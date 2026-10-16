@@ -3,6 +3,9 @@
 import type { Doc } from '../kernel/doc';
 import {
   BaseFlangeFeature,
+  BreakCornerFeature,
+  ClosedCornerFeature,
+  TabFeature,
   CutFeature,
   EdgeFlangeFeature,
   FEATURE_LABELS,
@@ -124,6 +127,18 @@ export function newCut(doc: Doc): CutFeature {
   };
 }
 
+export function newTab(doc: Doc): TabFeature {
+  return { id: featureId('tab'), name: nextName(doc, 'tab'), type: 'tab', edges: [], length: 20, width: { ...fullWidth, mode: 'centered', width: 30 } };
+}
+
+export function newClosedCorner(doc: Doc): ClosedCornerFeature {
+  return { id: featureId('closedCorner'), name: nextName(doc, 'closedCorner'), type: 'closedCorner', edges: [], gap: 0.1 };
+}
+
+export function newBreakCorner(doc: Doc): BreakCornerFeature {
+  return { id: featureId('breakCorner'), name: nextName(doc, 'breakCorner'), type: 'breakCorner', corners: [], kind: 'fillet', distance: 5 };
+}
+
 export const POSITION_LABELS: Record<string, string> = {
   materialInside: 'Material innen',
   materialOutside: 'Material außen',
@@ -168,5 +183,11 @@ export function summary(f: Feature): string {
       const shape = f.shape === 'circle' ? `Ø ${num(f.diameter)}` : f.shape === 'rect' ? `${num(f.width)} × ${num(f.height)}` : `Langloch ${num(f.width)} × ${num(f.height)}`;
       return f.count > 1 ? `${f.count} × ${shape}` : shape;
     }
+    case 'tab':
+      return `${num(f.length)} mm${f.edges.length > 1 ? ` · ${f.edges.length} Kanten` : ''}`;
+    case 'closedCorner':
+      return `Stoß · Spalt ${num(f.gap)} mm${f.edges.length > 1 ? ` · ${f.edges.length} Ecken` : ''}`;
+    case 'breakCorner':
+      return `${f.kind === 'fillet' ? 'Verrundung R' : 'Fase '}${num(f.distance)} mm · ${f.corners.length} ${f.corners.length === 1 ? 'Ecke' : 'Ecken'}`;
   }
 }

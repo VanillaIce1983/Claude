@@ -5,6 +5,9 @@ import { PLANE_LABELS } from '../kernel/features/baseFlange';
 import type {
   BaseFlangeFeature,
   BendPosition,
+  BreakCornerFeature,
+  ClosedCornerFeature,
+  TabFeature,
   CutFeature,
   EdgeFlangeFeature,
   Feature,
@@ -28,6 +31,7 @@ export interface PanelHost {
   /** Rebuild the panel (fields depend on a choice). */
   restructure(): void;
   edgeLabel(ref: { tag: string; at: { x: number; y: number } }, side?: 'top' | 'bottom'): string;
+  cornerLabel(ref: { prevTag: string; nextTag: string; at: { x: number; y: number } }): string;
   openSketch(): void;
 }
 
@@ -118,27 +122,25 @@ function overridesSection(host: PanelHost, sheet: SheetSettings, get: () => Bend
   return section('Biegeparameter', ...parts, h('p', { class: 'note' }, 'Ohne Häkchen gelten die Werte aus „Blech“.'));
 }
 
-function edgeList(host: PanelHost, f: EdgeFlangeFeature | HemFeature): HTMLElement {
-  if (f.edges.length === 0) {
-    return h('div', { class: 'picklist empty' }, 'Kanten im 3D-Fenster anklicken');
-  }
+function refList(host: PanelHost, labels: string[], remove: (i: number) => void, emptyText: string): HTMLElement {
+  if (labels.length === 0) return h('div', { class: 'picklist empty' }, emptyText);
   return h(
     'div',
     { class: 'picklist' },
-    ...f.edges.map((e, i) =>
+    ...labels.map((label, i) =>
       h(
         'div',
         { class: 'chip' },
-        h('span', {}, host.edgeLabel(e, e.side)),
+        h('span', {}, label),
         h(
           'button',
           {
             type: 'button',
             class: 'iconbtn',
-            title: 'Kante entfernen',
-            'aria-label': 'Kante entfernen',
+            title: 'Aus der Auswahl entfernen',
+            'aria-label': `${label} entfernen`,
             onclick: () => {
-              f.edges.splice(i, 1);
+              remove(i);
               host.changed();
               host.restructure();
             },
@@ -148,6 +150,60 @@ function edgeList(host: PanelHost, f: EdgeFlangeFeature | HemFeature): HTMLEleme
       ),
     ),
   );
+}
+
+function edgeList(host: PanelHost, f: EdgeFlangeFeature | HemFeature): HTMLElement {
+  return refList(host, f.edges.map((e) => host.edgeLabel(e, e.side)), (i) => f.edges.splice(i, 1), 'Kanten im 3D-Fenster anklicken');
+}
+
+function tabPanel(host: PanelHost, f: TabFeature): HTMLElement[] {
+  return [
+    section(
+      'Kanten',
+      refList(host, f.edges.map((e) => host.edgeLabel(e)), (i) => f.edges.splice(i, 1), 'Kanten im 3D-Fenster anklicken'),
+      h('p', { class: 'note' }, 'Die Lasche verlängert die Fläche in ihrer eigenen Ebene, ohne Biegung.'),
+    ),
+    section('Lasche', numberField('Länge', () => f.length, (v) => ((f.length = v), host.changed()), { unit: 'mm', gt: 0 })),
+    widthSection(host, f.width),
+  ];
+}
+
+function closedCornerPanel(host: PanelHost, f: ClosedCornerFeature): HTMLElement[] {
+  return [
+    section(
+      'Zu verlängernde Seiten',
+      refList(host, f.edges.map((e) => host.edgeLabel(e)), (i) => f.edges.splice(i, 1), 'Seitenkante einer Lasche anklicken'),
+      h('p', { class: 'note' }, 'Die gewählte Laschenseite wird bis zur gegenüberliegenden Lasche verlängert (Stoß). Die andere Lasche bleibt unverändert.'),
+    ),
+    section('Spalt', numberField('Spaltabstand', () => f.gap, (v) => ((f.gap = v), host.changed()), { unit: 'mm', min: 0 })),
+  ];
+}
+
+function breakCornerPanel(host: PanelHost, f: BreakCornerFeature): HTMLElement[] {
+  return [
+    section(
+      'Ecken',
+      refList(host, f.corners.map((c) => host.cornerLabel(c)), (i) => f.corners.splice(i, 1), 'Eckkanten im 3D-Fenster anklicken'),
+      h('p', { class: 'note' }, 'Gewählt wird die kurze Kante durch die Blechdicke an einer Ecke. Ecken an Biegungen sind ausgenommen.'),
+    ),
+    section(
+      'Art',
+      segField(
+        [
+          { value: 'fillet' as const, label: 'Verrundung' },
+          { value: 'chamfer' as const, label: 'Fase' },
+        ],
+        () => f.kind,
+        (v) => {
+          f.kind = v;
+          host.changed();
+          host.restructure();
+        },
+        'Art der Ecke',
+      ),
+      numberField(f.kind === 'fillet' ? 'Radius' : 'Abstand', () => f.distance, (v) => ((f.distance = v), host.changed()), { unit: 'mm', gt: 0 }),
+    ),
+  ];
 }
 
 function widthSection(host: PanelHost, w: WidthSpec): HTMLElement {
@@ -410,6 +466,12 @@ export function featurePanel(host: PanelHost, f: Feature): HTMLElement[] {
       return jogPanel(host, f);
     case 'cut':
       return cutPanel(host, f);
+    case 'tab':
+      return tabPanel(host, f);
+    case 'closedCorner':
+      return closedCornerPanel(host, f);
+    case 'breakCorner':
+      return breakCornerPanel(host, f);
   }
 }
 

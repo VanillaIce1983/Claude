@@ -6,7 +6,7 @@ import { meshToStl } from '../kernel/export/stl';
 import { flatToSvg } from '../kernel/export/svg';
 import { FlatPattern, flatPattern } from '../kernel/flat';
 import { FEATURE_LABELS, Feature, FeatureType } from '../kernel/features/types';
-import { PartMesh, PickEdge, buildMesh, meshVolume, pickEdges } from '../kernel/mesh';
+import { PartMesh, PickEdge, buildMesh, meshVolume, pickCorners, pickEdges } from '../kernel/mesh';
 import { EdgeRef, Part, findEdge, isSeamTag } from '../kernel/model';
 import { distPointSegment } from '../kernel/polygon';
 import { describeCalc } from '../kernel/sheet';
@@ -14,7 +14,7 @@ import { V2, dist2, dot2, norm2, rotCCW, sub2 } from '../kernel/vec';
 import { h, svgIcon } from './dom';
 import { exampleDoc } from './example';
 import { safeName, saveFile, initDownloads } from './exporter';
-import { newBaseFlange, newCut, newEdgeFlange, newHem, newJog, newSketchedBend, summary } from './features';
+import { newBaseFlange, newBreakCorner, newClosedCorner, newCut, newEdgeFlange, newHem, newJog, newSketchedBend, newTab, summary } from './features';
 import { flatPanel } from './flatpanel';
 import { num } from './format';
 import { ICONS, IconName } from './icons';
@@ -30,6 +30,7 @@ interface Model {
   mesh: PartMesh | null;
   fp: FlatPattern | null;
   edges: PickEdge[];
+  corners: PickEdge[];
   volume: number;
   meshError?: string;
 }
@@ -50,18 +51,29 @@ const ICON_FOR: Record<FeatureType, IconName> = {
   sketchedBend: 'sketchedBend',
   jog: 'jog',
   cut: 'cut',
+  tab: 'tab',
+  closedCorner: 'closedCorner',
+  breakCorner: 'breakCorner',
 };
 
 function buildModel(doc: Doc, upTo = Infinity): Model {
   const regen = regenerate(doc, upTo);
   const part = regen.part;
-  if (!part) return { regen, part: null, mesh: null, fp: null, edges: [], volume: 0 };
+  if (!part) return { regen, part: null, mesh: null, fp: null, edges: [], corners: [], volume: 0 };
   try {
     const mesh = buildMesh(part);
     const fp = flatPattern(part, mesh);
-    return { regen, part, mesh, fp, edges: pickEdges(part, mesh.placements), volume: meshVolume(mesh.positions, mesh.indices) };
+    return {
+      regen,
+      part,
+      mesh,
+      fp,
+      edges: pickEdges(part, mesh.placements),
+      corners: pickCorners(part, mesh.placements),
+      volume: meshVolume(mesh.positions, mesh.indices),
+    };
   } catch (e) {
-    return { regen, part, mesh: null, fp: null, edges: [], volume: 0, meshError: (e as Error).message };
+    return { regen, part, mesh: null, fp: null, edges: [], corners: [], volume: 0, meshError: (e as Error).message };
   }
 }
 
@@ -234,6 +246,9 @@ export class App implements PanelHost {
         t('sketchedBend', 'sketchedBend', 'Skizz. Biegung', 'Skizzierte Biegung entlang einer Linie'),
         t('jog', 'jog', 'Knick', 'Knick: zwei gegenläufige Biegungen mit Versatz'),
         t('cut', 'cut', 'Ausschnitt', 'Bohrung, Rechteck oder Langloch'),
+        t('tab', 'tab', 'Lasche', 'Lasche: Kante in der Ebene verlängern'),
+        t('closedCorner', 'closedCorner', 'Geschl. Ecke', 'Geschlossene Ecke: Laschenseite bis zur Nachbarlasche verlängern'),
+        t('breakCorner', 'breakCorner', 'Ecke brechen', 'Ecke brechen: Fase oder Verrundung'),
       ),
       h(
         'div',
@@ -320,16 +335,17 @@ export class App implements PanelHost {
       this.toast('Zuerst eine Basislasche erstellen.', true);
       return;
     }
-    const draft =
-      type === 'edgeFlange'
-        ? newEdgeFlange(this.doc)
-        : type === 'hem'
-          ? newHem(this.doc)
-          : type === 'sketchedBend'
-            ? newSketchedBend(this.doc)
-            : type === 'jog'
-              ? newJog(this.doc)
-              : newCut(this.doc);
+    const make: Record<Exclude<FeatureType, 'baseFlange'>, () => Feature> = {
+      edgeFlange: () => newEdgeFlange(this.doc),
+      hem: () => newHem(this.doc),
+      sketchedBend: () => newSketchedBend(this.doc),
+      jog: () => newJog(this.doc),
+      cut: () => newCut(this.doc),
+      tab: () => newTab(this.doc),
+      closedCorner: () => newClosedCorner(this.doc),
+      breakCorner: () => newBreakCorner(this.doc),
+    };
+    const draft = make[type]();
     this.beginSession(draft, this.doc.features.length, true);
   }
 
@@ -478,6 +494,29 @@ export class App implements PanelHost {
       this.viewer.setPickMode('edge', edges, (e) => !e.hole);
       const e = d.line.edge.tag ? find(d.line.edge) : undefined;
       this.viewer.setSelection(e ? [{ edge: e, side: 'top' }] : []);
+    } else if (d.type === 'tab' || d.type === 'closedCorner') {
+      this.viewer.setPickMode('edge', edges, (e) => !e.seam && !e.hole);
+      this.viewer.setSelection(d.edges.map((r) => ({ edge: find(r)!, side: 'top' as const })).filter((x) => x.edge));
+    } else if (d.type === 'breakCorner') {
+      const corners = s.pre.corners;
+      this.viewer.setPickMode('edge', corners);
+      const sel = d.corners
+        .map((c) => {
+          let best: PickEdge | undefined;
+          let bd = Infinity;
+          for (const e of corners) {
+            if (e.corner?.prevTag !== c.prevTag || e.corner?.nextTag !== c.nextTag) continue;
+            const dd = dist2(e.flatA, c.at);
+            if (dd < bd) {
+              bd = dd;
+              best = e;
+            }
+          }
+          return best;
+        })
+        .filter((e): e is PickEdge => !!e)
+        .map((edge) => ({ edge, side: 'top' as const }));
+      this.viewer.setSelection(sel);
     } else if (d.type === 'cut') {
       this.viewer.setPickMode('face');
       const e = d.edge.tag ? find(d.edge) : undefined;
@@ -522,6 +561,20 @@ export class App implements PanelHost {
       if (d.line.distance <= 0) d.line.distance = Math.min(20, len / 4);
       this.changed();
       this.restructure();
+    } else if ((d.type === 'tab' || d.type === 'closedCorner') && hit.kind === 'edge') {
+      const at = mid(hit.edge.flatA, hit.edge.flatB);
+      const i = d.edges.findIndex((r) => r.tag === hit.edge.tag && distPointSegment(r.at, hit.edge.flatA, hit.edge.flatB) < 1e-3);
+      if (i >= 0) d.edges.splice(i, 1);
+      else d.edges.push({ tag: hit.edge.tag, at });
+      this.changed();
+      this.restructure();
+    } else if (d.type === 'breakCorner' && hit.kind === 'edge' && hit.edge.corner) {
+      const c = hit.edge.corner;
+      const i = d.corners.findIndex((r) => r.prevTag === c.prevTag && r.nextTag === c.nextTag && dist2(r.at, hit.edge.flatA) < 1e-3);
+      if (i >= 0) d.corners.splice(i, 1);
+      else d.corners.push({ prevTag: c.prevTag, nextTag: c.nextTag, at: { ...hit.edge.flatA } });
+      this.changed();
+      this.restructure();
     } else if (d.type === 'cut' && hit.kind === 'face' && hit.pieceKind === 'face' && hit.flat && s.pre.part) {
       const face = s.pre.part.faces.get(hit.id);
       if (!face) return;
@@ -559,6 +612,13 @@ export class App implements PanelHost {
     } catch {
       return 'Kante fehlt – bitte neu wählen';
     }
+  }
+
+  cornerLabel(ref: { prevTag: string; nextTag: string; at: V2 }): string {
+    const part = this.session?.pre.part ?? this.model.part;
+    const face = part ? [...part.faces.values()].find((f) => f.outer.tags.includes(ref.prevTag) && f.outer.tags.includes(ref.nextTag)) : undefined;
+    const owner = face ? this.doc.features.find((f) => f.id === face.feature) : undefined;
+    return `${owner?.name ?? 'Fläche'} · Ecke bei ${num(ref.at.x, 1)} | ${num(ref.at.y, 1)}`;
   }
 
   // ---------------------------------------------------------------- side panel
@@ -749,6 +809,15 @@ export class App implements PanelHost {
           break;
         case 'cut':
           text = s.draft.edge.tag ? 'Erneut klicken zum Verschieben, Maße links' : 'Auf die Fläche klicken, wo der Ausschnitt sitzen soll';
+          break;
+        case 'tab':
+          text = s.draft.edges.length ? 'Weitere Kanten anklicken oder mit ✓ übernehmen' : 'Kante anklicken, die verlängert werden soll';
+          break;
+        case 'closedCorner':
+          text = s.draft.edges.length ? 'Weitere Laschenseiten anklicken oder mit ✓ übernehmen' : 'Seitenkante einer Lasche an der offenen Ecke anklicken';
+          break;
+        case 'breakCorner':
+          text = s.draft.corners.length ? 'Weitere Ecken anklicken oder mit ✓ übernehmen' : 'Kurze Eckkante (durch die Blechdicke) anklicken';
           break;
       }
     }

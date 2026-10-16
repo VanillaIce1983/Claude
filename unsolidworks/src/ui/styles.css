@@ -132,7 +132,7 @@ select {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: 4px 10px;
+  gap: 4px 8px;
   padding-block: 6px;
   padding-left: max(12px, env(safe-area-inset-left, 0px));
   padding-right: max(12px, env(safe-area-inset-right, 0px));
@@ -164,7 +164,7 @@ select {
   background: transparent;
   border-radius: 4px;
   padding: 2px 6px;
-  width: 11em;
+  width: 9.5em;
 }
 .brand .docname:hover,
 .brand .docname:focus {
@@ -175,8 +175,8 @@ select {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: 2px;
-  padding-left: 10px;
+  gap: 1px;
+  padding-left: 8px;
   border-left: 1px solid var(--line);
 }
 .group-label {
@@ -196,8 +196,8 @@ select {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  min-width: 58px;
-  padding: 4px 6px;
+  min-width: 50px;
+  padding: 4px 4px;
   border: 1px solid transparent;
   border-radius: var(--r);
   background: transparent;
@@ -685,7 +685,7 @@ table.bends tr:last-child td {
 }
 .hint {
   position: absolute;
-  top: 10px;
+  top: 52px;
   left: 50%;
   transform: translateX(-50%);
   max-width: min(460px, calc(100% - 24px));

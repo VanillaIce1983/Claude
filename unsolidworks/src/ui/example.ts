@@ -5,6 +5,17 @@ import { Doc, newDoc, regenerate } from '../kernel/doc';
 import type { Feature } from '../kernel/features/types';
 import { allEdges } from '../kernel/model';
 
+function cornerFor(doc: Doc, prevTag: string, nextTag: string): { prevTag: string; nextTag: string; at: { x: number; y: number } } {
+  const r = regenerate(doc);
+  for (const f of r.part?.faces.values() ?? []) {
+    const n = f.outer.pts.length;
+    for (let i = 0; i < n; i++) {
+      if (f.outer.tags[(i - 1 + n) % n] === prevTag && f.outer.tags[i] === nextTag) return { prevTag, nextTag, at: { ...f.outer.pts[i] } };
+    }
+  }
+  throw new Error(`example: corner ${prevTag}/${nextTag} missing`);
+}
+
 function refFor(doc: Doc, tag: string): { tag: string; at: { x: number; y: number } } {
   const r = regenerate(doc);
   if (!r.part) throw new Error('example: no part');
@@ -104,6 +115,14 @@ export function exampleDoc(): Doc {
     angle: 0,
     count: 1,
     spacing: 30,
+  });
+  add({
+    id: 'bc1',
+    name: 'Ecke brechen1',
+    type: 'breakCorner',
+    corners: [cornerFor(doc, 'fl1.1:end', 'fl1.1:side1'), cornerFor(doc, 'fl1.1:side0', 'fl1.1:end')],
+    kind: 'fillet',
+    distance: 6,
   });
   return doc;
 }

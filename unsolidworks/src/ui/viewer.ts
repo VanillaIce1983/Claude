@@ -6,7 +6,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
-import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { FlatPattern } from '../kernel/flat';
 import type { PartMesh, PickEdge } from '../kernel/mesh';
 import type { Part } from '../kernel/model';
@@ -238,26 +237,63 @@ export class Viewer {
     }
     const { mesh, flat } = this.state;
     const src = flat ? mesh.flatPositions : mesh.positions;
-    const indexed = new THREE.BufferGeometry();
-    indexed.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(src), 3));
-    indexed.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-    const shaded = toCreasedNormals(indexed, (30 * Math.PI) / 180);
+    // non-indexed copy: sheet surfaces get exact normals, side walls flat ones
+    const nrmSrc = flat ? mesh.flatNormals : mesh.normals;
+    const triCount = mesh.indices.length / 3;
+    const pos = new Float32Array(triCount * 9);
+    const nrm = new Float32Array(triCount * 9);
+    for (let t = 0; t < triCount; t++) {
+      const ia = mesh.indices[3 * t] * 3;
+      const ib = mesh.indices[3 * t + 1] * 3;
+      const ic = mesh.indices[3 * t + 2] * 3;
+      for (let k = 0; k < 3; k++) {
+        pos[9 * t + k] = src[ia + k];
+        pos[9 * t + 3 + k] = src[ib + k];
+        pos[9 * t + 6 + k] = src[ic + k];
+      }
+      if (mesh.triSurface[t] === 2) {
+        const ux = src[ib] - src[ia], uy = src[ib + 1] - src[ia + 1], uz = src[ib + 2] - src[ia + 2];
+        const vx = src[ic] - src[ia], vy = src[ic + 1] - src[ia + 1], vz = src[ic + 2] - src[ia + 2];
+        let nx = uy * vz - uz * vy;
+        let ny = uz * vx - ux * vz;
+        let nz = ux * vy - uy * vx;
+        const l = Math.hypot(nx, ny, nz) || 1;
+        nx /= l;
+        ny /= l;
+        nz /= l;
+        for (let c = 0; c < 3; c++) {
+          nrm[9 * t + 3 * c] = nx;
+          nrm[9 * t + 3 * c + 1] = ny;
+          nrm[9 * t + 3 * c + 2] = nz;
+        }
+      } else {
+        for (let k = 0; k < 3; k++) {
+          nrm[9 * t + k] = nrmSrc[ia + k];
+          nrm[9 * t + 3 + k] = nrmSrc[ib + k];
+          nrm[9 * t + 6 + k] = nrmSrc[ic + k];
+        }
+      }
+    }
+    const shaded = new THREE.BufferGeometry();
+    shaded.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    shaded.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
     const mat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(this.colors.steel),
       metalness: 0.3,
       roughness: 0.5,
+      // constant offset only: a slope-scaled one lets hidden outline edges bleed through at grazing angles
       polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
+      polygonOffsetFactor: 0,
+      polygonOffsetUnits: 2,
     });
     this.solid = new THREE.Mesh(shaded, mat);
     this.model.add(this.solid);
 
-    const edges = new THREE.EdgesGeometry(indexed, 24);
-    const edgeLines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: new THREE.Color(this.colors.edge) }));
-    this.model.add(edgeLines);
+    const edges = new THREE.BufferGeometry();
+    edges.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(src), 3));
+    edges.setIndex(new THREE.BufferAttribute(mesh.edgeLines, 1));
+    this.model.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: new THREE.Color(this.colors.edge) })));
 
-    indexed.dispose();
     this.updateOverlay();
   }
 

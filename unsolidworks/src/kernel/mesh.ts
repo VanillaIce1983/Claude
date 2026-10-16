@@ -9,7 +9,7 @@
 import earcut from 'earcut';
 import { Bend, Face, Part, computePlacements, isSeamTag, stripFlat, stripPoint } from './model';
 import { Ring, signedArea } from './polygon';
-import { Affine, V2, V3, applyA, cross2, dist2, dot2, sub2, v3 } from './vec';
+import { Affine, V2, V3, applyA, applyDirA, cross2, dist2, dot2, sub2, v3 } from './vec';
 
 export type Surface = 0 | 1 | 2; // top, bottom, side
 
@@ -33,12 +33,17 @@ export interface PartMesh {
   flatPositions: Float64Array;
   /** Flat 2D coordinates per vertex. */
   flat2: Float64Array;
+  /** Surface normal per vertex (top/bottom sheet surfaces), folded and flat. */
+  normals: Float64Array;
+  flatNormals: Float64Array;
   indices: Uint32Array;
   triPiece: Int32Array;
   triSurface: Uint8Array;
   pieces: MeshPiece[];
   /** Top-surface boundary edges (directed, material on the left in flat). */
   boundary: BoundaryEdge[];
+  /** Model edges for display: vertex index pairs (outline top and bottom, sharp corners through the thickness). */
+  edgeLines: Uint32Array;
   placements: Map<string, Affine>;
   warnings: string[];
 }
@@ -49,14 +54,27 @@ interface VertexStore {
   pos: number[];
   flat: number[];
   flat2: number[];
+  nrm: number[];
+  flatNrm: number[];
 }
 
-function pushVertex(vs: VertexStore, p: V3, f: V3, f2: V2): number {
+function pushVertex(vs: VertexStore, p: V3, f: V3, f2: V2, n: V3, fn: V3): number {
   vs.pos.push(p.x, p.y, p.z);
   vs.flat.push(f.x, f.y, f.z);
   vs.flat2.push(f2.x, f2.y);
+  vs.nrm.push(n.x, n.y, n.z);
+  vs.flatNrm.push(fn.x, fn.y, fn.z);
   return vs.pos.length / 3 - 1;
 }
+
+/** Normal of the top sheet surface inside a bend strip, in face A's frame. */
+function stripNormal(b: Bend, f: number): V3 {
+  const phi = b.angle * f;
+  const s = b.up ? -Math.sin(phi) : Math.sin(phi);
+  return v3(b.nrm.x * s, b.nrm.y * s, Math.cos(phi));
+}
+
+const neg = (a: V3): V3 => v3(-a.x, -a.y, -a.z);
 
 /** Points of a bend seam (in flat) that lie on the given side of the strip. */
 function seamPoints(b: Bend, ws: number[], side: 0 | 1): V2[] {
@@ -116,6 +134,57 @@ function augmentRing(ring: Ring, extra: V2[], allowedTag: (tag: string) => boole
   return { pts, tags };
 }
 
+/**
+ * Make an earcut triangulation conforming: drop zero-area slivers (earcut makes
+ * them at collinear points) and fan-split triangles whose edges pass through
+ * other vertices. Without this, seams show pixel cracks (T-junctions).
+ */
+function conformTriangles(coords: number[], idx: number[]): number[] {
+  const n = coords.length / 2;
+  const X = (i: number): number => coords[2 * i];
+  const Y = (i: number): number => coords[2 * i + 1];
+  const area2 = (a: number, b: number, c: number): number => (X(b) - X(a)) * (Y(c) - Y(a)) - (X(c) - X(a)) * (Y(b) - Y(a));
+  const len2 = (a: number, b: number): number => (X(b) - X(a)) ** 2 + (Y(b) - Y(a)) ** 2;
+  const stack: [number, number, number][] = [];
+  for (let i = 0; i < idx.length; i += 3) {
+    const [a, b, c] = [idx[i], idx[i + 1], idx[i + 2]];
+    const L = Math.max(len2(a, b), len2(b, c), len2(c, a));
+    if (Math.abs(area2(a, b, c)) > 1e-10 * L) stack.push([a, b, c]);
+  }
+  const out: number[] = [];
+  let guard = 0;
+  while (stack.length && guard++ < 1_000_000) {
+    const [a, b, c] = stack.pop()!;
+    let split = false;
+    for (const [u, v, w] of [
+      [a, b, c],
+      [b, c, a],
+      [c, a, b],
+    ] as const) {
+      const l2 = len2(u, v);
+      if (l2 < 1e-18) continue;
+      let best = -1;
+      let bestT = 2;
+      for (let p = 0; p < n; p++) {
+        if (p === u || p === v || p === w) continue;
+        const t = ((X(p) - X(u)) * (X(v) - X(u)) + (Y(p) - Y(u)) * (Y(v) - Y(u))) / l2;
+        if (t <= 1e-9 || t >= 1 - 1e-9 || t >= bestT) continue;
+        const cr = (X(v) - X(u)) * (Y(p) - Y(u)) - (Y(v) - Y(u)) * (X(p) - X(u));
+        if (cr * cr > 1e-14 * l2 * Math.max(1, l2)) continue;
+        best = p;
+        bestT = t;
+      }
+      if (best >= 0) {
+        stack.push([u, best, w], [best, v, w]);
+        split = true;
+        break;
+      }
+    }
+    if (!split) out.push(a, b, c);
+  }
+  return out;
+}
+
 function bendSlices(angle: number): number {
   return Math.max(2, Math.ceil((angle * 180) / Math.PI / 6));
 }
@@ -125,7 +194,8 @@ export function buildMesh(part: Part): PartMesh {
   const warnings: string[] = [];
   const T = part.T;
   const anchorM = part.anchor.M;
-  const vs: VertexStore = { pos: [], flat: [], flat2: [] };
+  const vs: VertexStore = { pos: [], flat: [], flat2: [], nrm: [], flatNrm: [] };
+  const flatUp = applyDirA(anchorM, v3(0, 0, 1));
   const tris: number[] = [];
   const triPiece: number[] = [];
   const triSurface: number[] = [];
@@ -174,14 +244,15 @@ export function buildMesh(part: Part): PartMesh {
     const holeIdx: number[] = [];
     const top: number[] = [];
     const list: { p: V2; top: number; bot: number }[] = [];
+    const up = applyDirA(M, v3(0, 0, 1));
     for (let r = 0; r < rings.length; r++) {
       if (r > 0) holeIdx.push(coords.length / 2);
       const ring = rings[r];
       const ringTop: number[] = [];
       for (const p of ring.pts) {
         coords.push(p.x, p.y);
-        const t = pushVertex(vs, applyA(M, v3(p.x, p.y, T)), applyA(anchorM, v3(p.x, p.y, T)), p);
-        const bt = pushVertex(vs, applyA(M, v3(p.x, p.y, 0)), applyA(anchorM, v3(p.x, p.y, 0)), p);
+        const t = pushVertex(vs, applyA(M, v3(p.x, p.y, T)), applyA(anchorM, v3(p.x, p.y, T)), p, up, flatUp);
+        const bt = pushVertex(vs, applyA(M, v3(p.x, p.y, 0)), applyA(anchorM, v3(p.x, p.y, 0)), p, neg(up), neg(flatUp));
         topToBottom.set(t, bt);
         top.push(t);
         ringTop.push(t);
@@ -192,7 +263,7 @@ export function buildMesh(part: Part): PartMesh {
       }
     }
     faceVerts.set(face.id, list);
-    const idx = earcut(coords, holeIdx, 2);
+    const idx = conformTriangles(coords, earcut(coords, holeIdx, 2));
     for (let i = 0; i < idx.length; i += 3) {
       let a = idx[i];
       let b = idx[i + 1];
@@ -249,8 +320,9 @@ export function buildMesh(part: Part): PartMesh {
           gridBot[i].push(shared.bot);
           continue;
         }
-        const t = pushVertex(vs, applyA(MA, stripPoint(b, T, ws[i], f, T)), applyA(anchorM, v3(fp.x, fp.y, T)), fp);
-        const bt = pushVertex(vs, applyA(MA, stripPoint(b, T, ws[i], f, 0)), applyA(anchorM, v3(fp.x, fp.y, 0)), fp);
+        const n = applyDirA(MA, stripNormal(b, f));
+        const t = pushVertex(vs, applyA(MA, stripPoint(b, T, ws[i], f, T)), applyA(anchorM, v3(fp.x, fp.y, T)), fp, n, flatUp);
+        const bt = pushVertex(vs, applyA(MA, stripPoint(b, T, ws[i], f, 0)), applyA(anchorM, v3(fp.x, fp.y, 0)), fp, neg(n), neg(flatUp));
         topToBottom.set(t, bt);
         gridTop[i].push(t);
         gridBot[i].push(bt);
@@ -324,15 +396,40 @@ export function buildMesh(part: Part): PartMesh {
     triSurface.push(2, 2);
   }
 
+  // 5. display edges: outline on both sheet surfaces, plus through-thickness lines at sharp corners
+  const outgoing = new Map<number, BoundaryEdge[]>();
+  for (const e of boundary) {
+    if (!outgoing.has(e.a)) outgoing.set(e.a, []);
+    outgoing.get(e.a)!.push(e);
+  }
+  const lines: number[] = [];
+  const f2 = vs.flat2;
+  const cosSharp = Math.cos((20 * Math.PI) / 180);
+  for (const e of boundary) {
+    lines.push(e.a, e.b, topToBottom.get(e.a)!, topToBottom.get(e.b)!);
+    const ux = f2[2 * e.b] - f2[2 * e.a];
+    const uy = f2[2 * e.b + 1] - f2[2 * e.a + 1];
+    const lu = Math.hypot(ux, uy);
+    for (const n of outgoing.get(e.b) ?? []) {
+      const wx = f2[2 * n.b] - f2[2 * n.a];
+      const wy = f2[2 * n.b + 1] - f2[2 * n.a + 1];
+      const lw = Math.hypot(wx, wy);
+      if (lu < 1e-9 || lw < 1e-9 || (ux * wx + uy * wy) / (lu * lw) < cosSharp) lines.push(e.b, topToBottom.get(e.b)!);
+    }
+  }
+
   return {
     positions: Float64Array.from(vs.pos),
     flatPositions: Float64Array.from(vs.flat),
     flat2: Float64Array.from(vs.flat2),
+    normals: Float64Array.from(vs.nrm),
+    flatNormals: Float64Array.from(vs.flatNrm),
     indices: Uint32Array.from(tris),
     triPiece: Int32Array.from(triPiece),
     triSurface: Uint8Array.from(triSurface),
     pieces,
     boundary,
+    edgeLines: Uint32Array.from(lines),
     placements,
     warnings,
   };
@@ -381,6 +478,8 @@ export interface PickEdge {
   hole: boolean;
   flatA: V2;
   flatB: V2;
+  /** Set for the through-thickness edge at an outline corner. */
+  corner?: { prevTag: string; nextTag: string };
   /** [top a, top b, bottom a, bottom b] in folded space. */
   folded: [V3, V3, V3, V3];
   flat: [V3, V3, V3, V3];
@@ -418,6 +517,46 @@ export function pickEdges(part: Part, placements: Map<string, Affine>): PickEdge
           flat: map(A),
         });
       }
+    }
+  }
+  return out;
+}
+
+/** Through-thickness edges at outline corners whose two edges are both free. */
+export function pickCorners(part: Part, placements: Map<string, Affine>): PickEdge[] {
+  const out: PickEdge[] = [];
+  const T = part.T;
+  const A = part.anchor.M;
+  for (const face of part.faces.values()) {
+    const M = placements.get(face.id);
+    if (!M) continue;
+    const r = face.outer;
+    const n = r.pts.length;
+    for (let i = 0; i < n; i++) {
+      const prevTag = r.tags[(i - 1 + n) % n];
+      const nextTag = r.tags[i];
+      if (isSeamTag(prevTag) || isSeamTag(nextTag)) continue;
+      const p = r.pts[i];
+      const a = sub2(p, r.pts[(i - 1 + n) % n]);
+      const b = sub2(r.pts[(i + 1) % n], p);
+      if (Math.abs(cross2(a, b)) < 1e-6 * Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y)) continue;
+      const map = (X: Affine): [V3, V3, V3, V3] => {
+        const top = applyA(X, v3(p.x, p.y, T));
+        const bot = applyA(X, v3(p.x, p.y, 0));
+        return [top, bot, top, bot];
+      };
+      out.push({
+        tag: `corner:${prevTag}|${nextTag}`,
+        faceId: face.id,
+        feature: face.feature,
+        seam: false,
+        hole: false,
+        flatA: p,
+        flatB: p,
+        corner: { prevTag, nextTag },
+        folded: map(M),
+        flat: map(A),
+      });
     }
   }
   return out;

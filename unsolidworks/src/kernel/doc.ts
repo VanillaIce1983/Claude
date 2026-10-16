@@ -1,4 +1,5 @@
 import { applyBaseFlange } from './features/baseFlange';
+import { applyBreakCorner, applyClosedCorner, applyTab } from './features/corner';
 import { applyCut } from './features/cut';
 import { applyEdgeFlange, applyHem } from './features/flange';
 import { applyJog, applySketchedBend } from './features/split';
@@ -44,6 +45,12 @@ function applyFeature(part: Part, sheet: SheetSettings, f: Feature): void {
       return applyJog(part, sheet, f);
     case 'cut':
       return applyCut(part, f);
+    case 'tab':
+      return applyTab(part, f);
+    case 'closedCorner':
+      return applyClosedCorner(part, f);
+    case 'breakCorner':
+      return applyBreakCorner(part, f);
   }
 }
 

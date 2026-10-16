@@ -66,6 +66,8 @@ export function attachToEdge(
   relief: ReliefSettings,
   bendId: string,
   tagPrefix: string,
+  /** Tag for the moved edge; defaults to the bend seam. Used for planar extensions. */
+  farTag?: string,
 ): StripFrame {
   const face = edge.face;
   const ring = face.outer;
@@ -78,7 +80,7 @@ export function attachToEdge(
   const o = rotCW(d);
   const W = (w: number, t: number): V2 => frame2(P, d, o, w, t);
   const origTag = ring.tags[k];
-  const seam = seamTag(bendId, 'A');
+  const seam = farTag ?? seamTag(bendId, 'A');
   const reliefTag = `${tagPrefix}:relief`;
   const tabTag = `${tagPrefix}:tab`;
   const dr = relief.ratio * part.T;

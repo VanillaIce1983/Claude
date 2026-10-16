@@ -129,7 +129,46 @@ export interface CutFeature extends FeatureBase {
   spacing: number;
 }
 
-export type Feature = BaseFlangeFeature | EdgeFlangeFeature | HemFeature | SketchedBendFeature | JogFeature | CutFeature;
+/** A corner of a face outline, identified by its two edges. */
+export interface CornerRef {
+  prevTag: string;
+  nextTag: string;
+  at: V2;
+}
+
+/** Ecke brechen: chamfer or round outline corners. */
+export interface BreakCornerFeature extends FeatureBase {
+  type: 'breakCorner';
+  corners: CornerRef[];
+  kind: 'chamfer' | 'fillet';
+  distance: number;
+}
+
+/** Lasche: extend free edges in the plane of their face. */
+export interface TabFeature extends FeatureBase {
+  type: 'tab';
+  edges: EdgeRef[];
+  length: number;
+  width: WidthSpec;
+}
+
+/** Geschlossene Ecke: extend a flange side up to the neighbouring flange. */
+export interface ClosedCornerFeature extends FeatureBase {
+  type: 'closedCorner';
+  edges: EdgeRef[];
+  gap: number;
+}
+
+export type Feature =
+  | BaseFlangeFeature
+  | EdgeFlangeFeature
+  | HemFeature
+  | SketchedBendFeature
+  | JogFeature
+  | CutFeature
+  | TabFeature
+  | ClosedCornerFeature
+  | BreakCornerFeature;
 export type FeatureType = Feature['type'];
 
 export const FEATURE_LABELS: Record<FeatureType, string> = {
@@ -139,4 +178,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   sketchedBend: 'Skizzierte Biegung',
   jog: 'Knick',
   cut: 'Ausschnitt',
+  tab: 'Lasche',
+  closedCorner: 'Geschlossene Ecke',
+  breakCorner: 'Ecke brechen',
 };

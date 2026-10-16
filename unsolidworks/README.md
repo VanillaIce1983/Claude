@@ -20,6 +20,9 @@ UnsolidWorks ist eine eigenständige Neuentwicklung. Der Code stammt nicht aus a
 | **Skizzierte Biegung** | Biegelinie parallel zu einer Bezugskante. Biegemittellinie, Material innen, Material außen, Biegung außen. Wählbar, welche Seite fest bleibt |
 | **Knick** | Zwei gegenläufige Biegungen mit Versatz. Bemaßung Versatz außen, Versatz innen oder Gesamtabmessung, Knickwinkel, projizierte Länge fixieren, Knickposition wie bei der skizzierten Biegung |
 | **Ausschnitt** | Rund, Rechteck oder Langloch auf einer Fläche, Lage per Klick und Abstand zu einer Kante, Drehung, lineares Muster |
+| **Lasche** | Freie Kanten in der Ebene der Fläche verlängern, ganze Kante oder Teilbreite |
+| **Geschlossene Ecke** | Laschenseite bis zur benachbarten Lasche verlängern (Stoß) mit Spaltabstand. Funktioniert mit der Seitenkante jeder der beiden Laschen an der Ecke |
+| **Ecke brechen** | Verrundung oder Fase an Außen- und Innenecken der Kontur |
 | **Abwicklung** | Exakte Abwicklung mit Biegelinien (oben/unten), Biegetabelle mit Winkel, Radius, Biegezugabe und Biegeabzug, Zuschnittmaß, kleinstes umschließendes Rechteck, Fläche, Schnittlänge, Masse |
 
 Dazu: Feature-Baum mit Bearbeiten, Unterdrücken und Löschen, Live-Vorschau beim Bearbeiten, Rückgängig/Wiederholen, Skizzen-Editor mit Raster, Winkelfang und Vorlagen, Projekt speichern und öffnen (JSON).
@@ -43,7 +46,7 @@ Die Abwicklungslänge einer Lasche ist damit A + B − BA (A, B bis zu den äuß
 
 ## Noch nicht enthalten
 
-Gehrungslasche, Lasche (Material auf einer Fläche ergänzen), geschlossene Ecke, Ecke brechen, Eckfreistich als eigenes Feature, Ausschnitte über Biegungen hinweg (Abwickeln/Zurückbiegen), Umformwerkzeuge, Biegetabellen und Blechstärketabellen, STEP-Export. Ecken zwischen Kantenlaschen an benachbarten Kanten bleiben offen.
+Gehrungslasche, Lasche aus einer frei skizzierten Kontur, geschlossene Ecke als Überlappung oder Unterlappung, Eckfreistich als eigenes Feature, Ausschnitte über Biegungen hinweg (Abwickeln/Zurückbiegen), Umformwerkzeuge, Biegetabellen und Blechstärketabellen, STEP-Export.
 
 ## Entwicklung
 
@@ -58,7 +61,7 @@ npm run build:artifact # zusätzlich dist/artifact.html für das Einbetten in ei
 Aufbau:
 
 - `src/kernel/` – Blech-Kern ohne Abhängigkeit zur Oberfläche. Jede Fläche liegt als Polygon in einem gemeinsamen Abwicklungs-Koordinatensystem, Flächen sind über Biegestreifen verbunden. Das 3D-Teil entsteht durch Falten um die Biegeachsen, deshalb ist die Abwicklung exakt.
-- `src/kernel/features/` – Basislasche, Kantenlasche, Saum, Skizzierte Biegung, Knick, Ausschnitt.
+- `src/kernel/features/` – Basislasche, Kantenlasche, Saum, Skizzierte Biegung, Knick, Ausschnitt, Lasche, Geschlossene Ecke, Ecke brechen.
 - `src/kernel/mesh.ts` – geschlossenes Dreiecksnetz für gefalteten und abgewickelten Zustand.
 - `src/kernel/flat.ts`, `src/kernel/export/` – Abwicklung, DXF, SVG, STL, ZIP.
 - `src/ui/` – Oberfläche mit three.js.

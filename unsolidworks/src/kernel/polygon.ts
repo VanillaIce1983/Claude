@@ -245,3 +245,29 @@ export function bbox2(pts: V2[]): { minX: number; minY: number; maxX: number; ma
   }
   return { minX, minY, maxX, maxY };
 }
+
+/** Area of the part of `subject` (any simple polygon) inside the convex polygon `clip` (CCW). */
+export function clippedArea(subject: V2[], clip: V2[]): number {
+  let out = subject.slice();
+  for (let i = 0; i < clip.length && out.length; i++) {
+    const a = clip[i];
+    const b = clip[(i + 1) % clip.length];
+    const inside = (p: V2): boolean => cross2(sub2(b, a), sub2(p, a)) >= -1e-12;
+    const input = out;
+    out = [];
+    for (let j = 0; j < input.length; j++) {
+      const p = input[j];
+      const q = input[(j + 1) % input.length];
+      const pin = inside(p);
+      const qin = inside(q);
+      if (pin) out.push(p);
+      if (pin !== qin) {
+        const d1 = cross2(sub2(b, a), sub2(p, a));
+        const d2 = cross2(sub2(b, a), sub2(q, a));
+        const t = d1 / (d1 - d2);
+        out.push(v2(p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t));
+      }
+    }
+  }
+  return out.length >= 3 ? Math.abs(signedArea(out)) : 0;
+}
