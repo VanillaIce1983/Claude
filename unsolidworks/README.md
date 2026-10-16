@@ -63,7 +63,7 @@ npm install
 npm test               # Kern-Tests (Abwicklungslängen, Maße, geschlossene Netze)
 npm run typecheck
 npm run build          # dist/index.html, eine einzelne Datei
-npm run build:artifact # zusätzlich dist/artifact.html für das Einbetten in eine Seite
+npm run build:artifact # zusätzlich dist/artifact.html + dist/app.js zum Hosten als Seite
 ```
 
 Aufbau:
