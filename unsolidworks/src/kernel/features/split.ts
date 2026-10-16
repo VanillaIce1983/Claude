@@ -1,10 +1,10 @@
 // Skizzierte Biegung (sketched bend) and Knick (jog): both cut a face along a
 // line and insert bends there.
 
-import { Bend, Face, Part, computePlacements, connectedFaces, findEdge, seamTag } from '../model';
+import { Bend, Face, Part, computePlacements, connectedFaces, findEdge, seamTag, stripFlat, stripRange } from '../model';
 import { Ring, simplifyRing, splitRing } from '../polygon';
 import { SheetSettings, bendAllowance, describeCalc, insideSetback, outsideSetback, resolveBendParams } from '../sheet';
-import { V2, add2, dot2, frame2, norm2, rad, rotCCW, rotCW, scale2, sub2 } from '../vec';
+import { V2, add2, dot2, norm2, rad, rotCCW, rotCW, scale2, sub2 } from '../vec';
 import { rectRing } from './attach';
 import type { BendPosition, FaceLine, JogFeature, SketchedBendFeature } from './types';
 
@@ -114,9 +114,10 @@ function splitFace(part: Part, lf: LineFrame, c1: number, c2: number, seamA: str
     for (const side of ['A', 'B'] as const) {
       const owner = side === 'A' ? b.faceA : b.faceB;
       if (owner !== face.id) continue;
-      const t = side === 'A' ? 0 : b.ba;
-      const p0 = frame2(b.origin, b.dir, b.nrm, b.w0, t);
-      const p1 = frame2(b.origin, b.dir, b.nrm, b.w1, t);
+      const fraction = side === 'A' ? 0 : 1;
+      const [wl, wr] = stripRange(b, fraction);
+      const p0 = stripFlat(b, wl, fraction);
+      const p1 = stripFlat(b, wr, fraction);
       const s0 = sigma(p0);
       const s1 = sigma(p1);
       if (Math.max(s0, s1) <= c1 + 1e-5) continue;
