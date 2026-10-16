@@ -158,8 +158,8 @@ export interface ClosedCornerFeature extends FeatureBase {
   type: 'closedCorner';
   edges: EdgeRef[];
   gap: number;
-  /** overlap: the picked flange covers the other one; underlap: it is covered. */
-  kind?: 'overlap' | 'underlap';
+  /** butt: both run to the other's inner face; overlap: the picked flange covers the other one; underlap: it is covered. */
+  kind?: 'butt' | 'overlap' | 'underlap';
 }
 
 /**

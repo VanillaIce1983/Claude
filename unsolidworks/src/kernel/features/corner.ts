@@ -143,15 +143,17 @@ function cornerPartner(part: Part, placements: Map<string, Affine>, a: Side): Si
 
 /**
  * Closes the corner between the picked flange side and the neighbouring
- * flange. Überlappen: the picked flange runs to the outer surface of the
- * other one, which then stops at the picked flange's inner surface (minus the
- * gap). Unterlappen: the other way round. Both flanges are extended or
- * trimmed as needed.
+ * flange. Both flanges are extended or trimmed as needed:
+ * - Stoß: both are treated alike and run to the other one's inner surface
+ *   (minus the gap); the outer corner keeps a thickness × thickness notch.
+ * - Überlappen: the picked flange runs to the other one's outer surface, the
+ *   other stops at the picked flange's inner surface (minus the gap).
+ * - Unterlappen: the other way round.
  */
 export function applyClosedCorner(part: Part, f: ClosedCornerFeature): void {
   if (f.edges.length === 0) throw new Error('Bitte mindestens eine Seitenkante einer Lasche auswählen.');
   if (!(f.gap >= 0)) throw new Error('Der Spalt darf nicht negativ sein.');
-  const overlap = (f.kind ?? 'overlap') === 'overlap';
+  const kind = f.kind ?? 'overlap';
   const done = new Set<string>();
   let changedAny = false;
   f.edges.forEach((ref, i) => {
@@ -167,8 +169,8 @@ export function applyClosedCorner(part: Part, f: ClosedCornerFeature): void {
     done.add(key);
     const ab = surfaceHits(part, placements, a, b.edge.face.id)!;
     const ba = surfaceHits(part, placements, b, a.edge.face.id)!;
-    const La = overlap ? ab.far : ab.near - f.gap;
-    const Lb = overlap ? ba.near - f.gap : ba.far;
+    const La = kind === 'overlap' ? ab.far : ab.near - f.gap;
+    const Lb = kind === 'underlap' ? ba.far : ba.near - f.gap;
     const id = f.edges.length > 1 ? `${f.id}.${i}` : f.id;
     for (const [side, L, suffix] of [
       [a, La, 'a'],

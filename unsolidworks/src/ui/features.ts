@@ -209,7 +209,7 @@ export function summary(f: Feature): string {
     case 'tab':
       return `${num(f.length)} mm${f.edges.length > 1 ? ` · ${f.edges.length} Kanten` : ''}`;
     case 'closedCorner':
-      return `${f.kind === 'underlap' ? 'Unterlappen' : 'Überlappen'} · Spalt ${num(f.gap)} mm${f.edges.length > 1 ? ` · ${f.edges.length} Kanten` : ''}`;
+      return `${f.kind === 'butt' ? 'Stoß' : f.kind === 'underlap' ? 'Unterlappen' : 'Überlappen'} · Spalt ${num(f.gap)} mm${f.edges.length > 1 ? ` · ${f.edges.length} Kanten` : ''}`;
     case 'breakCorner':
       return `${f.kind === 'fillet' ? 'Verrundung R' : 'Fase '}${num(f.distance)} mm · ${f.corners.length} ${f.corners.length === 1 ? 'Ecke' : 'Ecken'}`;
   }

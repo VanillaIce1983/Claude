@@ -56,3 +56,10 @@ export const POSITION_DIAGRAMS: Record<string, string> = {
   tangentToBend: `<svg viewBox="0 0 34 26"><path d="M17 1v24" stroke="var(--sel)" stroke-dasharray="2 2"/><path d="M2 20h8a7 7 0 0 0 7-7c0-3-2-6-5-8l-1.5 2.4C12.6 9 14 11 14 13a4 4 0 0 1-4 4H2z" fill="currentColor" fill-opacity=".25" stroke="currentColor"/></svg>`,
   centerline: `<svg viewBox="0 0 34 26"><path d="M14 1v24" stroke="var(--sel)" stroke-dasharray="2 2"/><path d="M2 20h8a4 4 0 0 0 4-4V3h-3v13a1 1 0 0 1-1 1H2z" fill="currentColor" fill-opacity=".25" stroke="currentColor"/></svg>`,
 };
+
+/** Top views of a closed corner between two flanges (picked flange drawn darker). */
+export const CORNER_DIAGRAMS: Record<'butt' | 'overlap' | 'underlap', string> = {
+  butt: `<svg viewBox="0 0 34 26"><path d="M4 21h20v-4H4z" fill="currentColor" fill-opacity=".55" stroke="currentColor"/><path d="M25 3h4v14h-4z" fill="currentColor" fill-opacity=".2" stroke="currentColor"/></svg>`,
+  overlap: `<svg viewBox="0 0 34 26"><path d="M4 21h25v-4H4z" fill="currentColor" fill-opacity=".55" stroke="currentColor"/><path d="M25 3h4v13h-4z" fill="currentColor" fill-opacity=".2" stroke="currentColor"/></svg>`,
+  underlap: `<svg viewBox="0 0 34 26"><path d="M4 21h20v-4H4z" fill="currentColor" fill-opacity=".55" stroke="currentColor"/><path d="M25 3h4v18h-4z" fill="currentColor" fill-opacity=".2" stroke="currentColor"/></svg>`,
+};

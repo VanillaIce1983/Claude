@@ -23,7 +23,7 @@ import { h, svgIcon } from './dom';
 import { HEM_LABELS, JOG_DIM_LABELS, LENGTH_LABELS, POSITION_LABELS, sketchContents } from './features';
 import { num } from './format';
 import { checkField, numberField, section, segField, selectField, wideSelect } from './forms';
-import { ICONS, POSITION_DIAGRAMS } from './icons';
+import { CORNER_DIAGRAMS, ICONS, POSITION_DIAGRAMS } from './icons';
 
 export interface PanelHost {
   doc: Doc;
@@ -213,14 +213,19 @@ function closedCornerPanel(host: PanelHost, f: ClosedCornerFeature): HTMLElement
       'Eckentyp',
       segField(
         [
-          { value: 'overlap' as const, label: 'Überlappen' },
-          { value: 'underlap' as const, label: 'Unterlappen' },
+          { value: 'butt' as const, label: 'Stoß', icon: CORNER_DIAGRAMS.butt },
+          { value: 'overlap' as const, label: 'Überlappen', icon: CORNER_DIAGRAMS.overlap },
+          { value: 'underlap' as const, label: 'Unterlappen', icon: CORNER_DIAGRAMS.underlap },
         ],
         () => f.kind ?? 'overlap',
         (v) => ((f.kind = v), host.changed()),
         'Eckentyp',
       ),
-      h('p', { class: 'note' }, 'Überlappen: Die gewählte Lasche läuft bis zur Außenseite der anderen. Unterlappen: Die andere Lasche deckt die Ecke ab.'),
+      h(
+        'p',
+        { class: 'note' },
+        'Stoß: Beide Laschen laufen gleichmäßig bis zur Innenseite der anderen, außen bleibt eine Aussparung in Blechdicke. Überlappen: Die gewählte Lasche läuft bis zur Außenseite der anderen. Unterlappen: Die andere Lasche deckt die Ecke ab.',
+      ),
     ),
     section('Spalt', numberField('Spaltabstand', () => f.gap, (v) => ((f.gap = v), host.changed()), { unit: 'mm', min: 0 })),
   ];

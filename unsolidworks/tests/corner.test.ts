@@ -164,6 +164,18 @@ describe('Geschlossene Ecke', () => {
       expect(r.bounds.max.z).toBeCloseTo(R + T, 6);
     });
 
+    it('butt extends both flanges by the same amount up to the other one\'s inner face', () => {
+      const r1 = build(doc([plate(), outside]));
+      const r = build(doc([plate(), outside, cc([edgeRef(r1.part, 'fl.0:side1')], 'butt')]));
+      expect(checkClosed(r.mesh.indices).bad).toBe(0);
+      expect(r.volume).toBeCloseTo(expectedVolume(r), 6);
+      // each flange grows R − gap; picking the other side gives the same part
+      expect(r.fp.area - r1.fp.area).toBeCloseTo(2 * (R - 0.1) * lc, 6);
+      const r2 = build(doc([plate(), outside, cc([edgeRef(r1.part, 'fl.1:side0')], 'butt')]));
+      expect(r2.fp.area).toBeCloseTo(r.fp.area, 6);
+      expect(r2.volume).toBeCloseTo(r.volume, 6);
+    });
+
     it('material outside closes as well', () => {
       const mo: EdgeFlangeFeature = { ...twoFlanges, position: 'materialOutside' };
       const r1 = build(doc([plate(), mo]));
@@ -172,6 +184,14 @@ describe('Geschlossene Ecke', () => {
       expect(r.volume).toBeCloseTo(expectedVolume(r), 6);
       expect(r.bounds.max.x).toBeCloseTo(100 + T, 6);
     });
+  });
+
+  it('butt with material inside trims the covering flange back to the other one\'s inner face', () => {
+    const r1 = build(doc([plate(), twoFlanges]));
+    const r = build(doc([plate(), twoFlanges, cc([edgeRef(r1.part, 'fl.0:side1')], 'butt')]));
+    expect(checkClosed(r.mesh.indices).bad).toBe(0);
+    // first flange loses T + gap, second one gains 4 − T − gap
+    expect(r.fp.area - r1.fp.area).toBeCloseTo((-(T + 0.1) + (4 - T - 0.1)) * lc, 6);
   });
 
   it('refuses an edge without a neighbouring flange', () => {
