@@ -16,6 +16,7 @@
   "license": "MIT",
   "dependencies": {
     "earcut": "3.0.1",
+    "polygon-clipping": "0.15.7",
     "three": "0.170.0"
   },
   "devDependencies": {

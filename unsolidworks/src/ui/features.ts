@@ -5,6 +5,7 @@ import {
   BaseFlangeFeature,
   BreakCornerFeature,
   ClosedCornerFeature,
+  SketchCutFeature,
   TabFeature,
   CutFeature,
   EdgeFlangeFeature,
@@ -127,12 +128,32 @@ export function newCut(doc: Doc): CutFeature {
   };
 }
 
+export function newSketchCut(doc: Doc): SketchCutFeature {
+  return { id: featureId('sketchCut'), name: nextName(doc, 'sketchCut'), type: 'sketchCut', sketch: { edge: { tag: '', at: { x: 0, y: 0 } }, entities: [] } };
+}
+
+const ENTITY_LABELS: Record<string, [string, string]> = {
+  rect: ['Rechteck', 'Rechtecke'],
+  circle: ['Kreis', 'Kreise'],
+  slot: ['Langloch', 'Langlöcher'],
+  polygon: ['Vieleck', 'Vielecke'],
+  polyline: ['Linienzug', 'Linienzüge'],
+};
+
+/** "2 Kreise, 1 Rechteck" */
+export function sketchContents(entities: { kind: string }[]): string {
+  if (!entities.length) return 'leere Skizze';
+  const counts = new Map<string, number>();
+  for (const e of entities) counts.set(e.kind, (counts.get(e.kind) ?? 0) + 1);
+  return [...counts.entries()].map(([k, n]) => `${n} ${ENTITY_LABELS[k]?.[n === 1 ? 0 : 1] ?? k}`).join(', ');
+}
+
 export function newTab(doc: Doc): TabFeature {
   return { id: featureId('tab'), name: nextName(doc, 'tab'), type: 'tab', edges: [], length: 20, width: { ...fullWidth, mode: 'centered', width: 30 } };
 }
 
 export function newClosedCorner(doc: Doc): ClosedCornerFeature {
-  return { id: featureId('closedCorner'), name: nextName(doc, 'closedCorner'), type: 'closedCorner', edges: [], gap: 0.1 };
+  return { id: featureId('closedCorner'), name: nextName(doc, 'closedCorner'), type: 'closedCorner', edges: [], gap: 0.1, kind: 'overlap' };
 }
 
 export function newBreakCorner(doc: Doc): BreakCornerFeature {
@@ -183,10 +204,12 @@ export function summary(f: Feature): string {
       const shape = f.shape === 'circle' ? `Ø ${num(f.diameter)}` : f.shape === 'rect' ? `${num(f.width)} × ${num(f.height)}` : `Langloch ${num(f.width)} × ${num(f.height)}`;
       return f.count > 1 ? `${f.count} × ${shape}` : shape;
     }
+    case 'sketchCut':
+      return `Skizze · ${sketchContents(f.sketch.entities)}`;
     case 'tab':
       return `${num(f.length)} mm${f.edges.length > 1 ? ` · ${f.edges.length} Kanten` : ''}`;
     case 'closedCorner':
-      return `Stoß · Spalt ${num(f.gap)} mm${f.edges.length > 1 ? ` · ${f.edges.length} Ecken` : ''}`;
+      return `${f.kind === 'underlap' ? 'Unterlappen' : 'Überlappen'} · Spalt ${num(f.gap)} mm${f.edges.length > 1 ? ` · ${f.edges.length} Kanten` : ''}`;
     case 'breakCorner':
       return `${f.kind === 'fillet' ? 'Verrundung R' : 'Fase '}${num(f.distance)} mm · ${f.corners.length} ${f.corners.length === 1 ? 'Ecke' : 'Ecken'}`;
   }

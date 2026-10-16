@@ -7,6 +7,7 @@ import type {
   BendPosition,
   BreakCornerFeature,
   ClosedCornerFeature,
+  SketchCutFeature,
   TabFeature,
   CutFeature,
   EdgeFlangeFeature,
@@ -19,7 +20,7 @@ import type {
 } from '../kernel/features/types';
 import { BendCalc, BendMethod, BendOverrides, MATERIALS, ReliefType, SheetSettings } from '../kernel/sheet';
 import { h, svgIcon } from './dom';
-import { HEM_LABELS, JOG_DIM_LABELS, LENGTH_LABELS, POSITION_LABELS } from './features';
+import { HEM_LABELS, JOG_DIM_LABELS, LENGTH_LABELS, POSITION_LABELS, sketchContents } from './features';
 import { num } from './format';
 import { checkField, numberField, section, segField, selectField, wideSelect } from './forms';
 import { ICONS, POSITION_DIAGRAMS } from './icons';
@@ -33,6 +34,10 @@ export interface PanelHost {
   edgeLabel(ref: { tag: string; at: { x: number; y: number } }, side?: 'top' | 'bottom'): string;
   cornerLabel(ref: { prevTag: string; nextTag: string; at: { x: number; y: number } }): string;
   openSketch(): void;
+  /** Open the face sketch of the sketched cut being edited. */
+  openFaceSketch(): void;
+  /** Forget the chosen face (and the sketch on it) so another face can be picked. */
+  resetSketchFace(): void;
 }
 
 const METHOD_LABELS: [BendMethod, string][] = [
@@ -156,6 +161,35 @@ function edgeList(host: PanelHost, f: EdgeFlangeFeature | HemFeature): HTMLEleme
   return refList(host, f.edges.map((e) => host.edgeLabel(e, e.side)), (i) => f.edges.splice(i, 1), 'Kanten im 3D-Fenster anklicken');
 }
 
+function sketchCutPanel(host: PanelHost, f: SketchCutFeature): HTMLElement[] {
+  if (!f.sketch.edge.tag) {
+    return [
+      section(
+        'Skizzenfläche',
+        h('div', { class: 'picklist empty' }, 'Fläche im 3D-Fenster anklicken'),
+        h('p', { class: 'note' }, 'Die nächstgelegene Kante der angeklickten Fläche wird zur Bezugskante: Dort liegt der Skizzenursprung, die X-Achse läuft entlang der Kante.'),
+      ),
+    ];
+  }
+  return [
+    section(
+      'Skizze',
+      h('div', { class: 'picklist' }, h('div', { class: 'chip' }, h('span', {}, `Bezug: ${host.edgeLabel(f.sketch.edge)}`))),
+      h('div', { class: 'infobox' }, sketchContents(f.sketch.entities)),
+      h(
+        'div',
+        { class: 'btnrow' },
+        h('button', { type: 'button', class: 'btn primary', onclick: () => host.openFaceSketch() }, svgIcon(ICONS.sketch), 'Skizze bearbeiten'),
+        h('button', { type: 'button', class: 'btn', onclick: () => host.resetSketchFace() }, 'Andere Fläche'),
+      ),
+    ),
+    section(
+      'Schnitt',
+      h('p', { class: 'note' }, 'Senkrecht zur Fläche durch die Blechdicke. Profile innerhalb der Fläche werden Durchbrüche, Profile über den Rand kerben die Kontur ein. Biegungen dürfen nicht berührt werden.'),
+    ),
+  ];
+}
+
 function tabPanel(host: PanelHost, f: TabFeature): HTMLElement[] {
   return [
     section(
@@ -171,9 +205,22 @@ function tabPanel(host: PanelHost, f: TabFeature): HTMLElement[] {
 function closedCornerPanel(host: PanelHost, f: ClosedCornerFeature): HTMLElement[] {
   return [
     section(
-      'Zu verlängernde Seiten',
-      refList(host, f.edges.map((e) => host.edgeLabel(e)), (i) => f.edges.splice(i, 1), 'Seitenkante einer Lasche anklicken'),
-      h('p', { class: 'note' }, 'Die gewählte Laschenseite wird bis zur gegenüberliegenden Lasche verlängert (Stoß). Die andere Lasche bleibt unverändert.'),
+      'Ecken',
+      refList(host, f.edges.map((e) => host.edgeLabel(e)), (i) => f.edges.splice(i, 1), 'Seitenkante einer Lasche an der offenen Ecke anklicken'),
+      h('p', { class: 'note' }, 'Eine Seitenkante pro Ecke genügt. Beide Laschen an der Ecke werden so verlängert oder gekürzt, dass sie sich treffen.'),
+    ),
+    section(
+      'Eckentyp',
+      segField(
+        [
+          { value: 'overlap' as const, label: 'Überlappen' },
+          { value: 'underlap' as const, label: 'Unterlappen' },
+        ],
+        () => f.kind ?? 'overlap',
+        (v) => ((f.kind = v), host.changed()),
+        'Eckentyp',
+      ),
+      h('p', { class: 'note' }, 'Überlappen: Die gewählte Lasche läuft bis zur Außenseite der anderen. Unterlappen: Die andere Lasche deckt die Ecke ab.'),
     ),
     section('Spalt', numberField('Spaltabstand', () => f.gap, (v) => ((f.gap = v), host.changed()), { unit: 'mm', min: 0 })),
   ];
@@ -466,6 +513,8 @@ export function featurePanel(host: PanelHost, f: Feature): HTMLElement[] {
       return jogPanel(host, f);
     case 'cut':
       return cutPanel(host, f);
+    case 'sketchCut':
+      return sketchCutPanel(host, f);
     case 'tab':
       return tabPanel(host, f);
     case 'closedCorner':

@@ -14,7 +14,7 @@ import { V2, dist2, dot2, norm2, rotCCW, sub2 } from '../kernel/vec';
 import { h, svgIcon } from './dom';
 import { exampleDoc } from './example';
 import { safeName, saveFile, initDownloads } from './exporter';
-import { newBaseFlange, newBreakCorner, newClosedCorner, newCut, newEdgeFlange, newHem, newJog, newSketchedBend, newTab, summary } from './features';
+import { newBaseFlange, newBreakCorner, newClosedCorner, newCut, newEdgeFlange, newHem, newJog, newSketchCut, newSketchedBend, newTab, summary } from './features';
 import { flatPanel } from './flatpanel';
 import { num } from './format';
 import { ICONS, IconName } from './icons';
@@ -51,6 +51,7 @@ const ICON_FOR: Record<FeatureType, IconName> = {
   sketchedBend: 'sketchedBend',
   jog: 'jog',
   cut: 'cut',
+  sketchCut: 'sketchCut',
   tab: 'tab',
   closedCorner: 'closedCorner',
   breakCorner: 'breakCorner',
@@ -341,6 +342,7 @@ export class App implements PanelHost {
       sketchedBend: () => newSketchedBend(this.doc),
       jog: () => newJog(this.doc),
       cut: () => newCut(this.doc),
+      sketchCut: () => newSketchCut(this.doc),
       tab: () => newTab(this.doc),
       closedCorner: () => newClosedCorner(this.doc),
       breakCorner: () => newBreakCorner(this.doc),
@@ -460,6 +462,11 @@ export class App implements PanelHost {
     this.changed();
     this.restructure();
   }
+
+  // Sketched cuts get their face sketch editor in the next step.
+  openFaceSketch(): void {}
+
+  resetSketchFace(): void {}
 
   // ---------------------------------------------------------------- picking
 
@@ -814,7 +821,7 @@ export class App implements PanelHost {
           text = s.draft.edges.length ? 'Weitere Kanten anklicken oder mit ✓ übernehmen' : 'Kante anklicken, die verlängert werden soll';
           break;
         case 'closedCorner':
-          text = s.draft.edges.length ? 'Weitere Laschenseiten anklicken oder mit ✓ übernehmen' : 'Seitenkante einer Lasche an der offenen Ecke anklicken';
+          text = s.draft.edges.length ? 'Weitere Ecken anklicken oder mit ✓ übernehmen' : 'Seitenkante einer Lasche an der offenen Ecke anklicken';
           break;
         case 'breakCorner':
           text = s.draft.corners.length ? 'Weitere Ecken anklicken oder mit ✓ übernehmen' : 'Kurze Eckkante (durch die Blechdicke) anklicken';

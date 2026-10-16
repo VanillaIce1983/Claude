@@ -21,7 +21,7 @@ UnsolidWorks ist eine eigenständige Neuentwicklung. Der Code stammt nicht aus a
 | **Knick** | Zwei gegenläufige Biegungen mit Versatz. Bemaßung Versatz außen, Versatz innen oder Gesamtabmessung, Knickwinkel, projizierte Länge fixieren, Knickposition wie bei der skizzierten Biegung |
 | **Ausschnitt** | Rund, Rechteck oder Langloch auf einer Fläche, Lage per Klick und Abstand zu einer Kante, Drehung, lineares Muster |
 | **Lasche** | Freie Kanten in der Ebene der Fläche verlängern, ganze Kante oder Teilbreite |
-| **Geschlossene Ecke** | Laschenseite bis zur benachbarten Lasche verlängern (Stoß) mit Spaltabstand. Funktioniert mit der Seitenkante jeder der beiden Laschen an der Ecke |
+| **Geschlossene Ecke** | Offene Ecke zwischen zwei Laschen schließen: beide Laschen werden passend verlängert oder gekürzt, Eckentyp Überlappen oder Unterlappen, Spaltabstand. Eine Seitenkante pro Ecke genügt |
 | **Ecke brechen** | Verrundung oder Fase an Außen- und Innenecken der Kontur |
 | **Abwicklung** | Exakte Abwicklung mit Biegelinien (oben/unten), Biegetabelle mit Winkel, Radius, Biegezugabe und Biegeabzug, Zuschnittmaß, kleinstes umschließendes Rechteck, Fläche, Schnittlänge, Masse |
 
@@ -46,7 +46,7 @@ Die Abwicklungslänge einer Lasche ist damit A + B − BA (A, B bis zu den äuß
 
 ## Noch nicht enthalten
 
-Gehrungslasche, Lasche aus einer frei skizzierten Kontur, geschlossene Ecke als Überlappung oder Unterlappung, Eckfreistich als eigenes Feature, Ausschnitte über Biegungen hinweg (Abwickeln/Zurückbiegen), Umformwerkzeuge, Biegetabellen und Blechstärketabellen, STEP-Export.
+Gehrungslasche, Lasche aus einer frei skizzierten Kontur, geschlossene Ecke als Stoß, Eckfreistich als eigenes Feature, Ausschnitte über Biegungen hinweg (Abwickeln/Zurückbiegen), Umformwerkzeuge, Biegetabellen und Blechstärketabellen, STEP-Export.
 
 ## Entwicklung
 

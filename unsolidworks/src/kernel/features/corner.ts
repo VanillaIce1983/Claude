@@ -1,9 +1,9 @@
-// Lasche (planar edge extension), Geschlossene Ecke (extend a flange side to
-// the neighbouring flange) and Ecke brechen (chamfer / round outline corners).
+// Lasche (planar edge extension), Geschlossene Ecke (close the gap between
+// two flanges at a corner) and Ecke brechen (chamfer / round outline corners).
 
 import { FoundEdge, Part, allEdges, computePlacements, findEdge, isSeamTag, stripFlat } from '../model';
 import { Ring, clippedArea, isSimple, pointInPolygon, distPointSegment, ringsCross, signedArea } from '../polygon';
-import { Affine, V2, add2, applyA, applyDirA, cross2, dist2, dot3, frame2, invertRigid, norm2, rotCCW, rotCW, scale2, sub2, sub3, v3 } from '../vec';
+import { Affine, V2, V3, add2, applyA, applyDirA, cross2, dist2, dot3, frame2, norm2, rotCCW, rotCW, scale2, sub2, sub3, v3 } from '../vec';
 import { attachToEdge, requireFreeOuterEdge, resolveWidth } from './attach';
 import type { BreakCornerFeature, ClosedCornerFeature, CornerRef, TabFeature } from './types';
 
@@ -75,75 +75,114 @@ function sampleOverlap(a: V2[], b: V2[]): number {
   return 0;
 }
 
-interface CornerTarget {
+/** A free side edge of a flange face, seen in model space. */
+interface Side {
   edge: FoundEdge;
-  dist: number;
+  /** Mid-thickness midpoint of the edge. */
+  mid: V3;
+  /** Edge direction. */
+  dir: V3;
+  /** Outward in-plane normal: the direction the face grows when the edge is extended. */
+  out: V3;
 }
 
-/** Distance along the outward in-plane normal of `edge` to the nearest face in front of it. */
-function targetOf(part: Part, placements: Map<string, Affine>, edge: FoundEdge, only?: string): CornerTarget | null {
-  const T = part.T;
+function sideOf(part: Part, placements: Map<string, Affine>, edge: FoundEdge): Side | null {
   const M = placements.get(edge.face.id);
   if (!M) return null;
   const d = norm2(sub2(edge.b, edge.a));
   const o = rotCW(d);
-  const mid = { x: (edge.a.x + edge.b.x) / 2, y: (edge.a.y + edge.b.y) / 2 };
-  const m3 = applyA(M, v3(mid.x, mid.y, T / 2));
-  const u3 = applyDirA(M, v3(o.x, o.y, 0));
-  let best: CornerTarget | null = null;
-  for (const other of part.faces.values()) {
-    if (other.id === edge.face.id || (only && other.id !== only)) continue;
-    const MA = placements.get(other.id);
-    if (!MA) continue;
-    const nA = applyDirA(MA, v3(0, 0, 1));
-    const denom = dot3(u3, nA);
-    if (Math.abs(denom) < 0.25) continue;
-    const base = dot3(sub3(applyA(MA, v3(0, 0, 0)), m3), nA);
-    const near = Math.min(base / denom, (base + T) / denom);
-    if (near < -1e-6 || near > 200) continue;
-    const local = applyA(invertRigid(MA), { x: m3.x + u3.x * near, y: m3.y + u3.y * near, z: m3.z + u3.z * near });
-    const lp = { x: local.x, y: local.y };
-    const pts = other.outer.pts;
-    const onFace = pointInPolygon(lp, pts) || pts.some((p, k) => distPointSegment(lp, p, pts[(k + 1) % pts.length]) < 1e-3);
-    if (onFace && (!best || near < best.dist)) best = { edge, dist: near };
-  }
-  return best;
+  const m = { x: (edge.a.x + edge.b.x) / 2, y: (edge.a.y + edge.b.y) / 2 };
+  return {
+    edge,
+    mid: applyA(M, v3(m.x, m.y, part.T / 2)),
+    dir: applyDirA(M, v3(d.x, d.y, 0)),
+    out: applyDirA(M, v3(o.x, o.y, 0)),
+  };
 }
 
+/**
+ * Distances along `from.out` to the two sheet surfaces of `faceId`
+ * (near = the one reached first). Null when the face is nearly parallel.
+ */
+function surfaceHits(part: Part, placements: Map<string, Affine>, from: Side, faceId: string): { near: number; far: number } | null {
+  const MA = placements.get(faceId);
+  if (!MA) return null;
+  const n = applyDirA(MA, v3(0, 0, 1));
+  const denom = dot3(from.out, n);
+  if (Math.abs(denom) < 0.25) return null;
+  const base = dot3(sub3(applyA(MA, v3(0, 0, 0)), from.mid), n);
+  const d0 = base / denom;
+  const d1 = (base + part.T) / denom;
+  return { near: Math.min(d0, d1), far: Math.max(d0, d1) };
+}
+
+/** The free side edge of another flange that forms a corner with `a`. */
+function cornerPartner(part: Part, placements: Map<string, Affine>, a: Side): Side | null {
+  const maxR = Math.max(0, ...[...part.bends.values()].map((b) => b.radius));
+  const reach = 2 * (maxR + part.T) + part.T + 1;
+  let best: { side: Side; dist: number } | null = null;
+  for (const e of allEdges(part)) {
+    if (e.face.id === a.edge.face.id || e.ringIndex !== -1 || isSeamTag(e.tag)) continue;
+    const b = sideOf(part, placements, e);
+    if (!b || Math.abs(dot3(a.dir, b.dir)) < 0.95) continue;
+    // both edges must point at the other face
+    const ab = surfaceHits(part, placements, a, e.face.id);
+    const ba = surfaceHits(part, placements, b, a.edge.face.id);
+    if (!ab || !ba || ab.far < -reach || ba.far < -reach || ab.near > reach || ba.near > reach) continue;
+    // distance between the two (parallel) edge lines, and overlap along them
+    const w = sub3(b.mid, a.mid);
+    const along = dot3(w, a.dir);
+    const perp = Math.hypot(w.x - a.dir.x * along, w.y - a.dir.y * along, w.z - a.dir.z * along);
+    const la = dist2(a.edge.a, a.edge.b);
+    const lb = dist2(e.a, e.b);
+    if (perp > reach || Math.abs(along) > (la + lb) / 2) continue;
+    if (!best || perp < best.dist) best = { side: b, dist: perp };
+  }
+  return best?.side ?? null;
+}
+
+/**
+ * Closes the corner between the picked flange side and the neighbouring
+ * flange. Überlappen: the picked flange runs to the outer surface of the
+ * other one, which then stops at the picked flange's inner surface (minus the
+ * gap). Unterlappen: the other way round. Both flanges are extended or
+ * trimmed as needed.
+ */
 export function applyClosedCorner(part: Part, f: ClosedCornerFeature): void {
   if (f.edges.length === 0) throw new Error('Bitte mindestens eine Seitenkante einer Lasche auswählen.');
   if (!(f.gap >= 0)) throw new Error('Der Spalt darf nicht negativ sein.');
+  const overlap = (f.kind ?? 'overlap') === 'overlap';
+  const done = new Set<string>();
+  let changedAny = false;
   f.edges.forEach((ref, i) => {
     const placements = computePlacements(part);
     const picked = findEdge(part, ref);
     requireFreeOuterEdge(picked);
-    let target = targetOf(part, placements, picked);
-    if (!target) {
-      // the picked flange already runs through the corner: extend the neighbour towards it instead
-      const M = placements.get(picked.face.id)!;
-      const pm = { x: (picked.a.x + picked.b.x) / 2, y: (picked.a.y + picked.b.y) / 2 };
-      const p3 = applyA(M, v3(pm.x, pm.y, part.T / 2));
-      let best: CornerTarget | null = null;
-      for (const e of allEdges(part)) {
-        if (e.face.id === picked.face.id || e.ringIndex !== -1 || isSeamTag(e.tag)) continue;
-        const Me = placements.get(e.face.id);
-        if (!Me) continue;
-        const em = { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 };
-        const e3 = applyA(Me, v3(em.x, em.y, part.T / 2));
-        if (Math.hypot(e3.x - p3.x, e3.y - p3.y, e3.z - p3.z) > dist2(picked.a, picked.b) + 20) continue;
-        const t = targetOf(part, placements, e, picked.face.id);
-        if (t && t.dist - f.gap > 1e-3 && (!best || t.dist < best.dist)) best = t;
-      }
-      target = best;
-    }
-    if (!target) throw new Error('Gegenüber dieser Kante liegt keine Lasche. Bitte die Seitenkante einer Lasche an einer Ecke wählen.');
-    const L = target.dist - f.gap;
-    if (L < 1e-3) throw new Error('Die Ecke ist bereits geschlossen.');
-    const edge = target.edge;
+    const a = sideOf(part, placements, picked);
+    const b = a && cornerPartner(part, placements, a);
+    if (!a || !b) throw new Error('An dieser Kante liegt keine benachbarte Lasche. Bitte die Seitenkante einer Lasche an einer offenen Ecke wählen.');
+    const key = [a.edge.face.id, b.edge.face.id].sort().join('|') + `@${Math.round(a.mid.x)},${Math.round(a.mid.y)},${Math.round(a.mid.z)}`;
+    const keyB = [a.edge.face.id, b.edge.face.id].sort().join('|') + `@${Math.round(b.mid.x)},${Math.round(b.mid.y)},${Math.round(b.mid.z)}`;
+    if (done.has(key) || done.has(keyB)) return; // both sides of the same corner were picked
+    done.add(key);
+    const ab = surfaceHits(part, placements, a, b.edge.face.id)!;
+    const ba = surfaceHits(part, placements, b, a.edge.face.id)!;
+    const La = overlap ? ab.far : ab.near - f.gap;
+    const Lb = overlap ? ba.near - f.gap : ba.far;
     const id = f.edges.length > 1 ? `${f.id}.${i}` : f.id;
-    attachToEdge(part, edge, 0, dist2(edge.a, edge.b), L, relief, id, id, edge.tag);
-    checkFlatOverlap(part, edge.face.id);
+    for (const [side, L, suffix] of [
+      [a, La, 'a'],
+      [b, Lb, 'b'],
+    ] as const) {
+      if (Math.abs(L) < 1e-3) continue;
+      // re-find the edge: the other side's change may have rebuilt this face's outline
+      const edge = findEdge(part, { tag: side.edge.tag, at: { x: (side.edge.a.x + side.edge.b.x) / 2, y: (side.edge.a.y + side.edge.b.y) / 2 } });
+      attachToEdge(part, edge, 0, dist2(edge.a, edge.b), L, relief, `${id}${suffix}`, `${id}${suffix}`, edge.tag);
+      checkFlatOverlap(part, edge.face.id);
+      changedAny = true;
+    }
   });
+  if (!changedAny) throw new Error('Die Ecke ist bereits geschlossen.');
 }
 
 function findCorner(part: Part, c: CornerRef): { ring: Ring; index: number; faceId: string } {

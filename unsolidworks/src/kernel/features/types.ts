@@ -1,4 +1,5 @@
 import type { EdgeRef } from '../model';
+import type { FaceSketch } from '../sketch';
 import type { BendOverrides } from '../sheet';
 import type { V2 } from '../vec';
 
@@ -152,14 +153,27 @@ export interface TabFeature extends FeatureBase {
   width: WidthSpec;
 }
 
-/** Geschlossene Ecke: extend a flange side up to the neighbouring flange. */
+/** Geschlossene Ecke: close the gap between two flanges meeting at a corner. */
 export interface ClosedCornerFeature extends FeatureBase {
   type: 'closedCorner';
   edges: EdgeRef[];
   gap: number;
+  /** overlap: the picked flange covers the other one; underlap: it is covered. */
+  kind?: 'overlap' | 'underlap';
+}
+
+/**
+ * Ausschnitt (sketched cut): closed profiles sketched on a face are cut
+ * normal to the face through the sheet thickness. Profiles inside the face
+ * become holes; profiles that overlap the outline notch it.
+ */
+export interface SketchCutFeature extends FeatureBase {
+  type: 'sketchCut';
+  sketch: FaceSketch;
 }
 
 export type Feature =
+  | SketchCutFeature
   | BaseFlangeFeature
   | EdgeFlangeFeature
   | HemFeature
@@ -177,7 +191,8 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   hem: 'Saum',
   sketchedBend: 'Skizzierte Biegung',
   jog: 'Knick',
-  cut: 'Ausschnitt',
+  cut: 'Bohrung',
+  sketchCut: 'Ausschnitt',
   tab: 'Lasche',
   closedCorner: 'Geschlossene Ecke',
   breakCorner: 'Ecke brechen',

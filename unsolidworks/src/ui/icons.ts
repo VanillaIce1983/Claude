@@ -18,6 +18,7 @@ export const ICONS = {
   sketchedBend: svg(`<path d="M3 16l7-4 7 4-7 4z" ${fill}/><path d="M10 12l5-8 7 4-5 8" ${fill}/><path d="M10 12l7 4" stroke-dasharray="2 2"/>`),
   jog: svg(`<path d="M2 18h7l4-8h9"/><path d="M2 20.4h8.4l4-8H22" /><path d="M2 18v2.4M22 10v2.4"/>`),
   cut: svg(`<path d="M3 14l9-5 9 5-9 5z" ${fill}/><path d="M3 14v2l9 5 9-5v-2"/><ellipse cx="12" cy="14" rx="3" ry="1.6"/>`),
+  sketchCut: svg(`<path d="M3 14l9-5 9 5-9 5z" ${fill}/><path d="M3 14v2l9 5 9-5v-2"/><path d="M9 13l3-1.7 4 2.3-3 1.7z" stroke-dasharray="1.6 1.4"/>`),
   tab: svg(`<path d="M3 15l9-5 9 5-9 5z" ${fill}/><path d="M16 12.8l4-2.2 3 1.7-4 2.2" ${fill}/><path d="M3 15v1.6l9 5 9-5"/>`),
   closedCorner: svg(`<path d="M4 18V8l8-4v10z" ${fill}/><path d="M12 14V4l8 4v10z" ${fill}/><path d="M4 18l8-4 8 4" stroke-dasharray="2 2"/>`),
   breakCorner: svg(`<path d="M4 20V9a5 5 0 0 1 5-5h11" ${fill}/><path d="M4 20h16V4"/>`),
