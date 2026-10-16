@@ -185,6 +185,42 @@ function conformTriangles(coords: number[], idx: number[]): number[] {
   return out;
 }
 
+/**
+ * Breakpoints (positions w along the bend line) of every bend: the union of
+ * both seams' outline vertices, so face and strip share their seam edges.
+ */
+export function bendBreakpoints(part: Part): Map<string, number[]> {
+  const breaks = new Map<string, number[]>();
+  for (const b of part.bends.values()) {
+    const ws = [b.w0, b.w1];
+    const fa = part.faces.get(b.faceA);
+    if (fa) for (const p of fa.outer.pts) {
+      const w = onSeam(b, p, 0);
+      if (w !== null) ws.push(w);
+    }
+    const fb = b.faceB ? part.faces.get(b.faceB) : undefined;
+    if (fb) for (const p of fb.outer.pts) {
+      const w = onSeam(b, p, 1);
+      if (w !== null) ws.push(w);
+    }
+    breaks.set(
+      b.id,
+      uniqSorted(ws).filter((w) => w >= b.w0 - 1e-6 && w <= b.w1 + 1e-6),
+    );
+  }
+  return breaks;
+}
+
+/** Outer ring of a face with the bend breakpoints inserted into its seam edges. */
+export function seamSplitOuter(part: Part, face: Face, breaks: Map<string, number[]>): Ring {
+  const extra: V2[] = [];
+  for (const b of part.bends.values()) {
+    if (b.faceA === face.id) extra.push(...seamPoints(b, breaks.get(b.id)!, 0));
+    if (b.faceB === face.id) extra.push(...seamPoints(b, breaks.get(b.id)!, 1));
+  }
+  return augmentRing(face.outer, extra, isSeamTag);
+}
+
 function bendSlices(angle: number): number {
   return Math.max(2, Math.ceil((angle * 180) / Math.PI / 6));
 }
@@ -205,24 +241,7 @@ export function buildMesh(part: Part): PartMesh {
   const topToBottom = new Map<number, number>();
 
   // 1. breakpoints along each bend (union of both seams' vertices)
-  const breaks = new Map<string, number[]>();
-  for (const b of part.bends.values()) {
-    const ws = [b.w0, b.w1];
-    const fa = part.faces.get(b.faceA);
-    if (fa) for (const p of fa.outer.pts) {
-      const w = onSeam(b, p, 0);
-      if (w !== null) ws.push(w);
-    }
-    const fb = b.faceB ? part.faces.get(b.faceB) : undefined;
-    if (fb) for (const p of fb.outer.pts) {
-      const w = onSeam(b, p, 1);
-      if (w !== null) ws.push(w);
-    }
-    breaks.set(
-      b.id,
-      uniqSorted(ws).filter((w) => w >= b.w0 - 1e-6 && w <= b.w1 + 1e-6),
-    );
-  }
+  const breaks = bendBreakpoints(part);
 
   // 2. faces
   const faceVerts = new Map<string, { p: V2; top: number; bot: number }[]>();
@@ -232,12 +251,7 @@ export function buildMesh(part: Part): PartMesh {
       warnings.push(`Fläche ${face.id} ist nicht mit dem Teil verbunden.`);
       continue;
     }
-    const extra: V2[] = [];
-    for (const b of part.bends.values()) {
-      if (b.faceA === face.id) extra.push(...seamPoints(b, breaks.get(b.id)!, 0));
-      if (b.faceB === face.id) extra.push(...seamPoints(b, breaks.get(b.id)!, 1));
-    }
-    const outer = augmentRing(face.outer, extra, isSeamTag);
+    const outer = seamSplitOuter(part, face, breaks);
     const rings = [outer, ...face.holes];
     const pieceIndex = pieces.push({ kind: 'face', id: face.id, feature: face.feature }) - 1;
     const coords: number[] = [];

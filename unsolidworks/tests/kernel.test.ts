@@ -201,6 +201,55 @@ describe('hem', () => {
       expect(r.bounds.max.z).toBeCloseTo(0, 6);
     });
   }
+
+  // lowest point of the hem above the remaining base face (the plate's top surface is at y = T)
+  const lowestOverBase = (r: ReturnType<typeof build>): number => {
+    const { positions: P, indices: I, triPiece, pieces } = r.mesh;
+    const lo = [Infinity, Infinity];
+    const hi = [-Infinity, -Infinity];
+    const hemVerts = new Set<number>();
+    for (let t = 0; t < I.length / 3; t++) {
+      const piece = pieces[triPiece[t]];
+      for (let k = 0; k < 3; k++) {
+        const v = I[3 * t + k];
+        if (piece.id === 'hem') hemVerts.add(v);
+        else if (piece.id === 'base') {
+          lo[0] = Math.min(lo[0], P[3 * v]);
+          hi[0] = Math.max(hi[0], P[3 * v]);
+          lo[1] = Math.min(lo[1], P[3 * v + 2]);
+          hi[1] = Math.max(hi[1], P[3 * v + 2]);
+        }
+      }
+    }
+    let low = Infinity;
+    for (const v of hemVerts) {
+      const x = P[3 * v];
+      const z = P[3 * v + 2];
+      // the hem only has vertices at the ends of the edge (x), so only z must lie inside the base
+      if (x >= lo[0] - 1e-6 && x <= hi[0] + 1e-6 && z > lo[1] + 1e-6 && z < hi[1] - 1e-6) low = Math.min(low, P[3 * v + 1]);
+    }
+    return low;
+  };
+
+  // limit 360° − acos(R / (R + T)): 306.87° for R = 3, T = 2
+  for (const hemType of ['teardrop', 'rolled'] as const) {
+    for (const angle of [280, 300, 306.8]) {
+      it(`${hemType} hem at ${angle}° stays above the face`, () => {
+        const r = build(doc([plate(), hem({ hemType, angle, radius: 3 })]));
+        expectSolid(r);
+        expect(lowestOverBase(r)).toBeGreaterThanOrEqual(T - 1e-6);
+      });
+    }
+    it(`${hemType} hem past the limit is refused`, () => {
+      const res = regenerate(doc([plate(), hem({ hemType, angle: 307, radius: 3 })]));
+      expect(res.status.get('hem')?.error).toMatch(/eindringen.*306,8°/);
+    });
+  }
+
+  it('teardrop tail ends on the face at 270°', () => {
+    const r = build(doc([plate(), hem({ hemType: 'teardrop', angle: 270, radius: 3 })]));
+    expect(lowestOverBase(r)).toBeCloseTo(T, 6);
+  });
 });
 
 describe('open profile base flange', () => {

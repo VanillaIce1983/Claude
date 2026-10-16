@@ -2,7 +2,7 @@
 
 import { Bend, Part, findEdge, seamTag } from '../model';
 import { SheetSettings, bendAllowance, describeCalc, insideSetback, outsideSetback, resolveBendParams } from '../sheet';
-import { dist2, rad } from '../vec';
+import { dist2, fmt, rad } from '../vec';
 import { attachToEdge, rectRing, requireFreeOuterEdge, resolveWidth } from './attach';
 import type { EdgeFlangeFeature, EdgeSelection, HemFeature } from './types';
 
@@ -120,6 +120,17 @@ export function applyEdgeFlange(part: Part, sheet: SheetSettings, f: EdgeFlangeF
   });
 }
 
+/**
+ * Past 360° − acos(R / (R + T)) the outer surface at the end of the curl
+ * reaches below the face it started from, so the hem would cut into the sheet.
+ */
+function checkCurlLimit(what: string, angleDeg: number, R: number, T: number): void {
+  const max = 360 - (Math.acos(R / (R + T)) * 180) / Math.PI;
+  if (angleDeg >= max - 1e-9) {
+    throw new Error(`${what} würde in die Fläche eindringen. Bei Radius ${fmt(R).replace('.', ',')} mm sind höchstens ${fmt(Math.floor(max * 10) / 10, 1).replace('.', ',')}° möglich.`);
+  }
+}
+
 export function applyHem(part: Part, sheet: SheetSettings, f: HemFeature): void {
   if (f.edges.length === 0) throw new Error('Bitte mindestens eine Kante auswählen.');
   const base = resolveBendParams(sheet, f.overrides);
@@ -145,12 +156,14 @@ export function applyHem(part: Part, sheet: SheetSettings, f: HemFeature): void 
         if (!(f.radius > 0)) throw new Error('Der Radius muss größer als 0 sein.');
         angleDeg = f.angle;
         R = f.radius;
+        checkCurlLimit('Der Tropfensaum', angleDeg, R, T);
         break;
       case 'rolled':
         if (!(f.angle > 0 && f.angle < 360)) throw new Error('Der Winkel eines gerollten Saums muss zwischen 0° und 360° liegen.');
         if (!(f.radius > 0)) throw new Error('Der Radius muss größer als 0 sein.');
         angleDeg = f.angle;
         R = f.radius;
+        checkCurlLimit('Der gerollte Saum', angleDeg, R, T);
         break;
     }
     const th = rad(angleDeg);
@@ -164,8 +177,9 @@ export function applyHem(part: Part, sheet: SheetSettings, f: HemFeature): void 
       flat = f.length - (R + T);
       if (flat < 1e-3) throw new Error(`Die Saumlänge muss größer als ${(R + T).toFixed(2)} mm sein.`);
     } else if (f.hemType === 'teardrop') {
-      // straight tail until the inner surface touches the face again
-      flat = (R * (1 - Math.cos(th))) / -Math.sin(th);
+      // straight tail until its lower end corner touches the face again: the
+      // inner corner up to 270°, beyond that the outer one
+      flat = th <= (3 * Math.PI) / 2 ? (R * (1 - Math.cos(th))) / -Math.sin(th) : (R - (R + T) * Math.cos(th)) / -Math.sin(th);
     }
 
     const len = dist2(edge.a, edge.b);

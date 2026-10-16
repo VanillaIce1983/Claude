@@ -1,5 +1,5 @@
 // File output that works both standalone (plain browser download) and inside
-// a claude.ai artifact (downloads capability; DXF/STL go into a ZIP there,
+// a claude.ai artifact (downloads capability; DXF, STEP, STL and 3MF go into a ZIP there,
 // because only common file types may be saved from an artifact).
 
 import { makeZip } from '../kernel/export/zip';

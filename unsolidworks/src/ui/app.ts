@@ -2,8 +2,10 @@
 
 import { Doc, RegenResult, newDoc, parseDoc, regenerate } from '../kernel/doc';
 import { flatToDxf } from '../kernel/export/dxf';
+import { partToStep } from '../kernel/export/step';
 import { meshToStl } from '../kernel/export/stl';
 import { flatToSvg } from '../kernel/export/svg';
+import { partTo3mf } from '../kernel/export/threemf';
 import { FlatPattern, flatPattern } from '../kernel/flat';
 import { FEATURE_LABELS, Feature, FeatureType } from '../kernel/features/types';
 import { PartMesh, PickEdge, buildMesh, meshVolume, pickCorners, pickEdges } from '../kernel/mesh';
@@ -81,6 +83,8 @@ function buildModel(doc: Doc, upTo = Infinity): Model {
     return { regen, part, mesh: null, fp: null, edges: [], corners: [], volume: 0, meshError: (e as Error).message };
   }
 }
+
+type ExportKind = 'dxf' | 'svg' | 'step' | 'stl' | '3mf' | 'png' | 'json';
 
 export class App implements PanelHost {
   doc: Doc;
@@ -263,7 +267,7 @@ export class App implements PanelHost {
         'div',
         { class: 'group' },
         this.tb('flat', 'Abwicklung', () => this.toggleFlat(), { disabled: busy || !hasPart, on: this.flat, title: 'Abwicklung ein/aus' }),
-        this.tb('exportIcon', 'Export', () => this.exportMenu(), { disabled: busy || !hasPart, title: 'DXF, SVG, STL, Bild' }),
+        this.tb('exportIcon', 'Export', () => this.exportMenu(), { disabled: busy || !hasPart, title: 'DXF, SVG, STEP, STL, 3MF, Bild' }),
       ),
       h(
         'div',
@@ -1087,14 +1091,16 @@ export class App implements PanelHost {
     }
     const btn = [...this.els.top.querySelectorAll('.tb')].find((b) => b.textContent?.includes('Export')) as HTMLElement | undefined;
     const r = btn?.getBoundingClientRect();
-    const item = (label: string, sub: string, kind: 'dxf' | 'svg' | 'stl' | 'png' | 'json'): HTMLElement =>
+    const item = (label: string, sub: string, kind: ExportKind): HTMLElement =>
       h('button', { type: 'button', onclick: () => (menu.remove(), this.exportAs(kind)) }, label, h('small', {}, sub));
     const menu = h(
       'div',
       { class: 'menu', role: 'menu', style: { top: `${(r?.bottom ?? 60) + 4}px`, left: `${Math.max(8, Math.min((r?.left ?? 8), window.innerWidth - 250))}px` } },
       item('Abwicklung als DXF', 'Für Laser und Stanze, R12, mm', 'dxf'),
       item('Abwicklung als SVG', 'Zeichnung mit Biegelinien', 'svg'),
-      item('3D-Modell als STL', 'Gefaltetes Teil, mm', 'stl'),
+      item('3D-Modell als STEP', 'Exaktes Volumenmodell für CAD, mm', 'step'),
+      item('3D-Modell als STL', 'Gefaltetes Teil als Dreiecksnetz, mm', 'stl'),
+      item('3D-Modell als 3MF', 'Für den 3D-Druck, mm', '3mf'),
       item('Ansicht als PNG', 'Bild des 3D-Fensters', 'png'),
       item('Projekt als JSON', 'Zum späteren Weiterbearbeiten', 'json'),
     );
@@ -1108,7 +1114,7 @@ export class App implements PanelHost {
     setTimeout(() => window.addEventListener('pointerdown', close, true), 0);
   }
 
-  async exportAs(kind: 'dxf' | 'svg' | 'stl' | 'png' | 'json'): Promise<void> {
+  async exportAs(kind: ExportKind): Promise<void> {
     const base = safeName(this.doc.name);
     const m = this.model;
     let res: Awaited<ReturnType<typeof saveFile>>;
@@ -1119,6 +1125,18 @@ export class App implements PanelHost {
     } else if (kind === 'dxf') res = await saveFile(`${base}_Abwicklung.dxf`, flatToDxf(m.fp), 'application/dxf');
     else if (kind === 'svg') res = await saveFile(`${base}_Abwicklung.svg`, flatToSvg(m.fp), 'image/svg+xml');
     else if (kind === 'stl') res = await saveFile(`${base}.stl`, meshToStl(m.mesh.positions, m.mesh.indices, base), 'model/stl');
+    else if (kind === 'step' || kind === '3mf') {
+      let data: string | Uint8Array;
+      try {
+        data = kind === 'step'
+          ? partToStep(m.part, { name: this.doc.name || base, timestamp: new Date().toISOString() })
+          : partTo3mf(m.part, { name: this.doc.name || base });
+      } catch (e) {
+        this.toast(`Export nicht möglich: ${(e as Error).message}`, true);
+        return;
+      }
+      res = kind === 'step' ? await saveFile(`${base}.step`, data, 'model/step') : await saveFile(`${base}.3mf`, data, 'model/3mf');
+    }
     else {
       const data = this.viewer.snapshot();
       const bin = atob(data.split(',')[1]);

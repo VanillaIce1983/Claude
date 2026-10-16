@@ -38,9 +38,15 @@ Dazu: Feature-Baum mit Bearbeiten, Unterdrücken und Löschen, Live-Vorschau bei
 ### Export
 
 - **DXF** (R12, mm) der Abwicklung: Kontur als geschlossene Polylinien, runde Bohrungen als echte Kreise, Biegelinien auf eigenen Layern (`BIEGUNG_OBEN`, `BIEGUNG_UNTEN`) und Biegenotizen (`BIEGENOTIZEN`).
+- **STEP** (AP214, mm) des gefalteten Teils als exaktes Volumenmodell: ebene Flächen, Biegungen als Zylinderflächen, runde Bohrungen als Zylinder. In SolidWorks öffnen und mit „Biegungen einfügen“ wieder als Blechteil weiterbearbeiten.
+- **3MF** des gefalteten Teils für den 3D-Druck: geschlossenes Dreiecksnetz in mm, Z nach oben, auf der Druckplatte liegend.
 - **SVG** der Abwicklung, **STL** des gefalteten Teils, **PNG** der Ansicht, **JSON** des Projekts.
 
-In der gehosteten Fassung werden DXF und STL als ZIP geliefert, weil dort nur gängige Dateitypen direkt gespeichert werden dürfen.
+Wo das Blech auf sich selbst aufliegt (zugedrückter Saum mit Innenradius 0, Ende eines Tropfensaums), lassen STEP und 3MF einen Abstand von 0,001 mm, damit der Körper sich nicht selbst berührt.
+
+Parasolid (X_T) wird nicht angeboten: Das Format gehört Siemens, die Formatbeschreibung gibt es nur auf Anfrage beim Hersteller, und ohne den Parasolid-Kern lässt sich nicht prüfen, ob eine selbst geschriebene Datei korrekt gelesen wird. STEP überträgt dieselbe exakte Geometrie.
+
+In der gehosteten Fassung werden DXF, STEP, STL und 3MF als ZIP geliefert, weil dort nur gängige Dateitypen direkt gespeichert werden dürfen.
 
 ## Rechenregeln
 
@@ -54,7 +60,7 @@ Die Abwicklungslänge einer Lasche ist damit A + B − BA (A, B bis zu den äuß
 
 ## Noch nicht enthalten
 
-Gehrungslasche, Lasche aus einer frei skizzierten Kontur, Eckfreistich als eigenes Feature, Ausschnitte über Biegungen hinweg (Abwickeln/Zurückbiegen), Umformwerkzeuge, Biegetabellen und Blechstärketabellen, STEP-Export.
+Gehrungslasche, Lasche aus einer frei skizzierten Kontur, Eckfreistich als eigenes Feature, Ausschnitte über Biegungen hinweg (Abwickeln/Zurückbiegen), Umformwerkzeuge, Biegetabellen und Blechstärketabellen, Parasolid-Export (X_T).
 
 ## Entwicklung
 
@@ -71,6 +77,6 @@ Aufbau:
 - `src/kernel/` – Blech-Kern ohne Abhängigkeit zur Oberfläche. Jede Fläche liegt als Polygon in einem gemeinsamen Abwicklungs-Koordinatensystem, Flächen sind über Biegestreifen verbunden. Das 3D-Teil entsteht durch Falten um die Biegeachsen, deshalb ist die Abwicklung exakt.
 - `src/kernel/features/` – Basislasche, Kantenlasche, Saum, Skizzierte Biegung, Knick, Ausschnitt, Lasche, Geschlossene Ecke, Ecke brechen.
 - `src/kernel/mesh.ts` – geschlossenes Dreiecksnetz für gefalteten und abgewickelten Zustand.
-- `src/kernel/flat.ts`, `src/kernel/export/` – Abwicklung, DXF, SVG, STL, ZIP.
+- `src/kernel/flat.ts`, `src/kernel/export/` – Abwicklung, DXF, SVG, STEP, STL, 3MF, ZIP.
 - `src/ui/` – Oberfläche mit three.js.
 - `tests/` – Tests gegen Handrechnungen.
