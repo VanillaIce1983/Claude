@@ -1,5 +1,6 @@
-// three.js viewport: shaded part with crisp edges, edge/face picking,
-// selection highlights, flat-pattern bend lines and standard views.
+// three.js viewport: shaded part with crisp edges, edge/face/vertex picking,
+// selection highlights, measure dimensions, flat-pattern bend lines and
+// standard views.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -7,11 +8,17 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import type { FlatPattern } from '../kernel/flat';
-import type { PartMesh, PickEdge } from '../kernel/mesh';
-import type { Part } from '../kernel/model';
-import { Affine, V3, applyA, applyDirA, invertRigid, v3 } from '../kernel/vec';
+import type { MeasureLine } from '../kernel/measure';
+import type { PartMesh, PickEdge, Surface } from '../kernel/mesh';
+import type { CircleInfo, Part } from '../kernel/model';
+import { Affine, V2, V3, applyA, applyDirA, cross2, dot2, invertRigid, sub2, v3 } from '../kernel/vec';
 
-export type PickMode = 'none' | 'edge' | 'face';
+export type PickMode = 'none' | 'edge' | 'face' | 'measure';
+
+export interface VertexHit {
+  kind: 'vertex';
+  p: V3;
+}
 
 export interface EdgeHit {
   kind: 'edge';
@@ -24,11 +31,29 @@ export interface FaceHit {
   pieceKind: 'face' | 'bend';
   id: string;
   feature: string;
+  /** Top (0), bottom (1) or side wall (2) of the sheet. */
+  surface: Surface;
+  /** Hit point in world space. */
+  point: V3;
   /** Flat coordinates of the hit point (faces only). */
   flat?: { x: number; y: number };
 }
 
-export type Hit = EdgeHit | FaceHit;
+export type Hit = VertexHit | EdgeHit | FaceHit;
+
+/** A measure pick as the viewer draws it, independent of the feature selection. */
+export type MeasureSelectionView =
+  | { kind: 'vertex'; p: V3 }
+  | { kind: 'edge'; edge: PickEdge; side: 'top' | 'bottom' }
+  | { kind: 'face'; pieceKind: 'face' | 'bend'; id: string };
+
+const EDGE_PX = 11;
+const MEASURE_EDGE_PX = 10;
+const VERTEX_PX = 8;
+/** Below this turn, a vertex between two edges of one tag is a tessellated arc point, not a corner. */
+const SMOOTH_TURN = (20 * Math.PI) / 180;
+/** Measure overlays draw after the part, whatever their distance. */
+const OVERLAY_ORDER = 10;
 
 export interface ViewColors {
   steel: string;
@@ -62,6 +87,12 @@ export class Viewer {
   private pickMode: PickMode = 'none';
   private hover: Hit | null = null;
   private selectedEdges: { edge: PickEdge; side: 'top' | 'bottom' }[] = [];
+  private measureSel: MeasureSelectionView[] = [];
+  private measureLines: MeasureLine[] = [];
+  private labels: { el: HTMLDivElement; at: V3 }[] = [];
+  private labelLayer: HTMLDivElement;
+  private vertexCache: V3[] | null = null;
+  private dotTexture: THREE.Texture | null = null;
   private highlightFeature: string | null = null;
   private frameRequested = false;
   private downAt: { x: number; y: number } | null = null;
@@ -75,6 +106,11 @@ export class Viewer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setClearColor(0x000000, 0);
     host.appendChild(this.renderer.domElement);
+    this.labelLayer = document.createElement('div');
+    this.labelLayer.className = 'ms-labels';
+    Object.assign(this.labelLayer.style, { position: 'absolute', inset: '0', overflow: 'hidden', pointerEvents: 'none' });
+    // first child: the stage's own overlays (hint, view buttons) stay above the labels
+    host.prepend(this.labelLayer);
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -100000, 100000);
     this.camera.position.set(1, 0.8, 1).multiplyScalar(500);
     this.camera.up.set(0, 1, 0);
@@ -159,11 +195,13 @@ export class Viewer {
     requestAnimationFrame(() => {
       this.frameRequested = false;
       this.renderer.render(this.scene, this.camera);
+      this.placeLabels();
     });
   }
 
   setModel(mesh: PartMesh | null, part: Part | null, flat: boolean): void {
     this.state = mesh && part ? { mesh, part, flat } : null;
+    this.vertexCache = null;
     this.rebuild();
     if (!this.fitted && this.state) {
       this.fitted = true;
@@ -173,13 +211,16 @@ export class Viewer {
 
   clear(): void {
     this.state = null;
+    this.vertexCache = null;
     this.rebuild();
   }
 
+  /** In 'measure' mode, pass the edges and corner edges: their end points are the snap vertices. */
   setPickMode(mode: PickMode, edges: PickEdge[] = [], filter: (e: PickEdge) => boolean = () => true): void {
     this.pickMode = mode;
     this.pickables = edges;
     this.edgeFilter = filter;
+    this.vertexCache = null;
     this.hover = null;
     this.updateOverlay();
   }
@@ -187,6 +228,41 @@ export class Viewer {
   setSelection(edges: { edge: PickEdge; side: 'top' | 'bottom' }[]): void {
     this.selectedEdges = edges;
     this.updateOverlay();
+  }
+
+  /** Picked measure entities: vertices as dots, edges as fat lines, faces as a tint. */
+  setMeasureSelection(items: MeasureSelectionView[]): void {
+    this.measureSel = items;
+    this.updateOverlay();
+  }
+
+  /** Dimension lines with a text label at each midpoint; [] removes them. */
+  setMeasureOverlay(lines: MeasureLine[]): void {
+    this.measureLines = lines;
+    for (const l of this.labels) l.el.remove();
+    this.labels = lines.map((l) => {
+      const el = document.createElement('div');
+      el.className = 'ms-label';
+      el.textContent = l.text;
+      Object.assign(el.style, { position: 'absolute', left: '0', top: '0', pointerEvents: 'none' });
+      this.labelLayer.append(el);
+      return { el, at: v3((l.a.x + l.b.x) / 2, (l.a.y + l.b.y) / 2, (l.a.z + l.b.z) / 2) };
+    });
+    this.placeLabels();
+    this.updateOverlay();
+  }
+
+  /** Labels are HTML, so they follow the camera here instead of in the scene. */
+  private placeLabels(): void {
+    if (!this.labels.length) return;
+    const c = this.renderer.domElement;
+    const v = new THREE.Vector3();
+    for (const l of this.labels) {
+      v.set(l.at.x, l.at.y, l.at.z).project(this.camera);
+      const x = Math.round(c.offsetLeft + ((v.x + 1) / 2) * c.clientWidth);
+      const y = Math.round(c.offsetTop + ((1 - v.y) / 2) * c.clientHeight);
+      l.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+    }
   }
 
   setHighlightFeature(id: string | null): void {
@@ -340,13 +416,102 @@ export class Viewer {
       sel.push(a.x, a.y, a.z, b.x, b.y, b.z);
     }
     if (sel.length) this.overlay.add(this.fatLines(sel, this.fatMaterial(this.colors.accent, 4, { depthTest: false })));
-    if (this.hover?.kind === 'edge') {
-      const [a, b] = this.edgeSegment(this.hover.edge, this.hover.side);
-      this.overlay.add(this.fatLines([a.x, a.y, a.z, b.x, b.y, b.z], this.fatMaterial(this.colors.sel, 4.5, { depthTest: false })));
+    this.addMeasureSelection();
+    this.addMeasureLines();
+    if (this.hover?.kind === 'vertex') {
+      this.overlay.add(this.dots([this.hover.p], this.colors.sel, 12));
+    } else if (this.hover?.kind === 'edge') {
+      const runs = this.pickMode === 'measure' ? this.edgeRun(this.hover.edge) : [this.hover.edge];
+      const seg = this.segments(runs, this.hover.side);
+      this.overlay.add(this.fatLines(seg, this.fatMaterial(this.colors.sel, 4.5, { depthTest: false })));
     } else if (this.hover?.kind === 'face' && this.state && this.pickMode !== 'edge') {
       this.overlay.add(this.pieceHighlight(this.hover.pieceKind, this.hover.id, this.colors.sel, 0.28));
     }
     this.requestRender();
+  }
+
+  private segments(edges: PickEdge[], side: 'top' | 'bottom'): number[] {
+    const out: number[] = [];
+    for (const e of edges) {
+      const [a, b] = this.edgeSegment(e, side);
+      out.push(a.x, a.y, a.z, b.x, b.y, b.z);
+    }
+    return out;
+  }
+
+  /** A round hole measures as one circle, so all its segments light up together. */
+  private edgeRun(e: PickEdge): PickEdge[] {
+    if (!e.hole || !this.state?.part.circles.has(e.tag)) return [e];
+    const run = this.pickables.filter((o) => o.hole && o.tag === e.tag && o.faceId === e.faceId);
+    return run.length ? run : [e];
+  }
+
+  private addMeasureSelection(): void {
+    const seg: number[] = [];
+    const pts: V3[] = [];
+    for (const s of this.measureSel) {
+      if (s.kind === 'vertex') pts.push(s.p);
+      else if (s.kind === 'edge') seg.push(...this.segments(this.edgeRun(s.edge), s.side));
+      else if (this.state) this.overlay.add(this.pieceHighlight(s.pieceKind, s.id, this.colors.accent, 0.32));
+    }
+    if (seg.length) {
+      const l = this.fatLines(seg, this.fatMaterial(this.colors.accent, 4, { depthTest: false }));
+      l.renderOrder = OVERLAY_ORDER;
+      this.overlay.add(l);
+    }
+    if (pts.length) this.overlay.add(this.dots(pts, this.colors.accent, 11));
+  }
+
+  private addMeasureLines(): void {
+    if (!this.measureLines.length) return;
+    const seg: number[] = [];
+    const ends: V3[] = [];
+    for (const l of this.measureLines) {
+      seg.push(l.a.x, l.a.y, l.a.z, l.b.x, l.b.y, l.b.z);
+      ends.push(l.a, l.b);
+    }
+    const lines = this.fatLines(seg, this.fatMaterial(this.colors.sel, 2.2, { depthTest: false }));
+    lines.renderOrder = OVERLAY_ORDER;
+    this.overlay.add(lines, this.dots(ends, this.colors.sel, 8));
+  }
+
+  /** Screen-sized round markers that stay visible through the part. */
+  private dots(pts: V3[], color: string, size: number): THREE.Points {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts.flatMap((p) => [p.x, p.y, p.z]), 3));
+    const m = new THREE.PointsMaterial({
+      color: new THREE.Color(color),
+      size,
+      sizeAttenuation: false,
+      map: this.dotMap(),
+      transparent: true,
+      alphaTest: 0.05,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const p = new THREE.Points(g, m);
+    p.renderOrder = OVERLAY_ORDER + 1;
+    return p;
+  }
+
+  /** White disc with a dark rim; the material colour tints it. Shared, so never disposed with the overlay. */
+  private dotMap(): THREE.Texture {
+    if (this.dotTexture) return this.dotTexture;
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    if (g) {
+      g.fillStyle = '#404040';
+      g.beginPath();
+      g.arc(32, 32, 31, 0, 2 * Math.PI);
+      g.fill();
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.arc(32, 32, 21, 0, 2 * Math.PI);
+      g.fill();
+    }
+    this.dotTexture = new THREE.CanvasTexture(c);
+    return this.dotTexture;
   }
 
   private trianglesWhere(pred: (piece: number) => boolean): number[] {
@@ -396,8 +561,7 @@ export class Viewer {
     return new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
   }
 
-  private toScreen(p: V3): { x: number; y: number; depth: number } {
-    const r = this.renderer.domElement.getBoundingClientRect();
+  private toScreen(p: V3, r: DOMRect = this.renderer.domElement.getBoundingClientRect()): { x: number; y: number; depth: number } {
     const v = new THREE.Vector3(p.x, p.y, p.z).project(this.camera);
     return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height, depth: v.z };
   }
@@ -411,35 +575,67 @@ export class Viewer {
 
   private pickAt(x: number, y: number): Hit | null {
     if (!this.state) return null;
-    if (this.pickMode === 'edge') return this.pickEdge(x, y);
+    if (this.pickMode === 'edge') return this.pickEdge(x, y, EDGE_PX, this.edgeFilter);
+    if (this.pickMode === 'measure') {
+      return this.pickVertex(x, y) ?? this.pickEdge(x, y, MEASURE_EDGE_PX, () => true) ?? this.pickFace(x, y);
+    }
     return this.pickFace(x, y);
   }
 
-  private pickEdge(x: number, y: number): EdgeHit | null {
+  private pickEdge(x: number, y: number, maxPx: number, filter: (e: PickEdge) => boolean): EdgeHit | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
     const candidates: { d: number; hit: EdgeHit; p: V3 }[] = [];
     for (const e of this.pickables) {
-      if (!this.edgeFilter(e)) continue;
+      if (!filter(e)) continue;
       for (const side of ['top', 'bottom'] as const) {
         const [a, b] = this.edgeSegment(e, side);
-        const sa = this.toScreen(a);
-        const sb = this.toScreen(b);
+        const sa = this.toScreen(a, r);
+        const sb = this.toScreen(b, r);
         const dx = sb.x - sa.x;
         const dy = sb.y - sa.y;
         const l2 = dx * dx + dy * dy;
         let t = l2 > 0 ? ((x - sa.x) * dx + (y - sa.y) * dy) / l2 : 0;
         t = Math.max(0, Math.min(1, t));
         const d = Math.hypot(x - (sa.x + dx * t), y - (sa.y + dy * t));
-        if (d > 11) continue;
+        if (d > maxPx) continue;
         const p = v3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
         candidates.push({ d, hit: { kind: 'edge', edge: e, side }, p });
       }
     }
     candidates.sort((u, w) => u.d - w.d);
-    const tol = Math.max(0.5, 0.75 * (this.state?.part.T ?? 1));
+    const tol = this.occlusionTol();
     for (const c of candidates.slice(0, 12)) {
       if (!this.occluded(c.p, tol)) return c.hit;
     }
     return null;
+  }
+
+  private pickVertex(x: number, y: number): VertexHit | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const candidates: { d: number; p: V3 }[] = [];
+    for (const p of this.measureVertices()) {
+      const s = this.toScreen(p, r);
+      const d = Math.hypot(x - s.x, y - s.y);
+      if (d <= VERTEX_PX) candidates.push({ d, p });
+    }
+    candidates.sort((u, w) => u.d - w.d);
+    const tol = this.occlusionTol();
+    for (const c of candidates.slice(0, 12)) {
+      if (!this.occluded(c.p, tol)) return { kind: 'vertex', p: c.p };
+    }
+    return null;
+  }
+
+  private measureVertices(): V3[] {
+    if (!this.vertexCache) {
+      const st = this.state;
+      this.vertexCache = st ? snapVertices(this.pickables, st.flat, st.part.circles) : [];
+    }
+    return this.vertexCache;
+  }
+
+  private occlusionTol(): number {
+    return Math.max(0.5, 0.75 * (this.state?.part.T ?? 1));
   }
 
   /** Whether solid material lies clearly in front of a point (as seen by the camera). */
@@ -460,11 +656,18 @@ export class Viewer {
     const { mesh, part, flat } = this.state!;
     const piece = mesh.pieces[mesh.triPiece[hit.faceIndex]];
     if (!piece) return null;
-    const out: FaceHit = { kind: 'face', pieceKind: piece.kind, id: piece.id, feature: piece.feature };
+    const out: FaceHit = {
+      kind: 'face',
+      pieceKind: piece.kind,
+      id: piece.id,
+      feature: piece.feature,
+      surface: mesh.triSurface[hit.faceIndex] as Surface,
+      point: v3(hit.point.x, hit.point.y, hit.point.z),
+    };
     if (piece.kind === 'face') {
       const M: Affine | undefined = flat ? part.anchor.M : mesh.placements.get(piece.id);
       if (M) {
-        const local = applyA(invertRigid(M), v3(hit.point.x, hit.point.y, hit.point.z));
+        const local = applyA(invertRigid(M), out.point);
         out.flat = { x: local.x, y: local.y };
       }
     }
@@ -529,7 +732,54 @@ export class Viewer {
 
 function sameHit(a: Hit | null, b: Hit | null): boolean {
   if (!a || !b) return a === b;
+  if (a.kind === 'vertex' && b.kind === 'vertex') return a.p.x === b.p.x && a.p.y === b.p.y && a.p.z === b.p.z;
   if (a.kind === 'edge' && b.kind === 'edge') return a.edge === b.edge && a.side === b.side;
-  if (a.kind === 'face' && b.kind === 'face') return a.id === b.id && a.pieceKind === b.pieceKind;
+  if (a.kind === 'face' && b.kind === 'face') return a.id === b.id && a.pieceKind === b.pieceKind && a.surface === b.surface;
   return false;
+}
+
+interface VertexUse {
+  tags: Set<string>;
+  dirs: V2[];
+  top: V3;
+  bottom: V3;
+}
+
+/**
+ * Ring corners on both sheet surfaces, deduplicated. Inner points of round
+ * holes and tessellated arcs are left out: they are not corners, and their
+ * snap radius would otherwise cover the whole curve and hide the edge.
+ */
+function snapVertices(edges: PickEdge[], flat: boolean, circles: Map<string, CircleInfo>): V3[] {
+  const uses = new Map<string, VertexUse>();
+  const visit = (e: PickEdge, p: V2, dir: V2, top: V3, bottom: V3): void => {
+    const k = `${e.faceId}|${p.x.toFixed(5)}|${p.y.toFixed(5)}`;
+    let u = uses.get(k);
+    if (!u) uses.set(k, (u = { tags: new Set(), dirs: [], top, bottom }));
+    u.tags.add(e.tag);
+    u.dirs.push(dir);
+  };
+  for (const e of edges) {
+    // corner edges join ring points that the outline edges already cover
+    if (e.corner) continue;
+    const s = flat ? e.flat : e.folded;
+    const d = sub2(e.flatB, e.flatA);
+    visit(e, e.flatA, d, s[0], s[2]);
+    visit(e, e.flatB, d, s[1], s[3]);
+  }
+  const out = new Map<string, V3>();
+  for (const u of uses.values()) {
+    if (isSmooth(u, circles)) continue;
+    for (const p of [u.top, u.bottom]) out.set(`${p.x.toFixed(4)}|${p.y.toFixed(4)}|${p.z.toFixed(4)}`, p);
+  }
+  return [...out.values()];
+}
+
+function isSmooth(u: VertexUse, circles: Map<string, CircleInfo>): boolean {
+  if (u.tags.size !== 1) return false;
+  const [tag] = u.tags;
+  if (circles.has(tag)) return true;
+  if (u.dirs.length !== 2) return false;
+  const [a, b] = u.dirs;
+  return Math.abs(Math.atan2(cross2(a, b), dot2(a, b))) < SMOOTH_TURN;
 }

@@ -71,7 +71,7 @@ describe('measure: single entities', () => {
     const r = measure([circle(v3(10, 20, 30), v3(0, 0, 2), 4)]);
     expect(value(r, 'Durchmesser')).toBeCloseTo(8, 9);
     expect(value(r, 'Radius')).toBeCloseTo(4, 9);
-    expect(value(r, 'Länge')).toBeCloseTo(8 * Math.PI, 9);
+    expect(value(r, 'Umfang')).toBeCloseTo(8 * Math.PI, 9);
     expect(value(r, 'Mittelpunkt X')).toBe(10);
     expect(value(r, 'Mittelpunkt Y')).toBe(20);
     expect(value(r, 'Mittelpunkt Z')).toBe(30);

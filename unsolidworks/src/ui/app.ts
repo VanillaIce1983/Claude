@@ -15,6 +15,8 @@ import { h, svgIcon } from './dom';
 import { exampleDoc } from './example';
 import { safeName, saveFile, initDownloads } from './exporter';
 import { newBaseFlange, newBreakCorner, newClosedCorner, newCut, newEdgeFlange, newHem, newJog, newSketchCut, newSketchedBend, newTab, summary } from './features';
+import { MAX_MEASURE_PICKS, MEASURE_ICON, MeasurePick, measurePanel, pickToMeasure } from './measure';
+import { MeasureResult, measure } from '../kernel/measure';
 import { flatPanel } from './flatpanel';
 import { num } from './format';
 import { ICONS, IconName } from './icons';
@@ -85,6 +87,9 @@ export class App implements PanelHost {
   private model!: Model;
   private flat = false;
   private session: Session | null = null;
+  private measuring = false;
+  private picks: MeasurePick[] = [];
+  private measureResult: MeasureResult | null = null;
   private selected: string | null = null;
   private lastPick = { id: '', t: 0 };
   private viewer!: Viewer;
@@ -246,7 +251,7 @@ export class App implements PanelHost {
         t('hem', 'hem', 'Saum', 'Saum: geschlossen, offen, Tropfenform oder gerollt'),
         t('sketchedBend', 'sketchedBend', 'Skizz. Biegung', 'Skizzierte Biegung entlang einer Linie'),
         t('jog', 'jog', 'Knick', 'Knick: zwei gegenläufige Biegungen mit Versatz'),
-        t('cut', 'cut', 'Ausschnitt', 'Bohrung, Rechteck oder Langloch'),
+        t('cut', 'cut', 'Bohrung', 'Bohrung, Rechteck oder Langloch mit Abstand zu einer Kante, auch als Reihe'),
         t('tab', 'tab', 'Lasche', 'Lasche: Kante in der Ebene verlängern'),
         t('closedCorner', 'closedCorner', 'Geschl. Ecke', 'Geschlossene Ecke: Laschenseite bis zur Nachbarlasche verlängern'),
         t('breakCorner', 'breakCorner', 'Ecke brechen', 'Ecke brechen: Fase oder Verrundung'),
@@ -257,6 +262,23 @@ export class App implements PanelHost {
         this.tb('flat', 'Abwicklung', () => this.toggleFlat(), { disabled: busy || !hasPart, on: this.flat, title: 'Abwicklung ein/aus' }),
         this.tb('exportIcon', 'Export', () => this.exportMenu(), { disabled: busy || !hasPart, title: 'DXF, SVG, STL, Bild' }),
       ),
+      h(
+        'div',
+        { class: 'group' },
+        h(
+          'button',
+          {
+            type: 'button',
+            class: `tb${this.measuring ? ' on' : ''}`,
+            disabled: busy || !hasPart,
+            title: 'Messen: Abstände, Winkel, Längen, Radien und Flächen (M)',
+            'aria-pressed': this.measuring ? 'true' : 'false',
+            onclick: () => this.toggleMeasure(),
+          },
+          svgIcon(MEASURE_ICON),
+          'Messen',
+        ),
+      ),
     );
   }
 
@@ -265,7 +287,12 @@ export class App implements PanelHost {
   refresh(fitView = false): void {
     this.model = buildModel(this.doc);
     const m = this.model;
-    if (!m.part || !m.mesh) this.flat = false;
+    if (!m.part || !m.mesh) {
+      this.flat = false;
+      this.measuring = false;
+    }
+    // picks refer to the previous geometry
+    this.clearMeasure();
     this.viewer.setModel(m.mesh, m.part, this.flat);
     this.viewer.setFlatBendLines(this.flat ? m.fp : null, m.part);
     if (fitView && m.mesh) this.viewer.setView(this.flat ? 'normal' : 'iso');
@@ -324,6 +351,7 @@ export class App implements PanelHost {
 
   private async startCommand(type: FeatureType): Promise<void> {
     if (this.session) return;
+    if (this.measuring) this.toggleMeasure();
     if (this.flat) this.toggleFlat();
     if (type === 'baseFlange') {
       const existing = this.doc.features.find((f) => f.type === 'baseFlange');
@@ -358,6 +386,7 @@ export class App implements PanelHost {
 
   editFeature(id: string): void {
     if (this.session) return;
+    if (this.measuring) this.toggleMeasure();
     const index = this.doc.features.findIndex((f) => f.id === id);
     if (index < 0) return;
     if (this.flat) this.toggleFlat();
@@ -377,6 +406,7 @@ export class App implements PanelHost {
 
   private editSheet(): void {
     if (this.session) return;
+    if (this.measuring) this.toggleMeasure();
     if (this.flat) this.toggleFlat();
     const before = this.snapshot();
     this.session = { kind: 'sheet', draft: null, index: -1, isNew: false, before, pre: this.model };
@@ -433,12 +463,45 @@ export class App implements PanelHost {
   private toggleFlat(): void {
     if (!this.model.part) return;
     this.flat = !this.flat;
+    this.clearMeasure();
     this.viewer.setModel(this.model.mesh, this.model.part, this.flat);
     this.viewer.setFlatBendLines(this.flat ? this.model.fp : null, this.model.part);
     this.viewer.setView(this.flat ? 'normal' : 'iso');
+    this.updatePicking();
     this.renderToolbar();
     this.renderSide();
     this.renderStageOverlays();
+  }
+
+  // ---------------------------------------------------------------- measuring
+
+  private toggleMeasure(): void {
+    if (this.session || (!this.measuring && !this.model.part)) return;
+    this.measuring = !this.measuring;
+    this.clearMeasure();
+    this.updatePicking();
+    this.renderToolbar();
+    this.renderSide();
+    this.renderStageOverlays();
+  }
+
+  private clearMeasure(): void {
+    this.picks = [];
+    this.measureResult = null;
+    this.viewer?.setMeasureOverlay([]);
+    this.viewer?.setMeasureSelection([]);
+  }
+
+  private updateMeasure(): void {
+    try {
+      this.measureResult = this.picks.length ? measure(this.picks.map((p) => p.entity)) : null;
+    } catch (e) {
+      this.measureResult = null;
+      this.toast((e as Error).message, true);
+    }
+    this.viewer.setMeasureOverlay(this.measureResult?.lines ?? []);
+    this.viewer.setMeasureSelection(this.picks.map((p) => p.view));
+    this.renderSide();
   }
 
   private newDocument(): void {
@@ -466,12 +529,26 @@ export class App implements PanelHost {
   // Sketched cuts get their face sketch editor in the next step.
   openFaceSketch(): void {}
 
-  resetSketchFace(): void {}
+  resetSketchFace(): void {
+    const s = this.session;
+    if (!s?.draft || s.draft.type !== 'sketchCut') return;
+    s.draft.sketch = { edge: { tag: '', at: { x: 0, y: 0 } }, entities: [] };
+    this.changed();
+    this.restructure();
+  }
 
   // ---------------------------------------------------------------- picking
 
   private updatePicking(): void {
     const s = this.session;
+    if (!s && this.measuring && this.model.part) {
+      this.viewer.setHighlightFeature(null);
+      this.viewer.setSelection([]);
+      this.viewer.setPickMode('measure', [...this.model.edges, ...this.model.corners]);
+      this.viewer.setMeasureSelection(this.picks.map((p) => p.view));
+      this.renderStageOverlays();
+      return;
+    }
     if (!s || !s.draft) {
       this.viewer.setPickMode('none');
       this.viewer.setSelection([]);
@@ -528,6 +605,10 @@ export class App implements PanelHost {
       this.viewer.setPickMode('face');
       const e = d.edge.tag ? find(d.edge) : undefined;
       this.viewer.setSelection(e ? [{ edge: e, side: 'top' }] : []);
+    } else if (d.type === 'sketchCut') {
+      const e = d.sketch.edge.tag ? find(d.sketch.edge) : undefined;
+      this.viewer.setPickMode(e ? 'none' : 'face');
+      this.viewer.setSelection(e ? [{ edge: e, side: 'top' }] : []);
     } else {
       this.viewer.setPickMode('none');
       this.viewer.setSelection([]);
@@ -537,6 +618,26 @@ export class App implements PanelHost {
 
   private onPick(hit: Hit | null): void {
     const s = this.session;
+    if (!s && this.measuring) {
+      if (!hit || !this.model.part) return;
+      let p: MeasurePick | null;
+      try {
+        p = pickToMeasure(hit, this.model.part, this.flat);
+      } catch (e) {
+        this.toast((e as Error).message, true);
+        return;
+      }
+      if (!p) return;
+      const i = this.picks.findIndex((x) => x.key === p.key);
+      if (i >= 0) this.picks.splice(i, 1);
+      else {
+        // a new pick after a complete pair starts a new measurement
+        if (this.picks.length >= MAX_MEASURE_PICKS) this.picks = [];
+        this.picks.push(p);
+      }
+      this.updateMeasure();
+      return;
+    }
     if (!s || !s.draft) {
       if (hit?.kind === 'face') {
         const now = performance.now();
@@ -582,6 +683,25 @@ export class App implements PanelHost {
       else d.corners.push({ prevTag: c.prevTag, nextTag: c.nextTag, at: { ...hit.edge.flatA } });
       this.changed();
       this.restructure();
+    } else if (d.type === 'sketchCut' && !d.sketch.edge.tag && hit.kind === 'face' && hit.pieceKind === 'face' && hit.flat && s.pre.part) {
+      const face = s.pre.part.faces.get(hit.id);
+      if (!face) return;
+      // the outline edge nearest to the click becomes the sketch's reference edge
+      let best = 0;
+      let bd = Infinity;
+      face.outer.pts.forEach((p, i) => {
+        const dd = distPointSegment(hit.flat!, p, face.outer.pts[(i + 1) % face.outer.pts.length]);
+        if (dd < bd) {
+          bd = dd;
+          best = i;
+        }
+      });
+      const a = face.outer.pts[best];
+      const b = face.outer.pts[(best + 1) % face.outer.pts.length];
+      d.sketch.edge = { tag: face.outer.tags[best], at: mid(a, b) };
+      this.changed();
+      this.restructure();
+      void this.openFaceSketch();
     } else if (d.type === 'cut' && hit.kind === 'face' && hit.pieceKind === 'face' && hit.flat && s.pre.part) {
       const face = s.pre.part.faces.get(hit.id);
       if (!face) return;
@@ -637,6 +757,22 @@ export class App implements PanelHost {
     if (this.session) {
       side.replaceChildren(this.sessionPanel(this.session));
       this.updateSessionError();
+      return;
+    }
+    if (this.measuring) {
+      side.replaceChildren(
+        measurePanel(this.picks, this.measureResult, {
+          remove: (i: number) => {
+            this.picks.splice(i, 1);
+            this.updateMeasure();
+          },
+          clear: () => {
+            this.picks = [];
+            this.updateMeasure();
+          },
+          close: () => this.toggleMeasure(),
+        }),
+      );
       return;
     }
     const parts: HTMLElement[] = [];
@@ -817,6 +953,9 @@ export class App implements PanelHost {
         case 'cut':
           text = s.draft.edge.tag ? 'Erneut klicken zum Verschieben, Maße links' : 'Auf die Fläche klicken, wo der Ausschnitt sitzen soll';
           break;
+        case 'sketchCut':
+          text = s.draft.sketch.edge.tag ? 'Skizze links bearbeiten, dann mit ✓ übernehmen' : 'Fläche anklicken, auf der skizziert werden soll';
+          break;
         case 'tab':
           text = s.draft.edges.length ? 'Weitere Kanten anklicken oder mit ✓ übernehmen' : 'Kante anklicken, die verlängert werden soll';
           break;
@@ -827,6 +966,9 @@ export class App implements PanelHost {
           text = s.draft.corners.length ? 'Weitere Ecken anklicken oder mit ✓ übernehmen' : 'Kurze Eckkante (durch die Blechdicke) anklicken';
           break;
       }
+    }
+    if (!s && this.measuring) {
+      text = this.picks.length ? 'Weitere Elemente anklicken – erneuter Klick entfernt sie' : 'Punkt, Kante oder Fläche anklicken';
     }
     hint.textContent = text;
     hint.hidden = !text;
@@ -968,6 +1110,11 @@ export class App implements PanelHost {
       if (e.key === 'Escape' && this.session) {
         e.preventDefault();
         this.cancel();
+      } else if (e.key === 'Escape' && this.measuring) {
+        e.preventDefault();
+        this.toggleMeasure();
+      } else if (!typing && !mod && e.key.toLowerCase() === 'm' && !this.session) {
+        this.toggleMeasure();
       } else if (mod && e.key === 'Enter' && this.session) {
         e.preventDefault();
         (document.activeElement as HTMLElement)?.blur?.();

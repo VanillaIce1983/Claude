@@ -225,7 +225,7 @@ function single(e: MeasureEntity): MeasureResult {
       break;
     case 'edge': {
       const L = edgeLength(e);
-      addRow(res, 'Länge', L, 'mm');
+      addRow(res, e.circle ? 'Umfang' : 'Länge', L, 'mm');
       const c = e.circle;
       if (!c) {
         addLine(res, e.a, e.b, mmText(L));

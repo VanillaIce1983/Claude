@@ -1,0 +1,55 @@
+/* Measure tool: pick chips and results in the side panel, dimension labels in the viewport. */
+.ms-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ms-idx {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: var(--font-label);
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 1;
+}
+.ms-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-result dd {
+  white-space: nowrap;
+}
+.ms-result .ms-main {
+  padding-bottom: 4px;
+  font-size: 15px;
+}
+.ms-result dt.ms-main {
+  color: var(--fg);
+}
+.ms-result dd.ms-main {
+  font-weight: 600;
+}
+.ms-label {
+  padding: 2px 7px;
+  border: 1px solid var(--sel);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+  font-family: var(--font-num);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}

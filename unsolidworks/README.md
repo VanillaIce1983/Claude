@@ -25,6 +25,14 @@ UnsolidWorks ist eine eigenständige Neuentwicklung. Der Code stammt nicht aus a
 | **Ecke brechen** | Verrundung oder Fase an Außen- und Innenecken der Kontur |
 | **Abwicklung** | Exakte Abwicklung mit Biegelinien (oben/unten), Biegetabelle mit Winkel, Radius, Biegezugabe und Biegeabzug, Zuschnittmaß, kleinstes umschließendes Rechteck, Fläche, Schnittlänge, Masse |
 
+### Messen
+
+Werkzeug „Messen“ (Taste M): Punkte, Kanten, Flächen und Biegungen anklicken.
+
+- Ein Element: Koordinaten, Kantenlänge, Durchmesser, Radius und Mittelpunkt von Bohrungen, Fläche und Umfang, Biegeradius innen oder außen mit Winkel und Bogenlänge.
+- Zwei Elemente: Abstand, ΔX/ΔY/ΔZ, senkrechter Abstand, minimaler Abstand, Achsabstand und Winkel. Das Ergebnis erscheint als Maßlinie im 3D-Fenster.
+- Funktioniert auch in der Abwicklung.
+
 Dazu: Feature-Baum mit Bearbeiten, Unterdrücken und Löschen, Live-Vorschau beim Bearbeiten, Rückgängig/Wiederholen, Skizzen-Editor mit Raster, Winkelfang und Vorlagen, Projekt speichern und öffnen (JSON).
 
 ### Export
