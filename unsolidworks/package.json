@@ -1,0 +1,28 @@
+{
+  "name": "unsolidworks",
+  "version": "0.1.0",
+  "private": true,
+  "description": "UnsolidWorks – Blech-CAD im Browser",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build:artifact": "npm run build && node scripts/artifact.mjs",
+    "release": "npm run build && node scripts/artifact.mjs && cp dist/index.html UnsolidWorks.html"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "earcut": "3.0.1",
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.170.0",
+    "typescript": "5.7.3",
+    "vite": "6.3.5",
+    "vite-plugin-singlefile": "2.1.0",
+    "vitest": "3.2.4"
+  }
+}

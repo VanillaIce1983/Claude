@@ -1,0 +1,428 @@
+// Builds a closed triangle mesh of the part (folded and flat state share one
+// topology), plus the pickable edge list for the UI.
+//
+// Each face polygon and each bend strip is meshed separately. Pieces are
+// glued only along bend seams, so cuts like tear reliefs stay open even
+// where two pieces touch in the flat pattern. Boundary edges of the top
+// surface get side walls; the same boundary loops are the flat pattern.
+
+import earcut from 'earcut';
+import { Bend, Face, Part, computePlacements, isSeamTag, stripFlat, stripPoint } from './model';
+import { Ring, signedArea } from './polygon';
+import { Affine, V2, V3, applyA, cross2, dist2, dot2, sub2, v3 } from './vec';
+
+export type Surface = 0 | 1 | 2; // top, bottom, side
+
+export interface MeshPiece {
+  kind: 'face' | 'bend';
+  id: string;
+  feature: string;
+}
+
+export interface BoundaryEdge {
+  a: number;
+  b: number;
+  tag: string;
+  piece: number;
+}
+
+export interface PartMesh {
+  /** Folded positions (x, y, z per vertex). */
+  positions: Float64Array;
+  /** Flat-pattern positions, laid in the plane of the fixed face. */
+  flatPositions: Float64Array;
+  /** Flat 2D coordinates per vertex. */
+  flat2: Float64Array;
+  indices: Uint32Array;
+  triPiece: Int32Array;
+  triSurface: Uint8Array;
+  pieces: MeshPiece[];
+  /** Top-surface boundary edges (directed, material on the left in flat). */
+  boundary: BoundaryEdge[];
+  placements: Map<string, Affine>;
+  warnings: string[];
+}
+
+const TOL = 1e-6;
+
+interface VertexStore {
+  pos: number[];
+  flat: number[];
+  flat2: number[];
+}
+
+function pushVertex(vs: VertexStore, p: V3, f: V3, f2: V2): number {
+  vs.pos.push(p.x, p.y, p.z);
+  vs.flat.push(f.x, f.y, f.z);
+  vs.flat2.push(f2.x, f2.y);
+  return vs.pos.length / 3 - 1;
+}
+
+/** Points of a bend seam (in flat) that lie on the given side of the strip. */
+function seamPoints(b: Bend, ws: number[], side: 0 | 1): V2[] {
+  return ws.map((w) => stripFlat(b, w, side));
+}
+
+function onSeam(b: Bend, p: V2, side: 0 | 1): number | null {
+  const rel = sub2(p, b.origin);
+  const t = dot2(rel, b.nrm);
+  const target = side === 0 ? 0 : b.ba;
+  if (Math.abs(t - target) > 1e-5) return null;
+  const w = dot2(rel, b.dir);
+  if (w < b.w0 - 1e-5 || w > b.w1 + 1e-5) return null;
+  return w;
+}
+
+function uniqSorted(values: number[]): number[] {
+  const s = [...values].sort((a, b) => a - b);
+  const out: number[] = [];
+  for (const v of s) if (out.length === 0 || v - out[out.length - 1] > 1e-6) out.push(v);
+  return out;
+}
+
+/** Insert extra collinear points into a ring's edges (used to avoid T-junctions). */
+function augmentRing(ring: Ring, extra: V2[], allowedTag: (tag: string) => boolean): Ring {
+  const pts: V2[] = [];
+  const tags: string[] = [];
+  const n = ring.pts.length;
+  for (let i = 0; i < n; i++) {
+    const a = ring.pts[i];
+    const b = ring.pts[(i + 1) % n];
+    const tag = ring.tags[i];
+    pts.push(a);
+    tags.push(tag);
+    if (!allowedTag(tag)) continue;
+    const ab = sub2(b, a);
+    const l2 = dot2(ab, ab);
+    if (l2 < TOL * TOL) continue;
+    const ins: { t: number; p: V2 }[] = [];
+    for (const p of extra) {
+      const ap = sub2(p, a);
+      const t = dot2(ap, ab) / l2;
+      if (t <= 1e-9 || t >= 1 - 1e-9) continue;
+      if (Math.abs(cross2(ab, ap)) / Math.sqrt(l2) > 1e-5) continue;
+      if (dist2(p, a) < 1e-6 || dist2(p, b) < 1e-6) continue;
+      ins.push({ t, p });
+    }
+    ins.sort((x, y) => x.t - y.t);
+    let last = a;
+    for (const { p } of ins) {
+      if (dist2(p, last) < 1e-6) continue;
+      pts.push(p);
+      tags.push(tag);
+      last = p;
+    }
+  }
+  return { pts, tags };
+}
+
+function bendSlices(angle: number): number {
+  return Math.max(2, Math.ceil((angle * 180) / Math.PI / 6));
+}
+
+export function buildMesh(part: Part): PartMesh {
+  const placements = computePlacements(part);
+  const warnings: string[] = [];
+  const T = part.T;
+  const anchorM = part.anchor.M;
+  const vs: VertexStore = { pos: [], flat: [], flat2: [] };
+  const tris: number[] = [];
+  const triPiece: number[] = [];
+  const triSurface: number[] = [];
+  const pieces: MeshPiece[] = [];
+  /** directed top edges: key "a,b" → tag */
+  const edgeTag = new Map<string, string>();
+  const topToBottom = new Map<number, number>();
+
+  // 1. breakpoints along each bend (union of both seams' vertices)
+  const breaks = new Map<string, number[]>();
+  for (const b of part.bends.values()) {
+    const ws = [b.w0, b.w1];
+    const fa = part.faces.get(b.faceA);
+    if (fa) for (const p of fa.outer.pts) {
+      const w = onSeam(b, p, 0);
+      if (w !== null) ws.push(w);
+    }
+    const fb = b.faceB ? part.faces.get(b.faceB) : undefined;
+    if (fb) for (const p of fb.outer.pts) {
+      const w = onSeam(b, p, 1);
+      if (w !== null) ws.push(w);
+    }
+    breaks.set(
+      b.id,
+      uniqSorted(ws).filter((w) => w >= b.w0 - 1e-6 && w <= b.w1 + 1e-6),
+    );
+  }
+
+  // 2. faces
+  const faceVerts = new Map<string, { p: V2; top: number; bot: number }[]>();
+  for (const face of part.faces.values()) {
+    const M = placements.get(face.id);
+    if (!M) {
+      warnings.push(`Fläche ${face.id} ist nicht mit dem Teil verbunden.`);
+      continue;
+    }
+    const extra: V2[] = [];
+    for (const b of part.bends.values()) {
+      if (b.faceA === face.id) extra.push(...seamPoints(b, breaks.get(b.id)!, 0));
+      if (b.faceB === face.id) extra.push(...seamPoints(b, breaks.get(b.id)!, 1));
+    }
+    const outer = augmentRing(face.outer, extra, isSeamTag);
+    const rings = [outer, ...face.holes];
+    const pieceIndex = pieces.push({ kind: 'face', id: face.id, feature: face.feature }) - 1;
+    const coords: number[] = [];
+    const holeIdx: number[] = [];
+    const top: number[] = [];
+    const list: { p: V2; top: number; bot: number }[] = [];
+    for (let r = 0; r < rings.length; r++) {
+      if (r > 0) holeIdx.push(coords.length / 2);
+      const ring = rings[r];
+      const ringTop: number[] = [];
+      for (const p of ring.pts) {
+        coords.push(p.x, p.y);
+        const t = pushVertex(vs, applyA(M, v3(p.x, p.y, T)), applyA(anchorM, v3(p.x, p.y, T)), p);
+        const bt = pushVertex(vs, applyA(M, v3(p.x, p.y, 0)), applyA(anchorM, v3(p.x, p.y, 0)), p);
+        topToBottom.set(t, bt);
+        top.push(t);
+        ringTop.push(t);
+        list.push({ p, top: t, bot: bt });
+      }
+      for (let i = 0; i < ring.pts.length; i++) {
+        edgeTag.set(`${ringTop[i]},${ringTop[(i + 1) % ring.pts.length]}`, ring.tags[i]);
+      }
+    }
+    faceVerts.set(face.id, list);
+    const idx = earcut(coords, holeIdx, 2);
+    for (let i = 0; i < idx.length; i += 3) {
+      let a = idx[i];
+      let b = idx[i + 1];
+      let c = idx[i + 2];
+      const area =
+        (coords[2 * b] - coords[2 * a]) * (coords[2 * c + 1] - coords[2 * a + 1]) -
+        (coords[2 * c] - coords[2 * a]) * (coords[2 * b + 1] - coords[2 * a + 1]);
+      if (area < 0) [b, c] = [c, b];
+      tris.push(top[a], top[b], top[c]);
+      triPiece.push(pieceIndex);
+      triSurface.push(0);
+      tris.push(topToBottom.get(top[a])!, topToBottom.get(top[c])!, topToBottom.get(top[b])!);
+      triPiece.push(pieceIndex);
+      triSurface.push(1);
+    }
+  }
+
+  const findFaceVertex = (faceId: string | null, p: V2): { top: number; bot: number } | null => {
+    if (!faceId) return null;
+    const list = faceVerts.get(faceId);
+    if (!list) return null;
+    let best: { top: number; bot: number } | null = null;
+    let bd = 1e-5;
+    for (const v of list) {
+      const d = dist2(v.p, p);
+      if (d < bd) {
+        bd = d;
+        best = v;
+      }
+    }
+    return best;
+  };
+
+  // 3. bend strips
+  for (const b of part.bends.values()) {
+    const MA = placements.get(b.faceA);
+    if (!MA) continue;
+    const pieceIndex = pieces.push({ kind: 'bend', id: b.id, feature: b.feature }) - 1;
+    const ws = breaks.get(b.id)!;
+    const N = bendSlices(b.angle);
+    const gridTop: number[][] = [];
+    const gridBot: number[][] = [];
+    for (let i = 0; i < ws.length; i++) {
+      gridTop.push([]);
+      gridBot.push([]);
+      for (let j = 0; j <= N; j++) {
+        const f = j / N;
+        const fp = stripFlat(b, ws[i], f);
+        let shared: { top: number; bot: number } | null = null;
+        if (j === 0) shared = findFaceVertex(b.faceA, fp);
+        if (j === N) shared = findFaceVertex(b.faceB, fp);
+        if (shared) {
+          gridTop[i].push(shared.top);
+          gridBot[i].push(shared.bot);
+          continue;
+        }
+        const t = pushVertex(vs, applyA(MA, stripPoint(b, T, ws[i], f, T)), applyA(anchorM, v3(fp.x, fp.y, T)), fp);
+        const bt = pushVertex(vs, applyA(MA, stripPoint(b, T, ws[i], f, 0)), applyA(anchorM, v3(fp.x, fp.y, 0)), fp);
+        topToBottom.set(t, bt);
+        gridTop[i].push(t);
+        gridBot[i].push(bt);
+      }
+    }
+    // (dir, nrm) is a clockwise frame → this order is CCW in flat
+    const ccw = cross2(b.dir, b.nrm) < 0;
+    for (let i = 0; i + 1 < ws.length; i++) {
+      for (let j = 0; j < N; j++) {
+        const a = gridTop[i][j];
+        const bb = gridTop[i + 1][j];
+        const c = gridTop[i + 1][j + 1];
+        const d = gridTop[i][j + 1];
+        const quad = ccw ? [a, d, c, a, c, bb] : [a, bb, c, a, c, d];
+        for (let k = 0; k < 6; k += 3) {
+          tris.push(quad[k], quad[k + 1], quad[k + 2]);
+          triPiece.push(pieceIndex);
+          triSurface.push(0);
+          tris.push(topToBottom.get(quad[k])!, topToBottom.get(quad[k + 2])!, topToBottom.get(quad[k + 1])!);
+          triPiece.push(pieceIndex);
+          triSurface.push(1);
+        }
+      }
+    }
+    // tags for strip boundary edges
+    const lastW = ws.length - 1;
+    for (let j = 0; j < N; j++) {
+      edgeTag.set(`${gridTop[0][j + 1]},${gridTop[0][j]}`, 'bend-side');
+      edgeTag.set(`${gridTop[0][j]},${gridTop[0][j + 1]}`, 'bend-side');
+      edgeTag.set(`${gridTop[lastW][j]},${gridTop[lastW][j + 1]}`, 'bend-side');
+      edgeTag.set(`${gridTop[lastW][j + 1]},${gridTop[lastW][j]}`, 'bend-side');
+    }
+    for (let i = 0; i < lastW; i++) {
+      for (const j of [0, N]) {
+        const k1 = `${gridTop[i][j]},${gridTop[i + 1][j]}`;
+        const k2 = `${gridTop[i + 1][j]},${gridTop[i][j]}`;
+        if (!edgeTag.has(k1)) edgeTag.set(k1, j === 0 ? 'bend-start' : 'bend-end');
+        if (!edgeTag.has(k2)) edgeTag.set(k2, j === 0 ? 'bend-start' : 'bend-end');
+      }
+    }
+  }
+
+  // 4. boundary edges of the top surface → side walls
+  const count = new Map<string, number>();
+  const topTriCount = tris.length / 3;
+  for (let t = 0; t < topTriCount; t++) {
+    if (triSurface[t] !== 0) continue;
+    for (let e = 0; e < 3; e++) {
+      const a = tris[3 * t + e];
+      const b = tris[3 * t + ((e + 1) % 3)];
+      const key = a < b ? `${a},${b}` : `${b},${a}`;
+      count.set(key, (count.get(key) ?? 0) + 1);
+    }
+  }
+  const boundary: BoundaryEdge[] = [];
+  for (let t = 0; t < topTriCount; t++) {
+    if (triSurface[t] !== 0) continue;
+    for (let e = 0; e < 3; e++) {
+      const a = tris[3 * t + e];
+      const b = tris[3 * t + ((e + 1) % 3)];
+      const key = a < b ? `${a},${b}` : `${b},${a}`;
+      if (count.get(key) !== 1) continue;
+      boundary.push({ a, b, tag: edgeTag.get(`${a},${b}`) ?? 'edge', piece: triPiece[t] });
+    }
+  }
+  for (const e of boundary) {
+    const ab = topToBottom.get(e.a)!;
+    const bb = topToBottom.get(e.b)!;
+    tris.push(ab, bb, e.b, ab, e.b, e.a);
+    triPiece.push(e.piece, e.piece);
+    triSurface.push(2, 2);
+  }
+
+  return {
+    positions: Float64Array.from(vs.pos),
+    flatPositions: Float64Array.from(vs.flat),
+    flat2: Float64Array.from(vs.flat2),
+    indices: Uint32Array.from(tris),
+    triPiece: Int32Array.from(triPiece),
+    triSurface: Uint8Array.from(triSurface),
+    pieces,
+    boundary,
+    placements,
+    warnings,
+  };
+}
+
+/** Enclosed volume (mm³) of a closed mesh. */
+export function meshVolume(positions: Float64Array, indices: Uint32Array): number {
+  let v = 0;
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i] * 3;
+    const b = indices[i + 1] * 3;
+    const c = indices[i + 2] * 3;
+    const ax = positions[a], ay = positions[a + 1], az = positions[a + 2];
+    const bx = positions[b], by = positions[b + 1], bz = positions[b + 2];
+    const cx = positions[c], cy = positions[c + 1], cz = positions[c + 2];
+    v += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+  }
+  return v / 6;
+}
+
+export interface Box3 {
+  min: V3;
+  max: V3;
+}
+
+export function meshBounds(positions: Float64Array): Box3 {
+  const min = v3(Infinity, Infinity, Infinity);
+  const max = v3(-Infinity, -Infinity, -Infinity);
+  for (let i = 0; i < positions.length; i += 3) {
+    min.x = Math.min(min.x, positions[i]);
+    min.y = Math.min(min.y, positions[i + 1]);
+    min.z = Math.min(min.z, positions[i + 2]);
+    max.x = Math.max(max.x, positions[i]);
+    max.y = Math.max(max.y, positions[i + 1]);
+    max.z = Math.max(max.z, positions[i + 2]);
+  }
+  return { min, max };
+}
+
+/** Pickable edges of faces (free edges, cut-outs and seams), in folded and flat state. */
+export interface PickEdge {
+  tag: string;
+  faceId: string;
+  feature: string;
+  seam: boolean;
+  hole: boolean;
+  flatA: V2;
+  flatB: V2;
+  /** [top a, top b, bottom a, bottom b] in folded space. */
+  folded: [V3, V3, V3, V3];
+  flat: [V3, V3, V3, V3];
+}
+
+export function pickEdges(part: Part, placements: Map<string, Affine>): PickEdge[] {
+  const out: PickEdge[] = [];
+  const T = part.T;
+  const A = part.anchor.M;
+  for (const face of part.faces.values()) {
+    const M = placements.get(face.id);
+    if (!M) continue;
+    const rings: [Ring, boolean][] = [[face.outer, false], ...face.holes.map((h) => [h, true] as [Ring, boolean])];
+    for (const [ring, hole] of rings) {
+      const n = ring.pts.length;
+      for (let i = 0; i < n; i++) {
+        const a = ring.pts[i];
+        const b = ring.pts[(i + 1) % n];
+        const tag = ring.tags[i];
+        const map = (X: Affine): [V3, V3, V3, V3] => [
+          applyA(X, v3(a.x, a.y, T)),
+          applyA(X, v3(b.x, b.y, T)),
+          applyA(X, v3(a.x, a.y, 0)),
+          applyA(X, v3(b.x, b.y, 0)),
+        ];
+        out.push({
+          tag,
+          faceId: face.id,
+          feature: face.feature,
+          seam: isSeamTag(tag),
+          hole,
+          flatA: a,
+          flatB: b,
+          folded: map(M),
+          flat: map(A),
+        });
+      }
+    }
+  }
+  return out;
+}
+
+export function faceArea(face: Face): number {
+  return signedArea(face.outer.pts) + face.holes.reduce((s, h) => s + signedArea(h.pts), 0);
+}
