@@ -15,8 +15,10 @@ import { h, svgIcon } from './dom';
 import { exampleDoc } from './example';
 import { safeName, saveFile, initDownloads } from './exporter';
 import { newBaseFlange, newBreakCorner, newClosedCorner, newCut, newEdgeFlange, newHem, newJog, newSketchCut, newSketchedBend, newTab, summary } from './features';
+import { FaceSketchContext, openFaceSketcher } from './faceSketcher';
 import { MAX_MEASURE_PICKS, MEASURE_ICON, MeasurePick, measurePanel, pickToMeasure } from './measure';
 import { MeasureResult, measure } from '../kernel/measure';
+import { flatToSketch, sketchFrame } from '../kernel/sketch';
 import { flatPanel } from './flatpanel';
 import { num } from './format';
 import { ICONS, IconName } from './icons';
@@ -251,6 +253,7 @@ export class App implements PanelHost {
         t('hem', 'hem', 'Saum', 'Saum: geschlossen, offen, Tropfenform oder gerollt'),
         t('sketchedBend', 'sketchedBend', 'Skizz. Biegung', 'Skizzierte Biegung entlang einer Linie'),
         t('jog', 'jog', 'Knick', 'Knick: zwei gegenläufige Biegungen mit Versatz'),
+        t('sketchCut', 'sketchCut', 'Ausschnitt', 'Ausschnitt: Profile auf einer Fläche skizzieren und durch das Blech schneiden'),
         t('cut', 'cut', 'Bohrung', 'Bohrung, Rechteck oder Langloch mit Abstand zu einer Kante, auch als Reihe'),
         t('tab', 'tab', 'Lasche', 'Lasche: Kante in der Ebene verlängern'),
         t('closedCorner', 'closedCorner', 'Geschl. Ecke', 'Geschlossene Ecke: Laschenseite bis zur Nachbarlasche verlängern'),
@@ -526,8 +529,36 @@ export class App implements PanelHost {
     this.restructure();
   }
 
-  // Sketched cuts get their face sketch editor in the next step.
-  openFaceSketch(): void {}
+  async openFaceSketch(): Promise<void> {
+    const s = this.session;
+    if (!s?.draft || s.draft.type !== 'sketchCut' || !s.pre.part || !s.draft.sketch.edge.tag) return;
+    const f = s.draft;
+    let ctx: FaceSketchContext;
+    try {
+      const frame = sketchFrame(s.pre.part, f.sketch.edge);
+      const toS = (p: V2): V2 => flatToSketch(frame, p);
+      const ring = frame.face.outer;
+      const seams: [V2, V2][] = [];
+      ring.pts.forEach((p, i) => {
+        if (isSeamTag(ring.tags[i])) seams.push([toS(p), toS(ring.pts[(i + 1) % ring.pts.length])]);
+      });
+      const owner = this.doc.features.find((x) => x.id === frame.face.feature);
+      ctx = {
+        title: `Skizze auf ${owner?.name ?? 'Fläche'}`,
+        outline: ring.pts.map(toS),
+        holes: frame.face.holes.map((hRing) => hRing.pts.map(toS)),
+        seams,
+      };
+    } catch (e) {
+      this.toast((e as Error).message, true);
+      return;
+    }
+    const res = await openFaceSketcher(f.sketch.entities, ctx);
+    if (!res || this.session !== s) return;
+    f.sketch.entities = res;
+    this.changed();
+    this.restructure();
+  }
 
   resetSketchFace(): void {
     const s = this.session;

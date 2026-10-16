@@ -228,6 +228,20 @@ select {
 .tb.small {
   min-width: 44px;
 }
+/* keep the command bar on one row on common laptop widths */
+@media (max-width: 1560px) {
+  .topbar {
+    column-gap: 6px;
+  }
+  .tb {
+    min-width: 44px;
+    padding-inline: 2px;
+    font-size: 11px;
+  }
+  .brand .docname {
+    width: 7.5em;
+  }
+}
 
 /* ---------- main area ---------- */
 .main {
