@@ -5,8 +5,8 @@ import type { BreakCornerFeature, ClosedCornerFeature, EdgeFlangeFeature, Featur
 import { bendEntity } from '../src/kernel/measure';
 import type { PartMesh } from '../src/kernel/mesh';
 import { Bend, Part, computePlacements, endOffset, stripOutline, stripPoint, stripRange } from '../src/kernel/model';
-import { isSimple, signedArea } from '../src/kernel/polygon';
-import { V2, V3, applyA, applyDirA, dot3, norm3, sub3, v2, v3 } from '../src/kernel/vec';
+import { distPointSegment, isSimple, pointInPolygon, signedArea } from '../src/kernel/polygon';
+import { V2, V3, applyA, applyDirA, dot3, invertRigid, norm3, sub3, v2, v3 } from '../src/kernel/vec';
 import { exampleDoc } from '../src/ui/example';
 import { build, checkClosed, doc, edgeRef, expectedVolume, plate } from './helpers';
 
@@ -642,5 +642,167 @@ describe('Geschlossene Ecke: Biegebereich', () => {
     expect(() => bendEntity(part, 'fl.0', 2, atEnd(wr), false)).toThrow(/Stirnseite einer geschlossenen Ecke ist gekrümmt/);
     const plain = bendEntity(part, 'fl.0', 2, atEnd(a.w0), false);
     expect(plain.kind).toBe('plane');
+  });
+});
+
+describe('Kantenlasche auf Gehrung', () => {
+  const P = (x: number, y: number): V2 => v2(x, y);
+  const hexagon = [0, 1, 2, 3, 4, 5].map((i) => P(60 + 50 * Math.cos((i * Math.PI) / 3), 50 + 50 * Math.sin((i * Math.PI) / 3)));
+  const trapezoid = [P(0, 0), P(120, 0), P(95, 60), P(25, 60)];
+  const rectangle = [P(0, 0), P(100, 0), P(100, 50), P(0, 50)];
+
+  function trayDoc(points: V2[], over: Partial<EdgeFlangeFeature> = {}, count = points.length): Doc {
+    const base = { ...plate(), points } as Feature;
+    const r0 = build(doc([base]));
+    const f: EdgeFlangeFeature = {
+      id: 'fl',
+      name: 'Kantenlasche1',
+      type: 'edgeFlange',
+      edges: Array.from({ length: count }, (_, i) => edgeRef(r0.part, `base:e${i}`)),
+      angle: 90,
+      length: 30,
+      lengthRef: 'outer',
+      position: 'materialInside',
+      reverse: false,
+      width: { mode: 'full', offset1: 0, offset2: 0, width: 0 },
+      miterGap: 0.25,
+      ...over,
+    };
+    return doc([base, f]);
+  }
+
+  /** Points along the outline of a face on both sheet surfaces and up its corners, in model space. */
+  function facePoints(part: Part, id: string): V3[] {
+    const M = computePlacements(part).get(id)!;
+    const pts = part.faces.get(id)!.outer.pts;
+    const out: V3[] = [];
+    pts.forEach((a, i) => {
+      const b = pts[(i + 1) % pts.length];
+      for (let k = 0; k < 40; k++) for (const z of [0, T]) out.push(applyA(M, v3(a.x + ((b.x - a.x) * k) / 40, a.y + ((b.y - a.y) * k) / 40, z)));
+      for (let k = 1; k < 8; k++) out.push(applyA(M, v3(a.x, a.y, (T * k) / 8)));
+    });
+    return out;
+  }
+
+  /** Distance from p to the sheet of a face, negative inside. */
+  function prismDistance(part: Part, id: string, p: V3): number {
+    const face = part.faces.get(id)!;
+    const l = applyA(invertRigid(computePlacements(part).get(id)!), p);
+    const q = v2(l.x, l.y);
+    const pts = face.outer.pts;
+    const edge = Math.min(...pts.map((a, i) => distPointSegment(q, a, pts[(i + 1) % pts.length])));
+    const inPlane = pointInPolygon(q, pts);
+    const dz = Math.max(0, -l.z, l.z - T);
+    return inPlane && dz === 0 ? -Math.min(edge, l.z, T - l.z) : Math.hypot(inPlane ? 0 : edge, dz);
+  }
+
+  /** Smallest distance between two flange faces, sampled both ways. */
+  const clearance = (part: Part, a: string, b: string): number =>
+    Math.min(...facePoints(part, a).map((p) => prismDistance(part, b, p)), ...facePoints(part, b).map((p) => prismDistance(part, a, p)));
+
+  function flatOverlap(part: Part): number {
+    const pieces = [...[...part.faces.values()].map((f) => f.outer.pts), ...[...part.bends.values()].map((b) => stripOutline(b))];
+    let total = 0;
+    for (let i = 0; i < pieces.length; i++) {
+      for (let j = i + 1; j < pieces.length; j++) {
+        try {
+          total += polygonClipping
+            .intersection([pieces[i].map((p) => [p.x, p.y] as [number, number])], [pieces[j].map((p) => [p.x, p.y] as [number, number])])
+            .reduce((s, poly) => s + poly.reduce((t, r, k) => t + (k === 0 ? 1 : -1) * Math.abs(signedArea(r.map(([x, y]) => v2(x, y)))), 0), 0);
+        } catch {
+          // the clipper gives up on some pieces that only touch along an edge: count grid cells instead
+          const box = (pts: V2[]): number[] => [Math.min(...pts.map((p) => p.x)), Math.min(...pts.map((p) => p.y)), Math.max(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.y))];
+          const [a, b] = [box(pieces[i]), box(pieces[j])];
+          const h = 0.05;
+          for (let x = Math.max(a[0], b[0]) + h / 2; x < Math.min(a[2], b[2]); x += h) {
+            for (let y = Math.max(a[1], b[1]) + h / 2; y < Math.min(a[3], b[3]); y += h) if (pointInPolygon(v2(x, y), pieces[i]) && pointInPolygon(v2(x, y), pieces[j])) total += h * h;
+          }
+        }
+      }
+    }
+    return total;
+  }
+
+  /** Side edges of the flanges that differ from the open corners. */
+  function movedSides(r: Part, open: Part): number {
+    let n = 0;
+    for (const face of r.faces.values()) {
+      if (!face.id.startsWith('fl.')) continue;
+      for (const s of ['side0', 'side1']) {
+        const key = (p: Part): string => {
+          const f = p.faces.get(face.id)!;
+          return JSON.stringify(f.outer.pts.filter((_, i) => f.outer.tags[i] === `${face.id}:${s}`).map((q) => [q.x.toFixed(6), q.y.toFixed(6)]));
+        };
+        if (key(r) !== key(open)) n++;
+      }
+    }
+    return n;
+  }
+
+  const positions = ['materialInside', 'materialOutside', 'bendOutside', 'virtualSharp'] as const;
+  for (const position of positions) {
+    for (const angle of [60, 90, 120]) {
+      it(`mitres all four tray corners (${position}, ${angle}°)`, () => {
+        const d = trayDoc(rectangle, { position, angle });
+        const r = build(d);
+        const open = build(trayDoc(rectangle, { position, angle, miterGap: undefined }));
+        expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+        expect(movedSides(r.part, open.part)).toBe(8);
+        // every bend end at a corner meets its neighbour on the mitre
+        expect([...r.part.bends.values()].every((b) => b.ext0 && b.ext1)).toBe(true);
+        for (let i = 0; i < 4; i++) expect(clearance(r.part, `fl.${i}`, `fl.${(i + 1) % 4}`)).toBeGreaterThanOrEqual(0.25 - 1e-6);
+        expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+      });
+    }
+  }
+
+  it('keeps exactly the gap between the flanges', () => {
+    for (const gap of [0.25, 1]) {
+      const r = build(trayDoc(rectangle, { miterGap: gap }));
+      expect(clearance(r.part, 'fl.0', 'fl.1')).toBeCloseTo(gap, 6);
+    }
+  });
+
+  it('trims flanges leaning inwards that would run into each other', () => {
+    const open = build(trayDoc(rectangle, { angle: 120, miterGap: undefined }));
+    expect(clearance(open.part, 'fl.0', 'fl.1')).toBeLessThan(-0.5);
+    const r = build(trayDoc(rectangle, { angle: 120 }));
+    expect(clearance(r.part, 'fl.0', 'fl.1')).toBeCloseTo(0.25, 6);
+    expect(r.volume).toBeLessThan(open.volume);
+  });
+
+  it('mitres oblique plate corners and clears the flat pattern there', () => {
+    for (const [points, n] of [
+      [hexagon, 6],
+      [trapezoid, 4],
+    ] as const) {
+      const open = build(trayDoc(points, { miterGap: undefined }));
+      const r = build(trayDoc(points));
+      expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+      expect(movedSides(r.part, open.part)).toBe(2 * n);
+      for (let i = 0; i < n; i++) expect(clearance(r.part, `fl.${i}`, `fl.${(i + 1) % n}`)).toBeGreaterThanOrEqual(0.25 - 1e-6);
+      // plain flanges overlap in the flat pattern at such corners; mitred ones do not
+      expect(flatOverlap(open.part)).toBeGreaterThan(1);
+      expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+    }
+  });
+
+  it('only touches corners between two selected edges', () => {
+    const two = build(trayDoc(rectangle, {}, 2));
+    const twoOpen = build(trayDoc(rectangle, { miterGap: undefined }, 2));
+    expect(movedSides(two.part, twoOpen.part)).toBe(2);
+    const opposite = trayDoc(rectangle);
+    const f = opposite.features[1] as EdgeFlangeFeature;
+    f.edges = [f.edges[0], f.edges[2]];
+    const r = build(opposite);
+    const plain = build({ ...opposite, features: [opposite.features[0], { ...f, miterGap: undefined }] });
+    expect(Array.from(r.mesh.positions)).toEqual(Array.from(plain.mesh.positions));
+  });
+
+  it('leaves documents without the option unchanged and rejects a negative gap', () => {
+    const r = build(trayDoc(rectangle, { miterGap: undefined }));
+    expect([...r.part.bends.values()].some((b) => b.ext0 || b.ext1)).toBe(false);
+    const bad = regenerate(trayDoc(rectangle, { miterGap: -1 }));
+    expect(bad.status.get('fl')).toEqual({ ok: false, error: 'Der Gehrungsspalt darf nicht negativ sein.' });
   });
 });

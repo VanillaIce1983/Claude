@@ -1,10 +1,11 @@
 // Kantenlasche (edge flange) and Saum (hem).
 
-import { Bend, Part, clonePart, findEdge, seamTag } from '../model';
+import { Bend, Part, allEdges, clonePart, findEdge, seamTag } from '../model';
 import { SheetSettings, bendAllowance, describeCalc, insideSetback, outsideSetback, resolveBendParams } from '../sheet';
 import { dist2, fmt, rad } from '../vec';
 import { attachToEdge, rectRing, requireFreeOuterEdge, resolveWidth } from './attach';
 import { clearWidth } from './clearance';
+import { mitreCorner } from './corner';
 import type { EdgeFlangeFeature, EdgeSelection, HemFeature } from './types';
 
 /** Bend direction and selected-edge height in the canonical "bend up" frame. */
@@ -119,6 +120,35 @@ export function applyEdgeFlange(part: Part, sheet: SheetSettings, f: EdgeFlangeF
     };
     part.bends.set(id, bend);
   });
+  if (f.miterGap !== undefined && f.edges.length > 1) mitreCorners(part, f, f.miterGap);
+}
+
+/**
+ * Mitres the corners between this feature's flanges where two selected edges
+ * meet, like SolidWorks' edge flange on several edges: both flanges run up
+ * to the plane halving the angle between them, with the gap in between, and
+ * their bends meet on the same plane. A corner that cannot be mitred (it
+ * would cut off a bend, overlap in the flat pattern, …) stays open.
+ */
+function mitreCorners(part: Part, f: EdgeFlangeFeature, gap: number): void {
+  if (!(gap >= 0)) throw new Error('Der Gehrungsspalt darf nicht negativ sein.');
+  const ids = f.edges.map((_, i) => `${f.id}.${i}`);
+  const partners = new Set(ids);
+  const done = new Set<string>();
+  for (const id of ids) {
+    for (const tag of [`${id}:side0`, `${id}:side1`]) {
+      const e = allEdges(part).find((x) => x.face.id === id && x.tag === tag);
+      if (!e) continue;
+      const before = clonePart(part);
+      try {
+        mitreCorner(part, { tag, at: { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 } }, gap, partners, done);
+      } catch {
+        part.faces = before.faces;
+        part.bends = before.bends;
+        part.circles = before.circles;
+      }
+    }
+  }
 }
 
 /**

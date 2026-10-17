@@ -328,6 +328,21 @@ function edgeFlangePanel(host: PanelHost, f: EdgeFlangeFeature): HTMLElement[] {
       ),
     ),
     widthSection(host, f.width),
+    section(
+      'Gehrung',
+      checkField('Ecken auf Gehrung', () => f.miterGap !== undefined, (v) => {
+        if (v) f.miterGap = 0.25;
+        else delete f.miterGap;
+        host.changed();
+        host.restructure();
+      }),
+      ...(f.miterGap !== undefined ? [numberField('Gehrungsspalt', () => f.miterGap ?? 0, (v) => ((f.miterGap = v), host.changed()), { unit: 'mm', min: 0 })] : []),
+      h(
+        'p',
+        { class: 'note' },
+        'Wo zwei der gewählten Kanten zusammenstoßen, laufen beide Laschen bis zur Ebene, die den Winkel zwischen ihnen halbiert, und halten dort den Spalt. Der Schnitt steht senkrecht zum Blech, die Biegeradien treffen sich ebenfalls. Lässt sich eine Ecke so nicht schneiden, bleibt sie offen.',
+      ),
+    ),
     overridesSection(host, host.doc.sheet, () => f.overrides, (o) => (f.overrides = o), { radius: true, relief: true }),
   ];
 }

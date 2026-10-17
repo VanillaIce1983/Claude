@@ -63,6 +63,7 @@ export function newEdgeFlange(doc: Doc): EdgeFlangeFeature {
     position: 'materialInside',
     reverse: false,
     width: { ...fullWidth },
+    miterGap: 0.25,
   };
 }
 
@@ -252,7 +253,7 @@ export function summary(f: Feature): string {
     case 'baseFlange':
       return f.closed ? `Platte · ${f.points.length} Ecken` : `Profil · ${f.points.length - 1} Segmente · Tiefe ${num(f.depth)} mm`;
     case 'edgeFlange':
-      return `${num(f.angle)}° · ${num(f.length)} mm · ${POSITION_LABELS[f.position]}${f.edges.length > 1 ? ` · ${f.edges.length} Kanten` : ''}`;
+      return `${num(f.angle)}° · ${num(f.length)} mm · ${POSITION_LABELS[f.position]}${f.edges.length > 1 ? ` · ${f.edges.length} Kanten` : ''}${f.edges.length > 1 && f.miterGap !== undefined ? ` · Gehrung ${num(f.miterGap)} mm` : ''}`;
     case 'hem':
       return `${HEM_LABELS[f.hemType]} · ${f.hemType === 'teardrop' || f.hemType === 'rolled' ? `${num(f.angle)}° R${num(f.radius)}` : `${num(f.length)} mm`}`;
     case 'sketchedBend':

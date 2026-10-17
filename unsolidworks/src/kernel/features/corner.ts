@@ -5,6 +5,7 @@ import polygonClipping from 'polygon-clipping';
 import type { Ring as PcRing } from 'polygon-clipping';
 import {
   Bend,
+  EdgeRef,
   EndPiece,
   FoundEdge,
   Part,
@@ -21,7 +22,7 @@ import {
   stripRange,
   uniqFractions,
 } from '../model';
-import { Ring, bbox2, clippedArea, distPointSegment, isSimple, pointInPolygon, ringsCross, signedArea } from '../polygon';
+import { Ring, bbox2, clippedArea, distPointSegment, isSimple, orientRing, pointInPolygon, ringsCross, signedArea, splitRing } from '../polygon';
 import {
   Affine,
   V2,
@@ -32,6 +33,7 @@ import {
   applyDirA,
   composeA,
   cross2,
+  cross3,
   dist2,
   dot2,
   dot3,
@@ -90,6 +92,27 @@ function checkFlatOverlap(part: Part, key: string): void {
       throw new Error('Die Abwicklung würde sich überlappen. Bitte Länge oder Spalt verringern.');
     }
   }
+}
+
+/** Overlap areas of the given pieces with every other piece of the flat pattern. */
+function flatOverlaps(part: Part, keys: string[]): Map<string, number> {
+  const pieces = flatPieces(part);
+  const out = new Map<string, number>();
+  for (const key of keys) {
+    const mine = pieces.get(key);
+    if (!mine) continue;
+    for (const [k, piece] of pieces) {
+      const a = k === key ? 0 : overlapArea(mine, piece);
+      if (a > 1e-4) out.set(`${key}|${k}`, a);
+    }
+  }
+  return out;
+}
+
+/** Whether no overlap grew against `before` (overlaps elsewhere were there already). */
+function noNewOverlap(part: Part, keys: string[], before: Map<string, number>): boolean {
+  for (const [k, a] of flatOverlaps(part, keys)) if (a > (before.get(k) ?? 0) + 1e-4) return false;
+  return true;
 }
 
 const toPc = (pts: V2[]): PcRing => pts.map((p) => [p.x, p.y]);
@@ -238,6 +261,123 @@ export function applyClosedCorner(part: Part, f: ClosedCornerFeature): void {
     if (bends && closeBendRegion(part, bends, f.gap)) changedAny = true;
   });
   if (!changedAny) throw new Error('Die Ecke ist bereits geschlossen.');
+}
+
+const isSideTag = (e: FoundEdge): boolean => e.tag === `${e.face.id}:side0` || e.tag === `${e.face.id}:side1`;
+
+/** The side edge of a flange on one of `faces` whose end lies nearest to `a`. */
+function mitrePartner(part: Part, placements: Map<string, Affine>, a: Side, faces: Set<string>): Side | null {
+  const maxR = Math.max(0, ...[...part.bends.values()].map((b) => b.radius));
+  const reach = 2 * (maxR + part.T) + part.T + 1;
+  const ends = (e: FoundEdge): V3[] => [e.a, e.b].map((p) => applyA(placements.get(e.face.id)!, v3(p.x, p.y, part.T / 2)));
+  const mine = ends(a.edge);
+  let best: { side: Side; dist: number } | null = null;
+  for (const e of allEdges(part)) {
+    if (e.face.id === a.edge.face.id || !faces.has(e.face.id) || e.ringIndex !== -1 || !isSideTag(e)) continue;
+    const b = sideOf(part, placements, e);
+    if (!b) continue;
+    const dist = Math.min(...ends(e).flatMap((p) => mine.map((q) => len3(sub3(p, q)))));
+    if (dist <= reach && (!best || dist < best.dist)) best = { side: b, dist };
+  }
+  return best?.side ?? null;
+}
+
+/**
+ * Mitres the corner between the flange side edge `ref` and the nearest side
+ * edge of a flange on one of `partners`, like an edge flange on several
+ * edges in SolidWorks. Both flanges are extended or trimmed up to the plane
+ * that halves the angle between them, each keeping half the gap from it, so
+ * they never come closer than the gap. The cut stays perpendicular to the
+ * sheet (it is made in the flat), so the sheet surface nearer the plane
+ * limits it. The bends meet on the same plane. Returns whether the part
+ * changed, or null when no flange forms a corner there; throws when the
+ * corner cannot be mitred (the caller keeps it open).
+ */
+export function mitreCorner(part: Part, ref: EdgeRef, gap: number, partners: Set<string>, done: Set<string>): boolean | null {
+  const T = part.T;
+  const placements = computePlacements(part);
+  const a = sideOf(part, placements, findEdge(part, ref));
+  const b = a && mitrePartner(part, placements, a, partners);
+  if (!a || !b) return null;
+  const key = [a.edge.tag, b.edge.tag].sort().join('|');
+  if (done.has(key)) return false;
+  done.add(key);
+  // the corner line, where the two mid-planes meet
+  const MA = placements.get(a.edge.face.id)!;
+  const MB = placements.get(b.edge.face.id)!;
+  const nA = applyDirA(MA, v3(0, 0, 1));
+  const nB = applyDirA(MB, v3(0, 0, 1));
+  const u = cross3(nA, nB);
+  const uu = dot3(u, u);
+  if (uu < 1e-2) throw new Error('Die Laschen liegen parallel.');
+  const hA = dot3(nA, applyA(MA, v3(0, 0, T / 2)));
+  const hB = dot3(nB, applyA(MB, v3(0, 0, T / 2)));
+  const p0 = scale3(add3(scale3(cross3(nB, u), hA), scale3(cross3(u, nA), hB)), 1 / uu);
+  // in each flange, the direction across the corner line towards it
+  const towards = (s: Side, nX: V3): V3 => {
+    const d = norm3(cross3(u, nX));
+    const k = dot3(d, s.out);
+    if (Math.abs(k) < 0.2) throw new Error('Die Seitenkante zeigt nicht zur Ecke.');
+    return k > 0 ? d : scale3(d, -1);
+  };
+  const diff = sub3(towards(a, nA), towards(b, nB));
+  if (len3(diff) < 0.1) throw new Error('Die Laschen liegen in einer Ebene.');
+  const n = norm3(diff);
+  // the bends at both side edges, found before the flanges change
+  const pair = cornerPair(part, a.edge, b.edge);
+  const atSides = [...cornerBends(part, a.edge).map((c) => [c, 1] as const), ...cornerBends(part, b.edge).map((c) => [c, -1] as const)];
+  // the flat pattern may overlap already at corners not mitred yet; this one must not add to it
+  const keys = [faceKey(a.edge.face.id), faceKey(b.edge.face.id), ...new Set(atSides.map(([c]) => bendKey(c.bend.id)))];
+  const overlapBefore = flatOverlaps(part, keys);
+  const flatOk = (): boolean => noNewOverlap(part, keys, overlapBefore);
+  for (const [s, sign] of [
+    [a, 1],
+    [b, -1],
+  ] as const) {
+    // keep n·(p − p0) ≤ −gap/2 on both sheet surfaces, as a line in the flat
+    const M = placements.get(s.edge.face.id)!;
+    const nn = scale3(n, sign);
+    const k = dot3(nn, sub3(applyA(M, v3(0, 0, 0)), p0));
+    const lx = dot3(nn, applyDirA(M, v3(1, 0, 0)));
+    const ly = dot3(nn, applyDirA(M, v3(0, 1, 0)));
+    const g = Math.hypot(lx, ly);
+    if (g < 0.2) throw new Error('Die Gehrung liegt fast parallel zum Blech.');
+    const nrm = v2(lx / g, ly / g);
+    const c = (-gap / 2 - k - Math.max(0, dot3(nn, applyDirA(M, v3(0, 0, 1))) * T)) / g;
+    let edge = findEdge(part, { tag: s.edge.tag, at: scale2(add2(s.edge.a, s.edge.b), 0.5) });
+    const out = dot2(nrm, rotCW(norm2(sub2(edge.b, edge.a))));
+    if (out < 0.2) throw new Error('Die Gehrung zeigt nicht von der Seitenkante weg.');
+    // grow the side edge past the cut where the flange does not reach it yet
+    const grow = Math.max(...[edge.a, edge.b].map((p) => (c - dot2(nrm, p)) / out));
+    if (grow > 1e-6) {
+      attachToEdge(part, edge, 0, dist2(edge.a, edge.b), grow + 1, relief, s.edge.face.id, s.edge.face.id, edge.tag);
+      edge = findEdge(part, { tag: s.edge.tag, at: scale2(add2(s.edge.a, s.edge.b), 0.5) });
+    }
+    const face = edge.face;
+    const kept = splitRing(face.outer, v2(0, 0), nrm, c, s.edge.tag).neg;
+    if (!kept || !isSimple(kept.pts)) throw new Error('Die Gehrung zerschneidet die Lasche.');
+    if (face.outer.tags.some((t) => isSeamTag(t) && !kept.tags.includes(t))) throw new Error('Die Gehrung schneidet die Biegung ab.');
+    if (face.holes.some((h) => ringsCross(kept.pts, h.pts) || !pointInPolygon(h.pts[0], kept.pts))) throw new Error('Ein Ausschnitt liegt im Bereich der Gehrung.');
+    face.outer = orientRing(kept, true);
+  }
+  if (pair) closeBendRegion(part, pair, gap, { plane: { p0, n }, trimFallback: true, flatOk });
+  // every bend at the corner stays on its side of the mitre and under its flange's seam
+  for (const [c, sign] of atSides) {
+    const M = placements.get(c.bend.faceA)!;
+    const nn = scale3(n, sign);
+    for (const f of profileSamples(c.bend)) {
+      const [wl, wr] = stripRange(c.bend, f);
+      for (const h of [0, T]) {
+        const p = applyA(M, stripPoint(c.bend, T, c.s > 0 ? wr : wl, f, h));
+        if (dot3(nn, sub3(p, p0)) > -gap / 2 + 1e-6) throw new Error('Die Biegung reicht über die Gehrung.');
+      }
+    }
+    const [wl, wr] = stripRange(c.bend, c.fF);
+    const reach = seamReach(part, c);
+    if (reach === null || (c.s > 0 ? wr - c.bend.w1 : c.bend.w0 - wl) > reach + 1e-6) throw new Error('Die Biegung reicht über die Lasche hinaus.');
+  }
+  if (!flatOk()) throw new Error('Die Abwicklung würde sich überlappen.');
+  return true;
 }
 
 /** The end of a bend strip at a flange side edge: the bend part of a corner. */
@@ -464,36 +604,62 @@ function clearInFlat(part: Part, b: Bend): boolean {
   }
 }
 
+interface BendRegionOptions {
+  /** Mitre plane instead of the one through the web corner. */
+  plane: Mitre;
+  /** If the strips cannot meet, still cut them back where they cross the plane. */
+  trimFallback: boolean;
+  /** Flat-pattern check instead of "no overlap at all". */
+  flatOk: () => boolean;
+}
+
 /**
- * Runs both bend strips into the corner up to the mitre plane, each staying
- * half the gap away from it. The cut is perpendicular to the sheet, so the
- * inner or the outer fibre limits it, and no strip runs past its flange's
- * seam. Returns whether a profile changed. Corners without such a bend pair,
- * or where a grown strip would get too narrow, reach into the other flange
- * or overlap in the flat pattern, keep their bend region open, as before.
+ * Runs both bend strips into the corner up to the mitre plane (`plane`, or
+ * the one through the web corner), each staying half the gap away from it.
+ * The cut is perpendicular to the sheet, so the inner or the outer fibre
+ * limits it, and no strip runs past its flange's seam. Returns whether a
+ * profile changed. Corners without such a bend pair, or where a grown strip
+ * would get too narrow, reach into the other flange or overlap in the flat
+ * pattern, keep their bend region open, as before; with `trimFallback` the
+ * strips are then only cut back where they cross the mitre plane.
  */
-function closeBendRegion(part: Part, pair: [CornerBend, CornerBend], gap: number): boolean {
+function closeBendRegion(part: Part, pair: [CornerBend, CornerBend], gap: number, o: Partial<BendRegionOptions> = {}): boolean {
   const placements = computePlacements(part);
-  const mitre = cornerMitre(part, placements, pair[0], pair[1]);
-  if (!mitre) return false;
+  const found = cornerMitre(part, placements, pair[0], pair[1]);
+  if (!found) return false;
+  const mitre = o.plane ?? found;
+  const flatOk = o.flatOk ?? ((): boolean => pair.every((c) => clearInFlat(part, c.bend)));
   const caps = pair.map((c) => seamReach(part, c));
   if (caps[0] === null || caps[1] === null) return false;
   const key = (c: CornerBend): 'ext0' | 'ext1' => (c.s > 0 ? 'ext1' : 'ext0');
   const before = pair.map((c) => c.bend[key(c)]);
-  let changed = false;
-  pair.forEach((c, i) => {
-    const n = i === 0 ? mitre.n : scale3(mitre.n, -1);
-    const terms = [...fibreLimits(part, placements, c, n, mitre.p0, gap), { a: caps[i]!, b: 0, c: 0 }];
-    const end: StripEnd = { pieces: lowerEnvelope(terms, c.bend.angle) };
-    if (!sameEnd(c.bend[key(c)], end)) changed = true;
-    c.bend[key(c)] = end;
-  });
-  const fits = pair.every((c, i) => wideEnough(c.bend) && clearOfFlange(part, placements, c, pair[1 - i]) && clearInFlat(part, c.bend));
-  if (fits) return changed;
-  pair.forEach((c, i) => {
-    if (before[i]) c.bend[key(c)] = before[i];
-    else delete c.bend[key(c)];
-  });
+  const restore = (): void =>
+    pair.forEach((c, i) => {
+      if (before[i]) c.bend[key(c)] = before[i];
+      else delete c.bend[key(c)];
+    });
+  const profile = (grow: boolean): boolean => {
+    let changed = false;
+    pair.forEach((c, i) => {
+      const n = i === 0 ? mitre.n : scale3(mitre.n, -1);
+      const terms = [...fibreLimits(part, placements, c, n, mitre.p0, gap), { a: caps[i]!, b: 0, c: 0 }];
+      if (!grow) terms.push({ a: 0, b: 0, c: 0 });
+      const pieces = lowerEnvelope(terms, c.bend.angle);
+      const end = pieces.every((q) => q.a === 0 && q.b === 0 && q.c === 0) ? undefined : { pieces };
+      if (!sameEnd(c.bend[key(c)], end)) changed = true;
+      if (end) c.bend[key(c)] = end;
+      else delete c.bend[key(c)];
+    });
+    return changed;
+  };
+  let changed = profile(true);
+  if (pair.every((c, i) => wideEnough(c.bend) && clearOfFlange(part, placements, c, pair[1 - i])) && flatOk()) return changed;
+  restore();
+  if (!o.trimFallback) return false;
+  // the bend region stays open, but no strip may cross the mitre
+  changed = profile(false);
+  if (pair.every((c) => wideEnough(c.bend)) && flatOk()) return changed;
+  restore();
   return false;
 }
 
