@@ -155,6 +155,8 @@ interface Side {
   dir: V3;
   /** Outward in-plane normal: the direction the face grows when the edge is extended. */
   out: V3;
+  /** Normal of the face. */
+  nrm: V3;
 }
 
 function sideOf(part: Part, placements: Map<string, Affine>, edge: FoundEdge): Side | null {
@@ -168,12 +170,16 @@ function sideOf(part: Part, placements: Map<string, Affine>, edge: FoundEdge): S
     mid: applyA(M, v3(m.x, m.y, part.T / 2)),
     dir: applyDirA(M, v3(d.x, d.y, 0)),
     out: applyDirA(M, v3(o.x, o.y, 0)),
+    nrm: applyDirA(M, v3(0, 0, 1)),
   };
 }
 
 /**
  * Distances along `from.out` to the two sheet surfaces of `faceId`
- * (near = the one reached first). Null when the face is nearly parallel.
+ * (near = the one reached first), from the middle of the sheet. Where the
+ * faces do not meet at a right angle, one sheet surface of `from` gets there
+ * earlier; `near` is measured from that one, so a flange cut back to it
+ * stays clear on both surfaces. Null when the face is nearly parallel.
  */
 function surfaceHits(part: Part, placements: Map<string, Affine>, from: Side, faceId: string): { near: number; far: number } | null {
   const MA = placements.get(faceId);
@@ -184,7 +190,8 @@ function surfaceHits(part: Part, placements: Map<string, Affine>, from: Side, fa
   const base = dot3(sub3(applyA(MA, v3(0, 0, 0)), from.mid), n);
   const d0 = base / denom;
   const d1 = (base + part.T) / denom;
-  return { near: Math.min(d0, d1), far: Math.max(d0, d1) };
+  const lean = (Math.abs(dot3(from.nrm, n) / denom) * part.T) / 2;
+  return { near: Math.min(d0, d1) - lean, far: Math.max(d0, d1) };
 }
 
 /** The free side edge of another flange that forms a corner with `a`. */
@@ -661,6 +668,101 @@ function closeBendRegion(part: Part, pair: [CornerBend, CornerBend], gap: number
   if (pair.every((c) => wideEnough(c.bend)) && flatOk()) return changed;
   restore();
   return false;
+}
+
+/**
+ * Where bend `id` starts or ends at a web corner that an older bend on the
+ * same face runs past, the older bend and its flange are cut back to the
+ * plane through that corner perpendicular to the new bend line. At obtuse
+ * plate corners the older bend would otherwise run into the new one, in 3D
+ * and in the flat pattern; at right and acute corners it lies behind that
+ * plane already, so nothing changes there. The cut is perpendicular to the
+ * sheet, so the inner fibre limits it; the bends then meet only at the
+ * corner of the web. An older bend end with a profile already, one curling
+ * back over the web, or one whose cut would take off another seam or a
+ * hole stays as it is.
+ */
+export function yieldToBend(part: Part, id: string): void {
+  const s = part.bends.get(id);
+  const placements = computePlacements(part);
+  const MW = s && placements.get(s.faceA);
+  if (!s || !MW) return;
+  for (const [w, into] of [
+    [s.w0, s.dir],
+    [s.w1, scale2(s.dir, -1)],
+  ] as const) {
+    const corner = add2(s.origin, scale2(s.dir, w));
+    for (const r of part.bends.values()) {
+      if (r === s || r.faceA !== s.faceA || r.angle > Math.PI + 1e-9 || Math.abs(cross2(r.dir, s.dir)) < 1e-6) continue;
+      // the corner lies on the older bend line, inside its strip
+      const rel = sub2(corner, r.origin);
+      const at = dot2(rel, r.dir);
+      const [lo, hi] = stripRange(r, 0);
+      if (Math.abs(dot2(rel, r.nrm)) > 1e-6 || at <= lo + 1e-6 || at >= hi - 1e-6) continue;
+      // the end running past the corner points out of the web, towards the new bend's strip;
+      // it runs into the new bend only if it also points along it (an obtuse corner)
+      const end = dot2(r.dir, s.nrm) > 0 ? 1 : -1;
+      if (end * dot2(r.dir, into) < 1e-9) continue;
+      trimToPlane(part, placements, { bend: r, s: end, fF: 1, web: r.faceA }, applyA(MW, v3(corner.x, corner.y, 0)), applyDirA(MW, v3(into.x, into.y, 0)));
+    }
+  }
+}
+
+/** Length of the edges with each seam tag on a ring. */
+function seamLengths(r: Ring): Map<string, number> {
+  const out = new Map<string, number>();
+  r.pts.forEach((p, i) => {
+    if (isSeamTag(r.tags[i])) out.set(r.tags[i], (out.get(r.tags[i]) ?? 0) + dist2(p, r.pts[(i + 1) % r.pts.length]));
+  });
+  return out;
+}
+
+/** Cuts the corner end of a bend and its flange back to the plane n·(p − p0) ≤ 0. */
+function trimToPlane(part: Part, placements: Map<string, Affine>, c: CornerBend, p0: V3, n: V3): void {
+  const b = c.bend;
+  const key = c.s > 0 ? 'ext1' : 'ext0';
+  if (b[key]) return;
+  const pieces = lowerEnvelope([...fibreLimits(part, placements, c, n, p0, 0), { a: 0, b: 0, c: 0 }], b.angle);
+  if (pieces.every((q) => q.a === 0 && q.b === 0 && q.c === 0)) return;
+  b[key] = { pieces };
+  const face = b.faceB ? part.faces.get(b.faceB) : undefined;
+  if (!wideEnough(b)) {
+    delete b[key];
+    return;
+  }
+  if (!face) return;
+  // the flange ends where its seam ends now
+  const [wl, wr] = stripRange(b, 1);
+  const ring = face.outer;
+  const n2 = ring.pts.length;
+  const seam = seamTag(b.id, 'B');
+  let end = -1;
+  let far = -Infinity;
+  ring.pts.forEach((p, i) => {
+    const onSeam = ring.tags[i] === seam || ring.tags[(i - 1 + n2) % n2] === seam;
+    const w = c.s * dot2(sub2(p, b.origin), b.dir);
+    if (onSeam && w > far) [end, far] = [i, w];
+  });
+  let kept: Ring | null = null;
+  if (end >= 0) {
+    // the outline edge leaving the seam at its corner end names the cut
+    const sideTag = ring.tags[end] === seam ? ring.tags[(end - 1 + n2) % n2] : ring.tags[end];
+    try {
+      kept = splitRing(ring, b.origin, scale2(b.dir, c.s), c.s * (c.s > 0 ? wr : wl), sideTag).neg;
+    } catch {
+      kept = null;
+    }
+  }
+  const before = seamLengths(ring);
+  const after = kept && seamLengths(kept);
+  const fits =
+    kept &&
+    after &&
+    isSimple(kept.pts) &&
+    [...before].every(([t, len]) => t === seam || (after.get(t) ?? 0) >= len - 1e-9) &&
+    !face.holes.some((h) => ringsCross(kept!.pts, h.pts) || !pointInPolygon(h.pts[0], kept!.pts));
+  if (fits) face.outer = orientRing(kept!, true);
+  else delete b[key];
 }
 
 function findCorner(part: Part, c: CornerRef): { ring: Ring; index: number; faceId: string } {

@@ -12,6 +12,18 @@ import { build, checkClosed, doc, edgeRef, expectedVolume, plate } from './helpe
 
 const T = 2;
 
+/** Overlap area of two outlines on a 0.05 mm grid, for where the clipper gives up on pieces that only touch. */
+function gridOverlap(a: V2[], b: V2[]): number {
+  const box = (pts: V2[]): number[] => [Math.min(...pts.map((p) => p.x)), Math.min(...pts.map((p) => p.y)), Math.max(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.y))];
+  const [p, q] = [box(a), box(b)];
+  const h = 0.05;
+  let area = 0;
+  for (let x = Math.max(p[0], q[0]) + h / 2; x < Math.min(p[2], q[2]); x += h) {
+    for (let y = Math.max(p[1], q[1]) + h / 2; y < Math.min(p[3], q[3]); y += h) if (pointInPolygon(v2(x, y), a) && pointInPolygon(v2(x, y), b)) area += h * h;
+  }
+  return area;
+}
+
 const tab = (over: Partial<TabFeature> = {}): TabFeature => ({
   id: 'tab',
   name: 'Lasche1',
@@ -311,10 +323,15 @@ describe('Geschlossene Ecke: Biegebereich', () => {
     return s;
   }
 
-  const overlapArea = (a: V2[], b: V2[]): number =>
-    polygonClipping
-      .intersection([a.map((p) => [p.x, p.y] as [number, number])], [b.map((p) => [p.x, p.y] as [number, number])])
-      .reduce((s, poly) => s + poly.reduce((t, r, i) => t + (i === 0 ? 1 : -1) * Math.abs(signedArea(r.map(([x, y]) => v2(x, y)))), 0), 0);
+  const overlapArea = (a: V2[], b: V2[]): number => {
+    try {
+      return polygonClipping
+        .intersection([a.map((p) => [p.x, p.y] as [number, number])], [b.map((p) => [p.x, p.y] as [number, number])])
+        .reduce((s, poly) => s + poly.reduce((t, r, i) => t + (i === 0 ? 1 : -1) * Math.abs(signedArea(r.map(([x, y]) => v2(x, y)))), 0), 0);
+    } catch {
+      return gridOverlap(a, b);
+    }
+  };
 
   /** No strip outline overlaps another strip or any face, and the flat outline is one simple loop. */
   function expectFlatClean(r: ReturnType<typeof build>, bendIds: string[]): void {
@@ -645,7 +662,7 @@ describe('Geschlossene Ecke: Biegebereich', () => {
   });
 });
 
-describe('Kantenlasche auf Gehrung', () => {
+describe('Kantenlasche an Plattenecken', () => {
   const P = (x: number, y: number): V2 => v2(x, y);
   const hexagon = [0, 1, 2, 3, 4, 5].map((i) => P(60 + 50 * Math.cos((i * Math.PI) / 3), 50 + 50 * Math.sin((i * Math.PI) / 3)));
   const trapezoid = [P(0, 0), P(120, 0), P(95, 60), P(25, 60)];
@@ -710,13 +727,7 @@ describe('Kantenlasche auf Gehrung', () => {
             .intersection([pieces[i].map((p) => [p.x, p.y] as [number, number])], [pieces[j].map((p) => [p.x, p.y] as [number, number])])
             .reduce((s, poly) => s + poly.reduce((t, r, k) => t + (k === 0 ? 1 : -1) * Math.abs(signedArea(r.map(([x, y]) => v2(x, y)))), 0), 0);
         } catch {
-          // the clipper gives up on some pieces that only touch along an edge: count grid cells instead
-          const box = (pts: V2[]): number[] => [Math.min(...pts.map((p) => p.x)), Math.min(...pts.map((p) => p.y)), Math.max(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.y))];
-          const [a, b] = [box(pieces[i]), box(pieces[j])];
-          const h = 0.05;
-          for (let x = Math.max(a[0], b[0]) + h / 2; x < Math.min(a[2], b[2]); x += h) {
-            for (let y = Math.max(a[1], b[1]) + h / 2; y < Math.min(a[3], b[3]); y += h) if (pointInPolygon(v2(x, y), pieces[i]) && pointInPolygon(v2(x, y), pieces[j])) total += h * h;
-          }
+          total += gridOverlap(pieces[i], pieces[j]);
         }
       }
     }
@@ -771,7 +782,7 @@ describe('Kantenlasche auf Gehrung', () => {
     expect(r.volume).toBeLessThan(open.volume);
   });
 
-  it('mitres oblique plate corners and clears the flat pattern there', () => {
+  it('mitres oblique plate corners', () => {
     for (const [points, n] of [
       [hexagon, 6],
       [trapezoid, 4],
@@ -781,8 +792,7 @@ describe('Kantenlasche auf Gehrung', () => {
       expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
       expect(movedSides(r.part, open.part)).toBe(2 * n);
       for (let i = 0; i < n; i++) expect(clearance(r.part, `fl.${i}`, `fl.${(i + 1) % n}`)).toBeGreaterThanOrEqual(0.25 - 1e-6);
-      // plain flanges overlap in the flat pattern at such corners; mitred ones do not
-      expect(flatOverlap(open.part)).toBeGreaterThan(1);
+      expect(flatOverlap(open.part)).toBeLessThan(1e-4);
       expect(flatOverlap(r.part)).toBeLessThan(1e-4);
     }
   });
@@ -804,5 +814,153 @@ describe('Kantenlasche auf Gehrung', () => {
     expect([...r.part.bends.values()].some((b) => b.ext0 || b.ext1)).toBe(false);
     const bad = regenerate(trayDoc(rectangle, { miterGap: -1 }));
     expect(bad.status.get('fl')).toEqual({ ok: false, error: 'Der Gehrungsspalt darf nicht negativ sein.' });
+  });
+  const octagon = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => P(60 + 50 * Math.cos((i * Math.PI) / 4), 50 + 50 * Math.sin((i * Math.PI) / 4)));
+  const triangle = [P(0, 0), P(120, 0), P(60, 60 * Math.sqrt(3))];
+
+  /**
+   * The plane through the web corner where `later` starts or ends, perpendicular
+   * to its bend line, with the normal pointing along it, in model space.
+   */
+  function startPlane(part: Part, later: string, end: 0 | 1): { p0: V3; n: V3 } {
+    const b = part.bends.get(later)!;
+    const M = computePlacements(part).get(b.faceA)!;
+    const w = end === 0 ? b.w0 : b.w1;
+    const d = end === 0 ? b.dir : v2(-b.dir.x, -b.dir.y);
+    return { p0: applyA(M, v3(b.origin.x + b.dir.x * w, b.origin.y + b.dir.y * w, 0)), n: applyDirA(M, v3(d.x, d.y, 0)) };
+  }
+
+  /** Largest n·(p − p0) over the corner end of bend `id` (end 0 or 1) and the part of its flange beyond `p0`. */
+  function reach(part: Part, id: string, end: 0 | 1, plane: { p0: V3; n: V3 }): number {
+    const b = part.bends.get(id)!;
+    const pl = computePlacements(part);
+    const MA = pl.get(b.faceA)!;
+    let max = -Infinity;
+    for (let i = 0; i <= 64; i++) {
+      const [wl, wr] = stripRange(b, i / 64);
+      for (const h of [0, T]) max = Math.max(max, dot3(plane.n, sub3(applyA(MA, stripPoint(b, T, end === 0 ? wl : wr, i / 64, h)), plane.p0)));
+    }
+    const MB = pl.get(b.faceB!)!;
+    const at = (q: V2): number => (q.x - b.origin.x) * b.dir.x + (q.y - b.origin.y) * b.dir.y;
+    const corner = applyA(invertRigid(MA), plane.p0);
+    const wc = at(v2(corner.x, corner.y));
+    for (const q of part.faces.get(b.faceB!)!.outer.pts) {
+      if ((end === 1 ? at(q) - wc : wc - at(q)) < 0) continue;
+      for (const z of [0, T]) max = Math.max(max, dot3(plane.n, sub3(applyA(MB, v3(q.x, q.y, z)), plane.p0)));
+    }
+    return max;
+  }
+
+  for (const [name, points] of [
+    ['hexagon', hexagon],
+    ['octagon', octagon],
+    ['trapezoid', trapezoid],
+  ] as const) {
+    for (const position of ['materialInside', 'materialOutside', 'virtualSharp'] as const) {
+      for (const angle of [60, 90]) {
+        it(`cuts the older flange back at obtuse corners of a ${name} (${position}, ${angle}°)`, () => {
+          const n = points.length;
+          const r = build(trayDoc(points, { position, angle, miterGap: undefined }));
+          expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+          expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+          // each later flange starts at the corner with the one before; the last one also ends at the first
+          const corners: [string, 0 | 1, string, 0 | 1][] = Array.from({ length: n - 1 }, (_, i) => [`fl.${i}`, 1, `fl.${i + 1}`, 0] as [string, 0 | 1, string, 0 | 1]);
+          corners.push(['fl.0', 0, `fl.${n - 1}`, 1]);
+          let cut = 0;
+          for (const [older, olderEnd, later, laterEnd] of corners) {
+            const plane = startPlane(r.part, later, laterEnd);
+            const b = r.part.bends.get(older)!;
+            const turn = Math.abs(b.dir.x * r.part.bends.get(later)!.dir.x + b.dir.y * r.part.bends.get(later)!.dir.y);
+            if (b[olderEnd === 0 ? 'ext0' : 'ext1']) cut++;
+            // obtuse corners: the older bend and flange stay behind the later bend's end plane
+            if (turn > 1e-6 && (olderEnd === 1 ? 1 : -1) * (b.dir.x * plane.n.x + b.dir.y * plane.n.y) > 0) {
+              expect(reach(r.part, older, olderEnd, plane)).toBeLessThanOrEqual(1e-9);
+            }
+          }
+          expect(cut).toBe(name === 'trapezoid' ? 2 : n);
+        });
+      }
+    }
+  }
+
+  it('leaves right-angled and acute plate corners as they were', () => {
+    for (const points of [rectangle, triangle]) {
+      for (const position of ['materialInside', 'bendOutside', 'materialOutside'] as const) {
+        const r = build(trayDoc(points, { position, miterGap: undefined }));
+        expect([...r.part.bends.values()].some((b) => b.ext0 || b.ext1)).toBe(false);
+        expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+      }
+    }
+  });
+
+  it('cuts the older flange when the neighbour comes from another feature', () => {
+    const base = { ...plate(), points: hexagon } as Feature;
+    const r0 = build(doc([base]));
+    for (const [first, second] of [
+      ['materialInside', 'materialInside'],
+      ['bendOutside', 'materialInside'],
+      ['virtualSharp', 'materialOutside'],
+    ] as const) {
+      for (const order of [
+        [0, 1],
+        [1, 0],
+      ]) {
+        const fa: EdgeFlangeFeature = { ...twoFlanges, id: 'fa', position: first, edges: [edgeRef(r0.part, `base:e${order[0]}`)] };
+        const r1 = build(doc([base, fa]));
+        const fb: EdgeFlangeFeature = { ...twoFlanges, id: 'fb', position: second, edges: [edgeRef(r1.part, `base:e${order[1]}`)] };
+        const r = build(doc([base, fa, fb]));
+        expect(flatOverlap(r1.part)).toBeLessThan(1e-4);
+        expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+        expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+        const a = r.part.bends.get('fa')!;
+        expect(order[0] === 0 ? a.ext1 : a.ext0).toBeDefined();
+        expect(r.part.bends.get('fb')!.ext0 ?? r.part.bends.get('fb')!.ext1).toBeUndefined();
+      }
+    }
+  });
+
+  it('a closed hem before the neighbouring flange is cut back too; one after it is shortened as before', () => {
+    const base = { ...plate(), points: hexagon } as Feature;
+    const r0 = build(doc([base]));
+    const hem = (id: string, tag: string, p: Part): Feature =>
+      ({ id, name: id, type: 'hem', edges: [edgeRef(p, tag)], hemType: 'closed', position: 'materialInside', reverse: false, length: 10, gap: 1, angle: 270, radius: 3, width: { mode: 'full', offset1: 0, offset2: 0, width: 0 } }) as Feature;
+    const h = hem('ha', 'base:e0', r0.part);
+    const r1 = build(doc([base, h]));
+    const after = build(doc([base, h, { ...twoFlanges, id: 'fb', edges: [edgeRef(r1.part, 'base:e1')] }]));
+    expect(after.part.bends.get('ha')!.ext1).toBeDefined();
+    expect(flatOverlap(after.part)).toBeLessThan(1e-4);
+    const fa: EdgeFlangeFeature = { ...twoFlanges, id: 'fa', edges: [edgeRef(r0.part, 'base:e0')] };
+    const r2 = build(doc([base, fa]));
+    const before = build(doc([base, fa, hem('hb', 'base:e1', r2.part)]));
+    expect(before.part.bends.get('fa')!.ext1).toBeUndefined();
+    const hb = before.part.bends.get('hb')!;
+    const alone = build(doc([base, hem('hb', 'base:e1', r0.part)])).part.bends.get('hb')!;
+    expect(hb.w1 - hb.w0).toBeLessThan(alone.w1 - alone.w0 - 0.1);
+    expect(flatOverlap(before.part)).toBeLessThan(1e-4);
+  });
+
+  it('keeps the older flange as it is when the cut would take off a flange on its end', () => {
+    const base = { ...plate(), points: hexagon } as Feature;
+    const r0 = build(doc([base]));
+    const fa: EdgeFlangeFeature = { ...twoFlanges, id: 'fa', edges: [edgeRef(r0.part, 'base:e0')] };
+    const r1 = build(doc([base, fa]));
+    const fr: EdgeFlangeFeature = { ...twoFlanges, id: 'fr', length: 15, edges: [edgeRef(r1.part, 'fa:end')] };
+    const r2 = build(doc([base, fa, fr]));
+    const r = build(doc([base, fa, fr, { ...twoFlanges, id: 'fb', edges: [edgeRef(r2.part, 'base:e1')] }]));
+    expect(r.part.bends.get('fa')!.ext1).toBeUndefined();
+    expect(r.part.faces.get('fa')!.outer).toEqual(r2.part.faces.get('fa')!.outer);
+  });
+
+  it('closes an obtuse plate corner without the flanges running into each other', () => {
+    const base = { ...plate(), points: hexagon } as Feature;
+    const r0 = build(doc([base]));
+    const all: EdgeFlangeFeature = { ...twoFlanges, id: 'fl', edges: [0, 1, 2, 3, 4, 5].map((i) => edgeRef(r0.part, `base:e${i}`)) };
+    const r1 = build(doc([base, all]));
+    for (const kind of ['butt', 'overlap'] as const) {
+      const r = build(doc([base, all, { id: 'cc', name: 'cc', type: 'closedCorner', edges: [edgeRef(r1.part, 'fl.0:side1')], gap: 0.2, kind }]));
+      expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+      expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+      expect(clearance(r.part, 'fl.0', 'fl.1')).toBeGreaterThanOrEqual(0.2 - 1e-6);
+    }
   });
 });

@@ -5,7 +5,7 @@ import { SheetSettings, bendAllowance, describeCalc, insideSetback, outsideSetba
 import { dist2, fmt, rad } from '../vec';
 import { attachToEdge, rectRing, requireFreeOuterEdge, resolveWidth } from './attach';
 import { clearWidth } from './clearance';
-import { mitreCorner } from './corner';
+import { mitreCorner, yieldToBend } from './corner';
 import type { EdgeFlangeFeature, EdgeSelection, HemFeature } from './types';
 
 /** Bend direction and selected-edge height in the canonical "bend up" frame. */
@@ -119,6 +119,7 @@ export function applyEdgeFlange(part: Part, sheet: SheetSettings, f: EdgeFlangeF
       calc: describeCalc(calc),
     };
     part.bends.set(id, bend);
+    yieldToBend(part, id);
   });
   if (f.miterGap !== undefined && f.edges.length > 1) mitreCorners(part, f, f.miterGap);
 }
