@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { partToStep, stepReal, stepString } from '../src/kernel/export/step';
 import { MIN_EXPORT_RADIUS } from '../src/kernel/export/prepare';
-import type { CutFeature, EdgeFlangeFeature, Feature, HemFeature, SketchCutFeature } from '../src/kernel/features/types';
+import type { ClosedCornerFeature, CutFeature, EdgeFlangeFeature, Feature, HemFeature, SketchCutFeature } from '../src/kernel/features/types';
 import { emptyPart } from '../src/kernel/model';
 import type { Part } from '../src/kernel/model';
 import { exampleDoc } from '../src/ui/example';
-import { IDENTITY, V3, add3, cross3, dot3, norm3, scale3, sub3, v3 } from '../src/kernel/vec';
-import { build, doc, plate } from './helpers';
+import { IDENTITY, V3, add3, cross3, dot3, len3, norm3, scale3, sub3, v3 } from '../src/kernel/vec';
+import { build, doc, edgeRef, plate } from './helpers';
 
 const OPTS = { name: 'Gehäusewinkel', timestamp: '2026-10-16T12:00:00' };
 
@@ -191,9 +191,17 @@ function misoriented(E: Map<number, Entity>): number {
   for (const [, face] of ofType(E, 'ADVANCED_FACE')) {
     const ids = refs(face.args);
     const surf = E.get(ids.pop()!)!;
-    const f = frame(refs(surf.args)[0]);
     const s = sense(face.args) ? 1 : -1;
     const loops = ids.map((b) => ({ outer: E.get(b)!.type === 'FACE_OUTER_BOUND', ...vectorArea(refs(E.get(b)!.args)[0]) }));
+    if (surf.type === '') {
+      // ruled B-spline wall: control net rows (top, bottom); its normal ≈ along-curve × top-to-bottom
+      const net = refs(surf.args).map((id) => v3(...(reals(E.get(id)!.args) as [number, number, number])));
+      const along = sub3(net[net.length - 2], net[0]);
+      const down = sub3(net[1], net[0]);
+      if (s * dot3(cross3(along, down), loops[0].area) <= 0) bad++;
+      continue;
+    }
+    const f = frame(refs(surf.args)[0]);
     if (surf.type === 'PLANE') {
       if (loops.some((l) => (l.outer ? 1 : -1) * s * dot3(l.area, f.z) <= 0)) bad++;
       continue;
@@ -325,6 +333,33 @@ describe('STEP export', () => {
     const M = part.anchor.M;
     part.anchor.M = { r: [-M.r[0], -M.r[1], -M.r[2], M.r[3], M.r[4], M.r[5], M.r[6], M.r[7], M.r[8]], t: M.t };
     expectValidStep(part, partToStep(part, OPTS));
+  });
+
+  it('closed corners: mitred bend ends are exact B-spline curves with ruled side walls', () => {
+    const box = (position: EdgeFlangeFeature['position'], kind: ClosedCornerFeature['kind']): Feature[] => {
+      const fl = flange({ position, edges: [{ tag: 'base:e0', at: { x: 50, y: 0 }, side: 'top' }, { tag: 'base:e1', at: { x: 100, y: 25 }, side: 'top' }] });
+      const r = build(doc([plate(), fl]));
+      return [plate(), fl, { id: 'cc', name: 'Geschlossene Ecke1', type: 'closedCorner', edges: [edgeRef(r.part, 'fl.0:side1')], gap: 0.5, kind }];
+    };
+    for (const feats of [box('bendOutside', 'butt'), box('materialInside', 'overlap'), box('virtualSharp', 'underlap')]) {
+      const { part, E, text } = step(feats);
+      const pieces = [...part.bends.values()].flatMap((b) => [...(b.ext0?.pieces ?? []), ...(b.ext1?.pieces ?? [])]);
+      const curved = pieces.filter((p) => Math.abs(p.b) > 1e-12 || Math.abs(p.c) > 1e-12).length;
+      expect(curved).toBeGreaterThan(0);
+      expect(text.match(/B_SPLINE_SURFACE\(2,1,/g) ?? []).toHaveLength(curved);
+      expect(text.match(/B_SPLINE_CURVE\(2,/g) ?? []).toHaveLength(2 * curved);
+      // clamped curves start and end on their edge vertices
+      const point = (id: number): V3 => v3(...(reals(E.get(id)!.args) as [number, number, number]));
+      for (const [, ec] of ofType(E, 'EDGE_CURVE')) {
+        const [va, vb, curve] = refs(ec.args);
+        const c = E.get(curve)!;
+        if (c.type !== '') continue;
+        const ctrl = refs(c.args);
+        const ends = [point(refs(E.get(va)!.args)[0]), point(refs(E.get(vb)!.args)[0])];
+        expect(len3(sub3(point(ctrl[0]), ends[0]))).toBeLessThan(1e-9);
+        expect(len3(sub3(point(ctrl[ctrl.length - 1]), ends[1]))).toBeLessThan(1e-9);
+      }
+    }
   });
 
   it('collinear free edges of one face share a side face', () => {

@@ -38,7 +38,7 @@ Dazu: Feature-Baum mit Bearbeiten, Unterdrücken und Löschen, Live-Vorschau bei
 ### Export
 
 - **DXF** (R12, mm) der Abwicklung: Kontur als geschlossene Polylinien, runde Bohrungen als echte Kreise, Biegelinien auf eigenen Layern (`BIEGUNG_OBEN`, `BIEGUNG_UNTEN`) und Biegenotizen (`BIEGENOTIZEN`).
-- **STEP** (AP214, mm) des gefalteten Teils als exaktes Volumenmodell: ebene Flächen, Biegungen als Zylinderflächen, runde Bohrungen als Zylinder. In SolidWorks öffnen und mit „Biegungen einfügen“ wieder als Blechteil weiterbearbeiten.
+- **STEP** (AP214, mm) des gefalteten Teils als exaktes Volumenmodell: ebene Flächen, Biegungen als Zylinderflächen, runde Bohrungen als Zylinder, die schräg abgeschnittenen Biegezonen geschlossener Ecken als exakte B-Spline-Flächen. In SolidWorks öffnen und mit „Biegungen einfügen“ wieder als Blechteil weiterbearbeiten.
 - **3MF** des gefalteten Teils für den 3D-Druck: geschlossenes Dreiecksnetz in mm, Z nach oben, auf der Druckplatte liegend.
 - **SVG** der Abwicklung, **STL** des gefalteten Teils, **PNG** der Ansicht, **JSON** des Projekts.
 
