@@ -162,6 +162,8 @@ export interface ClosedCornerFeature extends FeatureBase {
   gap: number;
   /** butt: both run to the other's inner face; overlap: the picked flange covers the other one; underlap: it is covered. */
   kind?: 'butt' | 'overlap' | 'underlap';
+  /** true: the bend region stays open; otherwise both bends run into the corner as well. */
+  openBend?: boolean;
 }
 
 /**

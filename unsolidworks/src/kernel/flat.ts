@@ -2,7 +2,7 @@
 
 import type { PartMesh } from './mesh';
 import type { Part } from './model';
-import { stripFlat } from './model';
+import { stripFlat, stripRange } from './model';
 import { signedArea } from './polygon';
 import { bendDeduction } from './sheet';
 import { V2, cross2, deg, dist2, sub2, v2 } from './vec';
@@ -179,21 +179,23 @@ export function flatPattern(part: Part, mesh: PartMesh): FlatPattern {
 
   const bendLines: FlatBendLine[] = [];
   for (const b of part.bends.values()) {
-    const a = stripFlat(b, b.w0, 0.5);
-    const c = stripFlat(b, b.w1, 0.5);
+    // closed corners mitre the strip ends, so each line spans the strip where it lies
+    const [l0, r0] = stripRange(b, 0);
+    const [lm, rm] = stripRange(b, 0.5);
+    const [l1, r1] = stripRange(b, 1);
     bendLines.push({
       id: b.id,
       feature: b.feature,
-      a,
-      b: c,
-      regionA: [stripFlat(b, b.w0, 0), stripFlat(b, b.w1, 0)],
-      regionB: [stripFlat(b, b.w0, 1), stripFlat(b, b.w1, 1)],
+      a: stripFlat(b, lm, 0.5),
+      b: stripFlat(b, rm, 0.5),
+      regionA: [stripFlat(b, l0, 0), stripFlat(b, r0, 0)],
+      regionB: [stripFlat(b, l1, 1), stripFlat(b, r1, 1)],
       up: b.up,
       angleDeg: deg(b.angle),
       radius: b.radius,
       ba: b.ba,
       bd: b.angle < Math.PI - 1e-9 ? bendDeduction(b.angle, b.radius, part.T, b.ba) : NaN,
-      length: b.w1 - b.w0,
+      length: rm - lm,
       calc: b.calc,
     });
   }

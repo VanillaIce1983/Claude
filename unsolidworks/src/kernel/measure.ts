@@ -2,7 +2,7 @@
 // picked entities. Pure geometry, no UI. All values in mm and degrees.
 
 import type { PickEdge } from './mesh';
-import { CircleInfo, Face, Part, computePlacements, isSeamTag, stripFlat, stripPoint } from './model';
+import { Bend, CircleInfo, Face, Part, computePlacements, isSeamTag, stripFlat, stripOutline, stripPoint, stripRange } from './model';
 import { Ring, distPointSegment, signedArea } from './polygon';
 import {
   Affine,
@@ -579,6 +579,18 @@ function sideWall(part: Part, face: Face, M: Affine, hitPoint: V3): MeasureEntit
   };
 }
 
+/** Strip fraction of a point in face A's frame (folded) or in flat coordinates. */
+function hitFraction(b: Bend, T: number, q: V3, flat: boolean): number {
+  const off = dot2(sub2(v2(q.x, q.y), b.origin), b.nrm);
+  let f = 0;
+  if (flat) f = b.ba > 0 ? off / b.ba : 0;
+  else {
+    const phi = Math.atan2(off, b.up ? T + b.radius - q.z : q.z + b.radius);
+    f = (phi < -1e-6 ? phi + 2 * Math.PI : phi) / b.angle;
+  }
+  return Math.min(1, Math.max(0, f));
+}
+
 export function bendEntity(part: Part, bendId: string, surface: 0 | 1 | 2, hitPoint: V3, flat: boolean): MeasureEntity {
   const b = part.bends.get(bendId);
   if (!b) throw new Error('Die gewählte Biegung existiert nicht mehr. Bitte neu auswählen.');
@@ -586,12 +598,16 @@ export function bendEntity(part: Part, bendId: string, surface: 0 | 1 | 2, hitPo
   const T = part.T;
   const R = b.radius;
   const dir3 = v3(b.dir.x, b.dir.y, 0);
-  const L = b.w1 - b.w0;
+  // closed corners mitre the strip ends; length and axis are taken at mid-bend
+  const [wl, wr] = stripRange(b, 0.5);
+  const L = wr - wl;
   if (surface === 2) {
     // end wall at w0 or w1, whichever the hit is closer to
     const q = applyA(invertRigid(M), hitPoint);
     const w = dot2(sub2(v2(q.x, q.y), b.origin), b.dir);
-    const atStart = Math.abs(w - b.w0) <= Math.abs(w - b.w1);
+    const [hl, hr] = stripRange(b, hitFraction(b, T, q, flat));
+    const atStart = Math.abs(w - hl) <= Math.abs(w - hr);
+    if (atStart ? b.ext0 : b.ext1) throw new Error('Die Stirnseite einer geschlossenen Ecke ist gekrümmt. Bitte eine Kante oder die Biegefläche wählen.');
     const end = atStart ? b.w0 : b.w1;
     const normal = unit(applyDirA(M, atStart ? scale3(dir3, -1) : dir3)) ?? v3(0, 0, 1);
     if (flat) {
@@ -611,17 +627,18 @@ export function bendEntity(part: Part, bendId: string, surface: 0 | 1 | 2, hitPo
   if (flat) {
     const o = stripFlat(b, b.w0, 0);
     const n = faceNormal(M);
+    const outline = stripOutline(b);
     return {
       kind: 'plane',
       origin: applyA(M, v3(o.x, o.y, top ? T : 0)),
       normal: top ? n : scale3(n, -1),
-      area: b.ba * L,
-      perimeter: 2 * (b.ba + L),
+      area: Math.abs(signedArea(outline)),
+      perimeter: outline.reduce((s, p, i) => s + dist2(p, outline[(i + 1) % outline.length]), 0),
       label: 'Biegung',
     };
   }
   // axis as in foldTransform; the concave side of the bend has the inner radius R
-  const axis = v3(b.origin.x + b.dir.x * b.w0, b.origin.y + b.dir.y * b.w0, b.up ? T + R : -R);
+  const axis = v3(b.origin.x + b.dir.x * wl, b.origin.y + b.dir.y * wl, b.up ? T + R : -R);
   return {
     kind: 'cylinder',
     axisPoint: applyA(M, axis),

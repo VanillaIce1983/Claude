@@ -233,6 +233,15 @@ function closedCornerPanel(host: PanelHost, f: ClosedCornerFeature): HTMLElement
       ),
     ),
     section('Spalt', numberField('Spaltabstand', () => f.gap, (v) => ((f.gap = v), host.changed()), { unit: 'mm', min: 0 })),
+    section(
+      'Biegebereich',
+      checkField('Biegebereich offen lassen', () => !!f.openBend, (v) => {
+        if (v) f.openBend = true;
+        else delete f.openBend;
+        host.changed();
+      }),
+      h('p', { class: 'note' }, 'Ohne Haken laufen auch die Biegeradien beider Laschen bis in die Ecke und treffen sich schräg, wie in SolidWorks. Passt das wegen unterschiedlicher Radien nicht, bleibt der Biegebereich dieser Ecke offen.'),
+    ),
   ];
 }
 

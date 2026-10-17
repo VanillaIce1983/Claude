@@ -7,7 +7,7 @@
 // surface get side walls; the same boundary loops are the flat pattern.
 
 import earcut from 'earcut';
-import { Bend, Face, Part, computePlacements, isSeamTag, stripFlat, stripPoint } from './model';
+import { Bend, Face, Part, computePlacements, isSeamTag, stripFlat, stripFractions, stripPoint, stripRange, uniqFractions } from './model';
 import { Ring, signedArea } from './polygon';
 import { Affine, V2, V3, applyA, applyDirA, cross2, dist2, dot2, sub2, v3 } from './vec';
 
@@ -87,7 +87,8 @@ function onSeam(b: Bend, p: V2, side: 0 | 1): number | null {
   const target = side === 0 ? 0 : b.ba;
   if (Math.abs(t - target) > 1e-5) return null;
   const w = dot2(rel, b.dir);
-  if (w < b.w0 - 1e-5 || w > b.w1 + 1e-5) return null;
+  const [wl, wr] = stripRange(b, side);
+  if (w < wl - 1e-5 || w > wr + 1e-5) return null;
   return w;
 }
 
@@ -171,6 +172,9 @@ function conformTriangles(coords: number[], idx: number[]): number[] {
         if (t <= 1e-9 || t >= 1 - 1e-9 || t >= bestT) continue;
         const cr = (X(v) - X(u)) * (Y(p) - Y(u)) - (Y(v) - Y(u)) * (X(p) - X(u));
         if (cr * cr > 1e-14 * l2 * Math.max(1, l2)) continue;
+        // a vertex clearly outside the triangle only lies near the line of a long
+        // diagonal; splitting there would fold triangles over each other
+        if (cr * Math.sign(area2(u, v, w)) < -1e-9 * Math.sqrt(l2)) continue;
         best = p;
         bestT = t;
       }
@@ -186,43 +190,75 @@ function conformTriangles(coords: number[], idx: number[]): number[] {
 }
 
 /**
- * Breakpoints (positions w along the bend line) of every bend: the union of
- * both seams' outline vertices, so face and strip share their seam edges.
+ * Breakpoints (positions w along the bend line) of every bend: the seam
+ * vertices of face A within the strip's extent at f = 0, those of face B
+ * within its extent at f = 1, and both strip ends at f = 0 and f = 1.
  */
 export function bendBreakpoints(part: Part): Map<string, number[]> {
   const breaks = new Map<string, number[]>();
   for (const b of part.bends.values()) {
-    const ws = [b.w0, b.w1];
-    const fa = part.faces.get(b.faceA);
-    if (fa) for (const p of fa.outer.pts) {
-      const w = onSeam(b, p, 0);
-      if (w !== null) ws.push(w);
+    const ws: number[] = [];
+    for (const side of [0, 1] as const) {
+      const [wl, wr] = stripRange(b, side);
+      ws.push(wl, wr);
+      const faceId = side === 0 ? b.faceA : b.faceB;
+      const face = faceId ? part.faces.get(faceId) : undefined;
+      for (const p of face?.outer.pts ?? []) {
+        const w = onSeam(b, p, side);
+        if (w !== null && w >= wl - 1e-6 && w <= wr + 1e-6) ws.push(w);
+      }
     }
-    const fb = b.faceB ? part.faces.get(b.faceB) : undefined;
-    if (fb) for (const p of fb.outer.pts) {
-      const w = onSeam(b, p, 1);
-      if (w !== null) ws.push(w);
-    }
-    breaks.set(
-      b.id,
-      uniqSorted(ws).filter((w) => w >= b.w0 - 1e-6 && w <= b.w1 + 1e-6),
-    );
+    breaks.set(b.id, uniqSorted(ws));
   }
   return breaks;
 }
 
-/** Outer ring of a face with the bend breakpoints inserted into its seam edges. */
+/** One row of strip vertices at fraction f: both strip ends plus the breakpoints between them. */
+export function rowBreakpoints(b: Bend, all: number[], f: number): number[] {
+  const [wl, wr] = stripRange(b, f);
+  return [wl, ...all.filter((w) => w > wl + 1e-6 && w < wr - 1e-6), wr];
+}
+
+/** Outer ring of a face with the strip rows at its seams inserted into its seam edges. */
 export function seamSplitOuter(part: Part, face: Face, breaks: Map<string, number[]>): Ring {
   const extra: V2[] = [];
   for (const b of part.bends.values()) {
-    if (b.faceA === face.id) extra.push(...seamPoints(b, breaks.get(b.id)!, 0));
-    if (b.faceB === face.id) extra.push(...seamPoints(b, breaks.get(b.id)!, 1));
+    if (b.faceA === face.id) extra.push(...seamPoints(b, rowBreakpoints(b, breaks.get(b.id)!, 0), 0));
+    if (b.faceB === face.id) extra.push(...seamPoints(b, rowBreakpoints(b, breaks.get(b.id)!, 1), 1));
   }
   return augmentRing(face.outer, extra, isSeamTag);
 }
 
 function bendSlices(angle: number): number {
   return Math.max(2, Math.ceil((angle * 180) / Math.PI / 6));
+}
+
+/** Rows of a strip: the regular slices plus every fraction where an end profile changes. */
+function stripRows(b: Bend, all: number[]): { f: number; ws: number[] }[] {
+  const N = bendSlices(b.angle);
+  const fs = uniqFractions([...Array.from({ length: N + 1 }, (_, j) => j / N), ...stripFractions(b)], 1e-6);
+  return fs.map((f) => ({ f, ws: rowBreakpoints(b, all, f) }));
+}
+
+/**
+ * Triangles between two rows of vertices, each sorted by w. The band between
+ * two rows is a convex trapezoid, so merging by w always gives a valid fan.
+ * Triangles are counter-clockwise in the strip's (w, f) frame.
+ */
+function zipRows(r0: number[], w0: number[], r1: number[], w1: number[]): number[] {
+  const out: number[] = [];
+  let i = 0;
+  let j = 0;
+  while (i + 1 < r0.length || j + 1 < r1.length) {
+    if (i + 1 >= r0.length || (j + 1 < r1.length && w1[j + 1] <= w0[i + 1] + 1e-9)) {
+      out.push(r0[i], r1[j + 1], r1[j]);
+      j++;
+    } else {
+      out.push(r0[i], r0[i + 1], r1[j]);
+      i++;
+    }
+  }
+  return out;
 }
 
 export function buildMesh(part: Part): PartMesh {
@@ -311,71 +347,54 @@ export function buildMesh(part: Part): PartMesh {
     return best;
   };
 
-  // 3. bend strips
+  // 3. bend strips: one row of vertices per fraction, rows zipped together
   for (const b of part.bends.values()) {
     const MA = placements.get(b.faceA);
     if (!MA) continue;
     const pieceIndex = pieces.push({ kind: 'bend', id: b.id, feature: b.feature }) - 1;
-    const ws = breaks.get(b.id)!;
-    const N = bendSlices(b.angle);
+    const rows = stripRows(b, breaks.get(b.id)!);
+    const last = rows.length - 1;
     const gridTop: number[][] = [];
-    const gridBot: number[][] = [];
-    for (let i = 0; i < ws.length; i++) {
-      gridTop.push([]);
-      gridBot.push([]);
-      for (let j = 0; j <= N; j++) {
-        const f = j / N;
-        const fp = stripFlat(b, ws[i], f);
-        let shared: { top: number; bot: number } | null = null;
-        if (j === 0) shared = findFaceVertex(b.faceA, fp);
-        if (j === N) shared = findFaceVertex(b.faceB, fp);
-        if (shared) {
-          gridTop[i].push(shared.top);
-          gridBot[i].push(shared.bot);
-          continue;
-        }
-        const n = applyDirA(MA, stripNormal(b, f));
-        const t = pushVertex(vs, applyA(MA, stripPoint(b, T, ws[i], f, T)), applyA(anchorM, v3(fp.x, fp.y, T)), fp, n, flatUp);
-        const bt = pushVertex(vs, applyA(MA, stripPoint(b, T, ws[i], f, 0)), applyA(anchorM, v3(fp.x, fp.y, 0)), fp, neg(n), neg(flatUp));
-        topToBottom.set(t, bt);
-        gridTop[i].push(t);
-        gridBot[i].push(bt);
-      }
-    }
-    // (dir, nrm) is a clockwise frame → this order is CCW in flat
+    rows.forEach(({ f, ws }, k) => {
+      const n = applyDirA(MA, stripNormal(b, f));
+      gridTop.push(
+        ws.map((w) => {
+          const fp = stripFlat(b, w, f);
+          let shared: { top: number; bot: number } | null = null;
+          if (k === 0) shared = findFaceVertex(b.faceA, fp);
+          if (k === last) shared = findFaceVertex(b.faceB, fp);
+          if (shared) return shared.top;
+          const t = pushVertex(vs, applyA(MA, stripPoint(b, T, w, f, T)), applyA(anchorM, v3(fp.x, fp.y, T)), fp, n, flatUp);
+          const bt = pushVertex(vs, applyA(MA, stripPoint(b, T, w, f, 0)), applyA(anchorM, v3(fp.x, fp.y, 0)), fp, neg(n), neg(flatUp));
+          topToBottom.set(t, bt);
+          return t;
+        }),
+      );
+    });
+    // zipRows is CCW in (w, f); a clockwise (dir, nrm) frame flips it
     const ccw = cross2(b.dir, b.nrm) < 0;
-    for (let i = 0; i + 1 < ws.length; i++) {
-      for (let j = 0; j < N; j++) {
-        const a = gridTop[i][j];
-        const bb = gridTop[i + 1][j];
-        const c = gridTop[i + 1][j + 1];
-        const d = gridTop[i][j + 1];
-        const quad = ccw ? [a, d, c, a, c, bb] : [a, bb, c, a, c, d];
-        for (let k = 0; k < 6; k += 3) {
-          tris.push(quad[k], quad[k + 1], quad[k + 2]);
-          triPiece.push(pieceIndex);
-          triSurface.push(0);
-          tris.push(topToBottom.get(quad[k])!, topToBottom.get(quad[k + 2])!, topToBottom.get(quad[k + 1])!);
-          triPiece.push(pieceIndex);
-          triSurface.push(1);
-        }
+    for (let k = 0; k < last; k++) {
+      const tri = zipRows(gridTop[k], rows[k].ws, gridTop[k + 1], rows[k + 1].ws);
+      for (let i = 0; i < tri.length; i += 3) {
+        const [a, bb, c] = ccw ? [tri[i], tri[i + 2], tri[i + 1]] : [tri[i], tri[i + 1], tri[i + 2]];
+        tris.push(a, bb, c);
+        triPiece.push(pieceIndex);
+        triSurface.push(0);
+        tris.push(topToBottom.get(a)!, topToBottom.get(c)!, topToBottom.get(bb)!);
+        triPiece.push(pieceIndex);
+        triSurface.push(1);
       }
     }
     // tags for strip boundary edges
-    const lastW = ws.length - 1;
-    for (let j = 0; j < N; j++) {
-      edgeTag.set(`${gridTop[0][j + 1]},${gridTop[0][j]}`, 'bend-side');
-      edgeTag.set(`${gridTop[0][j]},${gridTop[0][j + 1]}`, 'bend-side');
-      edgeTag.set(`${gridTop[lastW][j]},${gridTop[lastW][j + 1]}`, 'bend-side');
-      edgeTag.set(`${gridTop[lastW][j + 1]},${gridTop[lastW][j]}`, 'bend-side');
+    const tagBoth = (a: number, c: number, tag: string, keep: boolean): void => {
+      for (const key of [`${a},${c}`, `${c},${a}`]) if (!keep || !edgeTag.has(key)) edgeTag.set(key, tag);
+    };
+    for (let k = 0; k < last; k++) {
+      tagBoth(gridTop[k][0], gridTop[k + 1][0], 'bend-side', false);
+      tagBoth(gridTop[k][gridTop[k].length - 1], gridTop[k + 1][gridTop[k + 1].length - 1], 'bend-side', false);
     }
-    for (let i = 0; i < lastW; i++) {
-      for (const j of [0, N]) {
-        const k1 = `${gridTop[i][j]},${gridTop[i + 1][j]}`;
-        const k2 = `${gridTop[i + 1][j]},${gridTop[i][j]}`;
-        if (!edgeTag.has(k1)) edgeTag.set(k1, j === 0 ? 'bend-start' : 'bend-end');
-        if (!edgeTag.has(k2)) edgeTag.set(k2, j === 0 ? 'bend-start' : 'bend-end');
-      }
+    for (const k of [0, last]) {
+      for (let i = 0; i + 1 < gridTop[k].length; i++) tagBoth(gridTop[k][i], gridTop[k][i + 1], k === 0 ? 'bend-start' : 'bend-end', true);
     }
   }
 

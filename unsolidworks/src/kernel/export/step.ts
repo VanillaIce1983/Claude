@@ -473,6 +473,9 @@ function writeContext(w: StepWriter): number {
  * through exportPart() first (idempotent), so zero-radius hems never touch.
  */
 export function partToStep(part: Part, opts: StepOptions): string {
+  if ([...part.bends.values()].some((b) => b.ext0 || b.ext1)) {
+    throw new Error('STEP-Export: Geschlossene Ecken mit geschlossenem Biegebereich gehen hier noch nicht. Bitte bei der Ecke „Biegebereich offen lassen“ wählen.');
+  }
   const B = buildBrep(exportPart(part));
   const flip = determinantA(part.anchor.M) < 0;
   const name = stepString(opts.name);

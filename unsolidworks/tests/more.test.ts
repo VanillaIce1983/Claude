@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { regenerate } from '../src/kernel/doc';
-import type { EdgeFlangeFeature, Feature, JogFeature, SketchedBendFeature } from '../src/kernel/features/types';
+import type { CutFeature, EdgeFlangeFeature, Feature, JogFeature, SketchedBendFeature } from '../src/kernel/features/types';
 import { bendAllowance, outsideSetback } from '../src/kernel/sheet';
 import { rad } from '../src/kernel/vec';
 import { exampleDoc } from '../src/ui/example';
@@ -169,3 +169,38 @@ describe('open profile options', () => {
     expect(failing([u], 'base')).toMatch(/zu kurz/);
   });
 });
+
+describe('mesh robustness', () => {
+  // a hole vertex near the line of a long earcut diagonal used to split triangles it is not part of
+  const hole = (u: number, v: number, w: number): CutFeature => ({
+    id: 'h',
+    name: 'Bohrung1',
+    type: 'cut',
+    edge: { tag: 'base:e0', at: { x: 10, y: 0 } },
+    u,
+    v,
+    shape: 'rect',
+    diameter: 0,
+    width: w,
+    height: w,
+    angle: 0,
+    count: 1,
+    spacing: 0,
+    anchor: 'line',
+  });
+
+  for (const [L, gap, w] of [
+    [1000, 5e-4, 10],
+    [1000, 2e-3, 10],
+    [1000, 0.01, 1],
+    [3000, 0.05, 1],
+  ]) {
+    it(`a ${w} mm hole ${gap} mm below the edge of a ${L} mm plate stays a closed solid`, () => {
+      const r = build(doc([plate(L, 50), hole(L / 2, 50 - gap - w / 2, w)]));
+      expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+      expect(r.fp.area).toBeCloseTo(L * 50 - w * w, 6);
+      expect(r.mesh.indices.length / 3).toBeLessThan(200);
+    });
+  }
+});
+

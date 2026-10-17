@@ -3,7 +3,7 @@
 // strips. The folded 3D shape is derived by rotating each face about its bend
 // axes, so the flat pattern is exact by construction.
 
-import { Ring, cloneRing, distPointSegment, edgeAt } from './polygon';
+import { Ring, cloneRing, distPointSegment, edgeAt, signedArea } from './polygon';
 import {
   Affine,
   IDENTITY,
@@ -30,10 +30,30 @@ export interface Face {
 
 export type BendKind = 'base' | 'flange' | 'hem' | 'sketch' | 'jog';
 
+/** d(f) = a + b·sin(angle·f) + c·cos(angle·f) on [f0, f1]. */
+export interface EndPiece {
+  f0: number;
+  f1: number;
+  a: number;
+  b: number;
+  c: number;
+}
+
+/**
+ * Extension of a strip end along the bend line, away from the strip (mm,
+ * negative trims), as a function of f. Pieces cover [0, 1] in order and join
+ * continuously. The cut through the thickness stays perpendicular to the
+ * sheet, like the laser cut of the flat pattern.
+ */
+export interface StripEnd {
+  pieces: EndPiece[];
+}
+
 /**
  * A cylindrical bend between face A (where the strip starts, t = 0) and
  * face B (t = ba). In flat coordinates the strip is the rectangle
- * origin + w·dir + t·nrm with w ∈ [w0, w1], t ∈ [0, ba].
+ * origin + w·dir + t·nrm with w ∈ [w0, w1], t ∈ [0, ba]; ext0/ext1 mitre
+ * its ends (closed corners), see stripRange.
  */
 export interface Bend {
   id: string;
@@ -57,6 +77,10 @@ export interface Bend {
   ba: number;
   /** Short description of the bend calculation used. */
   calc: string;
+  /** Profile of the w0 end (grows towards -dir). */
+  ext0?: StripEnd;
+  /** Profile of the w1 end (grows towards +dir). */
+  ext1?: StripEnd;
 }
 
 /** Exact circle metadata for holes, so DXF export can write true circles. */
@@ -84,10 +108,19 @@ export function clonePart(p: Part): Part {
     faces.set(k, { ...f, outer: cloneRing(f.outer), holes: f.holes.map(cloneRing) });
   }
   const bends = new Map<string, Bend>();
-  for (const [k, b] of p.bends) bends.set(k, { ...b, origin: { ...b.origin }, dir: { ...b.dir }, nrm: { ...b.nrm } });
+  for (const [k, b] of p.bends) bends.set(k, cloneBend(b));
   const circles = new Map<string, CircleInfo>();
   for (const [k, c] of p.circles) circles.set(k, { c: { ...c.c }, r: c.r });
   return { T: p.T, faces, bends, anchor: { face: p.anchor.face, M: { r: [...p.anchor.M.r], t: { ...p.anchor.M.t } } }, circles };
+}
+
+const cloneEnd = (e: StripEnd): StripEnd => ({ pieces: e.pieces.map((q) => ({ ...q })) });
+
+function cloneBend(b: Bend): Bend {
+  const c: Bend = { ...b, origin: { ...b.origin }, dir: { ...b.dir }, nrm: { ...b.nrm } };
+  if (b.ext0) c.ext0 = cloneEnd(b.ext0);
+  if (b.ext1) c.ext1 = cloneEnd(b.ext1);
+  return c;
 }
 
 export const seamTag = (bendId: string, side: 'A' | 'B'): string => `seam:${bendId}:${side}`;
@@ -132,6 +165,58 @@ export function stripPoint(b: Bend, T: number, w: number, f: number, h: number):
 /** Flat position of a strip point. */
 export function stripFlat(b: Bend, w: number, f: number): V2 {
   return frame2(b.origin, b.dir, b.nrm, w, f * b.ba);
+}
+
+/** Extension of a strip end at fraction f (0 for a plain end). */
+export function endOffset(end: StripEnd | undefined, angle: number, f: number): number {
+  if (!end || end.pieces.length === 0) return 0;
+  const q = end.pieces.find((p) => f <= p.f1) ?? end.pieces[end.pieces.length - 1];
+  const phi = angle * f;
+  return q.a + q.b * Math.sin(phi) + q.c * Math.cos(phi);
+}
+
+/** Extent [wl, wr] of the strip along the bend line at fraction f. */
+export function stripRange(b: Bend, f: number): [number, number] {
+  return [b.w0 - endOffset(b.ext0, b.angle, f), b.w1 + endOffset(b.ext1, b.angle, f)];
+}
+
+/** Sorted fractions in [0, 1] without near duplicates, always starting at 0 and ending at 1. */
+export function uniqFractions(fs: number[], tol = 1e-9): number[] {
+  const out = [0];
+  for (const f of [...fs].sort((x, y) => x - y)) {
+    if (f - out[out.length - 1] > tol && f < 1 - tol) out.push(f);
+  }
+  out.push(1);
+  return out;
+}
+
+/** Fractions where either strip end changes its formula, including 0 and 1. */
+export function stripFractions(b: Bend): number[] {
+  const fs = [0, 1];
+  for (const end of [b.ext0, b.ext1]) for (const p of end?.pieces ?? []) fs.push(p.f0, p.f1);
+  return uniqFractions(fs);
+}
+
+const OUTLINE_STEP = (3 * Math.PI) / 180;
+
+/** Sample fractions of one strip end: piece boundaries, curved pieces at most 3° apart. */
+function endSamples(end: StripEnd | undefined, angle: number): number[] {
+  const fs = [0, 1];
+  for (const p of end?.pieces ?? []) {
+    fs.push(p.f0, p.f1);
+    if (p.b === 0 && p.c === 0) continue;
+    const n = Math.ceil(((p.f1 - p.f0) * angle) / OUTLINE_STEP);
+    for (let i = 1; i < n; i++) fs.push(p.f0 + ((p.f1 - p.f0) * i) / n);
+  }
+  return uniqFractions(fs);
+}
+
+/** Flat outline of a bend strip, counter-clockwise (a rectangle without end profiles). */
+export function stripOutline(b: Bend): V2[] {
+  const left = endSamples(b.ext0, b.angle).map((f) => stripFlat(b, stripRange(b, f)[0], f));
+  const right = endSamples(b.ext1, b.angle).map((f) => stripFlat(b, stripRange(b, f)[1], f));
+  const pts = [...left, ...right.reverse()];
+  return signedArea(pts) < 0 ? pts.reverse() : pts;
 }
 
 /** Placement (flat → model space) of every face, propagated from the anchor. */

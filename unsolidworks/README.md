@@ -21,7 +21,7 @@ UnsolidWorks ist eine eigenständige Neuentwicklung. Der Code stammt nicht aus a
 | **Knick** | Zwei gegenläufige Biegungen mit Versatz. Bemaßung Versatz außen, Versatz innen oder Gesamtabmessung, Knickwinkel, projizierte Länge fixieren, Knickposition wie bei der skizzierten Biegung |
 | **Ausschnitt** | Rund, Rechteck oder Langloch auf einer Fläche, Lage per Klick und Abstand zu einer Kante, Drehung, lineares Muster |
 | **Lasche** | Freie Kanten in der Ebene der Fläche verlängern, ganze Kante oder Teilbreite |
-| **Geschlossene Ecke** | Offene Ecke zwischen zwei Laschen schließen: beide Laschen werden passend verlängert oder gekürzt, Eckentyp Stoß (beide gleichmäßig bis zur Innenseite der anderen), Überlappen oder Unterlappen, Spaltabstand. Eine Seitenkante pro Ecke genügt |
+| **Geschlossene Ecke** | Offene Ecke zwischen zwei Laschen schließen: beide Laschen werden passend verlängert oder gekürzt, Eckentyp Stoß (beide gleichmäßig bis zur Innenseite der anderen), Überlappen oder Unterlappen, Spaltabstand. Die Biegebereiche laufen mit in die Ecke und treffen sich auf Gehrung, nur am Radius bleibt eine kleine Öffnung; wahlweise bleibt der Biegebereich offen. Eine Seitenkante pro Ecke genügt |
 | **Ecke brechen** | Verrundung oder Fase an Außen- und Innenecken der Kontur |
 | **Abwicklung** | Exakte Abwicklung mit Biegelinien (oben/unten), Biegetabelle mit Winkel, Radius, Biegezugabe und Biegeabzug, Zuschnittmaß, kleinstes umschließendes Rechteck, Fläche, Schnittlänge, Masse |
 
