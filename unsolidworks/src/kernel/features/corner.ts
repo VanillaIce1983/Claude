@@ -11,6 +11,7 @@ import {
   Part,
   StripEnd,
   allEdges,
+  clonePart,
   computePlacements,
   findEdge,
   isSeamTag,
@@ -327,7 +328,8 @@ interface Cut {
  * - Straight: the flange ranked first runs through and covers the corner;
  *   the other is cut straight, the gap before the first one's boundary
  *   facing it (its inner sheet surface, or for flanges in one plane its
- *   free edge).
+ *   free edge). Where no boundary faces it squarely, or the joint does not
+ *   fit, the corner is mitred instead.
  * Cuts stay perpendicular to the sheet (they are made in the flat), so the
  * sheet surface that gets there first limits them. The bends at the corner
  * follow. Returns whether the part changed, or null when no flange forms a
@@ -337,8 +339,8 @@ interface Cut {
 export function relieveCorner(part: Part, ref: EdgeRef, o: ReliefOptions): boolean | null {
   const T = part.T;
   const placements = computePlacements(part);
-  const a = sideOf(part, placements, findEdge(part, ref));
-  const b = a && mitrePartner(part, placements, a, o.partners);
+  let a = sideOf(part, placements, findEdge(part, ref));
+  let b = a && mitrePartner(part, placements, a, o.partners);
   if (!a || !b) return null;
   const key = [a.edge.tag, b.edge.tag].sort().join('|');
   if (o.done.has(key)) return false;
@@ -351,10 +353,21 @@ export function relieveCorner(part: Part, ref: EdgeRef, o: ReliefOptions): boole
     const [r, s] = o.rank(a.edge.face.id) <= o.rank(b.edge.face.id) ? [a, b] : [b, a];
     const stop = boundaryFacing(part, placements, r, scale3(s.out, -1));
     const cover = boundaryFacing(part, placements, s, r.out);
-    if (!stop) throw new Error('Kein gerader Stoß möglich.');
-    const cuts: Cut[] = [{ side: s, n: scale3(stop.n, -1), p0: stop.p0, lim: -o.gap, trim: true }];
-    if (cover) cuts.push({ side: r, n: cover.n, p0: cover.p0, lim: 0, trim: !parallel });
-    return fitCorner(part, placements, a, b, cuts, o.gap, undefined);
+    // where no boundary of the first flange faces the other one squarely, the corner gets a mitre instead
+    if (stop) {
+      const before = clonePart(part);
+      try {
+        const cuts: Cut[] = [{ side: s, n: scale3(stop.n, -1), p0: stop.p0, lim: -o.gap, trim: true }];
+        if (cover) cuts.push({ side: r, n: cover.n, p0: cover.p0, lim: 0, trim: !parallel });
+        return fitCorner(part, placements, a, b, cuts, o.gap, undefined);
+      } catch {
+        part.faces = before.faces;
+        part.bends = before.bends;
+        part.circles = before.circles;
+        const again = (x: Side): Side => sideOf(part, placements, findEdge(part, { tag: x.edge.tag, at: scale2(add2(x.edge.a, x.edge.b), 0.5) }))!;
+        [a, b] = [again(a), again(b)];
+      }
+    }
   }
   const m = parallel ? flatMitre(part, placements, a, b) : mitrePlane(part, placements, a, b);
   return fitCorner(
@@ -469,15 +482,22 @@ function fitFace(part: Part, placements: Map<string, Affine>, cut: Cut): void {
 }
 
 /**
- * Fits the corner end of a bend to n·(p − p0) ≤ lim: it may grow up to its
- * flange's seam, or else is only cut back. Throws when it gets too narrow.
+ * Fits the corner end of a bend to n·(p − p0) ≤ lim: with `grow` it may grow
+ * up to its flange's seam if that fits, else it is only cut back. Throws
+ * when it gets too narrow.
  */
-function fitBend(part: Part, placements: Map<string, Affine>, c: CornerBend, cut: Cut): void {
+function fitBend(part: Part, placements: Map<string, Affine>, c: CornerBend, cut: Cut, grow: boolean): void {
   const key = c.s > 0 ? 'ext1' : 'ext0';
-  const cap = seamReach(part, c);
-  if (c.bend[key] || cap === null) throw new Error('Das Biegungsende ist schon angepasst.');
-  for (const top of [cap, 0]) {
-    const pieces = lowerEnvelope([...fibreLimits(part, placements, c, cut.n, cut.p0, -2 * cut.lim), { a: Math.min(top, cap), b: 0, c: 0 }], c.bend.angle);
+  const flangeCap = seamReach(part, c);
+  const webCap = seamReach(part, c, c.fF === 0 ? 1 : 0);
+  if (c.bend[key] || flangeCap === null || webCap === null) throw new Error('Das Biegungsende ist schon angepasst.');
+  // growing, the strip stays within both its seams: a + c·cos(angle·f) runs from the web's reach to the flange's
+  const theta = c.bend.angle;
+  const [at0, at1] = c.fF === 1 ? [webCap, flangeCap] : [flangeCap, webCap];
+  const k = Math.abs(1 - Math.cos(theta)) > 1e-6 ? (at0 - at1) / (1 - Math.cos(theta)) : 0;
+  const reachCap: Trig = Math.abs(1 - Math.cos(theta)) > 1e-6 ? { a: at0 - k, b: 0, c: k } : { a: Math.min(at0, at1), b: 0, c: 0 };
+  for (const cap of grow ? [reachCap, { a: 0, b: 0, c: 0 }] : [{ a: 0, b: 0, c: 0 }]) {
+    const pieces = lowerEnvelope([...fibreLimits(part, placements, c, cut.n, cut.p0, -2 * cut.lim), cap], c.bend.angle);
     if (pieces.every((q) => q.a === 0 && q.b === 0 && q.c === 0)) delete c.bend[key];
     else c.bend[key] = { pieces };
     if (wideEnough(c.bend)) return;
@@ -490,7 +510,8 @@ function fitBend(part: Part, placements: Map<string, Affine>, c: CornerBend, cut
  * Applies the cuts to the two flanges of a corner and fits their bends:
  * bends from the same web meet on `bendPlane` (or, for a straight joint, on
  * the mitre through the web corner, as in a closed corner); other bends
- * follow the cut of their flange. Then checks the result.
+ * follow the cut of their flange, growing into the corner only at a mitre.
+ * Then checks the result.
  */
 function fitCorner(part: Part, placements: Map<string, Affine>, a: Side, b: Side, cuts: Cut[], gap: number, bendPlane: Mitre | undefined): boolean {
   const T = part.T;
@@ -503,8 +524,9 @@ function fitCorner(part: Part, placements: Map<string, Affine>, a: Side, b: Side
   const flatOk = (): boolean => noNewOverlap(part, keys, overlapBefore);
   for (const cut of cuts) fitFace(part, placements, cut);
   const cutOf = (s: Side): Cut | undefined => cuts.find((c) => c.side === s && c.trim);
+  // in a straight joint a bend running into the corner could meet the other flange's bend: it is only cut back
   if (pair) closeBendRegion(part, pair, gap, { plane: bendPlane, trimFallback: true, flatOk });
-  else for (const [c, s] of atSides) if (cutOf(s)) fitBend(part, placements, c, cutOf(s)!);
+  else for (const [c, s] of atSides) if (cutOf(s)) fitBend(part, placements, c, cutOf(s)!, !!bendPlane);
   // the bends stay on their side of the cut (unless they met on the web-corner mitre) and under their flange's seam
   for (const [c, s] of atSides) {
     const cut = cutOf(s);
@@ -718,12 +740,12 @@ function lowerEnvelope(terms: Trig[], angle: number): EndPiece[] {
   return merged.map((s, i) => ({ f0: i === 0 ? 0 : s.f0, f1: merged[i + 1]?.f0 ?? 1, ...terms[s.k] }));
 }
 
-/** How far the flange face's seam reaches beyond the strip end, towards the corner. */
-function seamReach(part: Part, c: CornerBend): number | null {
+/** How far the flange face's seam (or, given `fraction`, the seam on that side) reaches beyond the strip end, towards the corner. */
+function seamReach(part: Part, c: CornerBend, fraction: 0 | 1 = c.fF): number | null {
   const b = c.bend;
-  const flange = part.faces.get((c.fF === 0 ? b.faceA : b.faceB) ?? '');
+  const flange = part.faces.get((fraction === 0 ? b.faceA : b.faceB) ?? '');
   if (!flange) return null;
-  const tag = seamTag(b.id, seamSide(c.fF));
+  const tag = seamTag(b.id, seamSide(fraction));
   const ring = flange.outer;
   let reach = -Infinity;
   for (let i = 0; i < ring.pts.length; i++) {
