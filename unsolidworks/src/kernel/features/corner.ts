@@ -474,7 +474,8 @@ function fitFace(part: Part, placements: Map<string, Affine>, cut: Cut): void {
     edge = findEdge(part, { tag: s.edge.tag, at });
   }
   const face = edge.face;
-  const kept = splitRing(face.outer, v2(0, 0), nrm, c, s.edge.tag).neg;
+  const cutRing = splitRing(face.outer, v2(0, 0), nrm, c, s.edge.tag).neg;
+  const kept = cutRing && dropTinyEdges(cutRing);
   if (!kept || !isSimple(kept.pts)) throw new Error('Der Schnitt zerschneidet die Lasche.');
   if (face.outer.tags.some((t) => isSeamTag(t) && !kept.tags.includes(t))) throw new Error('Der Schnitt nimmt eine Biegung weg.');
   if (face.holes.some((h) => ringsCross(kept.pts, h.pts) || !pointInPolygon(h.pts[0], kept.pts))) throw new Error('Ein Ausschnitt liegt im Bereich des Schnitts.');
@@ -903,9 +904,38 @@ export function yieldToBend(part: Part, id: string): void {
       // it runs into the new bend only if it also points along it (an obtuse corner)
       const end = dot2(r.dir, s.nrm) > 0 ? 1 : -1;
       if (end * dot2(r.dir, into) < 1e-9) continue;
-      trimToPlane(part, placements, { bend: r, s: end, fF: 1, web: r.faceA }, at, applyA(MW, v3(corner.x, corner.y, 0)), applyDirA(MW, v3(into.x, into.y, 0)));
+      trimToPlane(part, placements, { bend: r, s: end, fF: 1, web: r.faceA }, corner, into, applyDirA(MW, v3(into.x, into.y, 0)), applyA(MW, v3(corner.x, corner.y, 0)));
     }
   }
+}
+
+/**
+ * Drops outline edges shorter than `tol`, left where a cut ends just past a
+ * corner (e.g. through a rounded corner); the edge after it takes over. Seam
+ * ends stay where they are.
+ */
+function dropTinyEdges(r: Ring, tol = 1e-3): Ring {
+  const pts = r.pts.slice();
+  const tags = r.tags.slice();
+  let i = 0;
+  while (i < pts.length && pts.length > 3) {
+    const j = (i + 1) % pts.length;
+    const h = (i - 1 + pts.length) % pts.length;
+    if (dist2(pts[i], pts[j]) >= tol) {
+      i++;
+      continue;
+    }
+    if (!isSeamTag(tags[i]) && !isSeamTag(tags[j])) {
+      // drop the far end: the tiny edge becomes the next one
+      tags[i] = tags[j];
+      pts.splice(j, 1);
+      tags.splice(j, 1);
+    } else if (!isSeamTag(tags[i]) && !isSeamTag(tags[h])) {
+      pts.splice(i, 1);
+      tags.splice(i, 1);
+    } else i++;
+  }
+  return { pts, tags };
 }
 
 /** Length of the edges with each seam tag on a ring. */
@@ -921,11 +951,15 @@ function seamLengths(r: Ring): Map<string, number> {
 const INTRUSION = 0.01;
 
 /**
- * Cuts the corner end (beyond w = `at`) of a bend and its flange back to the
- * plane n·(p − p0) ≤ 0. A flange reaching past its bend end there (a tab or
+ * Cuts the corner end of a bend and its flange back behind the plane through
+ * the web corner perpendicular to the new bend line (`into` points along it,
+ * in the flat and as `n` in the model). In the model the inner fibre limits
+ * the cut; in the flat the strip must stay behind the new bend's start line
+ * too, which matters where the bend allowance is shorter than the inner arc
+ * (methods BA and BD). A flange reaching past its bend end there (a tab or
  * a closed corner added to it) keeps its outline; only the bend is cut.
  */
-function trimToPlane(part: Part, placements: Map<string, Affine>, c: CornerBend, at: number, p0: V3, n: V3): void {
+function trimToPlane(part: Part, placements: Map<string, Affine>, c: CornerBend, corner: V2, into: V2, n: V3, p0: V3): void {
   const b = c.bend;
   const key = c.s > 0 ? 'ext1' : 'ext0';
   if (b[key]) return;
@@ -933,17 +967,28 @@ function trimToPlane(part: Part, placements: Map<string, Affine>, c: CornerBend,
   const MA = placements.get(b.faceA)!;
   const MB = b.faceB ? placements.get(b.faceB) : undefined;
   const w = (q: V2): number => dot2(sub2(q, b.origin), b.dir);
-  // how far the bend and flange reach past the plane
+  const at = w(corner);
+  // how far the bend and flange reach past the plane, in the model and in the flat
   let intrusion = -Infinity;
-  for (const f of profileSamples(b)) for (const h of [0, part.T]) intrusion = Math.max(intrusion, dot3(n, sub3(applyA(MA, stripPoint(b, part.T, cornerEnd(c), f, h)), p0)));
+  for (const f of profileSamples(b)) {
+    for (const h of [0, part.T]) intrusion = Math.max(intrusion, dot3(n, sub3(applyA(MA, stripPoint(b, part.T, cornerEnd(c), f, h)), p0)));
+    intrusion = Math.max(intrusion, dot2(sub2(stripFlat(b, cornerEnd(c), f), corner), into));
+  }
   if (face && MB) {
     for (const q of face.outer.pts) {
       if (c.s * (w(q) - at) < 0) continue;
+      intrusion = Math.max(intrusion, dot2(sub2(q, corner), into));
       for (const z of [0, part.T]) intrusion = Math.max(intrusion, dot3(n, sub3(applyA(MB, v3(q.x, q.y, z)), p0)));
     }
   }
   if (intrusion <= INTRUSION) return;
-  const pieces = lowerEnvelope([...fibreLimits(part, placements, c, n, p0, 0), { a: 0, b: 0, c: 0 }], b.angle);
+  // in the flat a strip point at fraction f may extend by e ≤ A + B·ba·f; B·ba/angle·sin(angle·f) stays below that
+  const ext = scale2(b.dir, c.s);
+  const along = dot2(ext, into);
+  const A = -dot2(sub2(stripFlat(b, cornerEnd(c), 0), corner), into) / along;
+  const B = -dot2(b.nrm, into) / along;
+  const flatTerm: Trig = B >= 0 && b.angle > 1e-9 ? { a: A, b: (B * b.ba) / b.angle, c: 0 } : { a: A + Math.min(0, B) * b.ba, b: 0, c: 0 };
+  const pieces = lowerEnvelope([...fibreLimits(part, placements, c, n, p0, 0), flatTerm, { a: 0, b: 0, c: 0 }], b.angle);
   if (pieces.every((q) => q.a === 0 && q.b === 0 && q.c === 0)) return;
   b[key] = { pieces };
   if (!wideEnough(b)) {
@@ -968,7 +1013,8 @@ function trimToPlane(part: Part, placements: Map<string, Affine>, c: CornerBend,
     // the outline edge leaving the seam at its corner end names the cut
     const sideTag = ring.tags[end] === seam ? ring.tags[(end - 1 + n2) % n2] : ring.tags[end];
     try {
-      kept = splitRing(ring, b.origin, scale2(b.dir, c.s), c.s * (c.s > 0 ? wr : wl), sideTag).neg;
+      const cut = splitRing(ring, b.origin, scale2(b.dir, c.s), c.s * (c.s > 0 ? wr : wl), sideTag).neg;
+      kept = cut && dropTinyEdges(cut);
     } catch {
       kept = null;
     }

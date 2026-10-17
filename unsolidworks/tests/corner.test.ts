@@ -656,7 +656,7 @@ describe('Geschlossene Ecke: Biegebereich', () => {
     // the mitred end wall is curved; the plain one is still a flat annular sector
     const M = computePlacements(part).get(a.faceA)!;
     const atEnd = (w: number): V3 => applyA(M, stripPoint(a, T, w, 0.5, T / 2));
-    expect(() => bendEntity(part, 'fl.0', 2, atEnd(wr), false)).toThrow(/Stirnseite einer geschlossenen Ecke ist gekrümmt/);
+    expect(() => bendEntity(part, 'fl.0', 2, atEnd(wr), false)).toThrow(/Stirnseite dieser Biegung ist gekrümmt/);
     const plain = bendEntity(part, 'fl.0', 2, atEnd(a.w0), false);
     expect(plain.kind).toBe('plane');
   });
@@ -882,6 +882,22 @@ describe('Kantenlasche an Plattenecken', () => {
       }
     }
   }
+
+  it('keeps the flat pattern clear at obtuse corners with a short bend allowance (BA, BD)', () => {
+    for (const calc of [
+      { method: 'ba' as const, kFactor: 0.5, ba: 3, bd: 0 },
+      { method: 'bd' as const, kFactor: 0.5, ba: 0, bd: 3 },
+    ]) {
+      for (const radius of [2, 6]) {
+        const d = trayDoc(hexagon, { miterGap: undefined });
+        d.sheet = { ...d.sheet, radius, calc };
+        const r = build(d);
+        expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+        expect(interpenetration(r.part).volume).toBe(0);
+        expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+      }
+    }
+  });
 
   it('leaves right-angled and acute plate corners as they were', () => {
     for (const points of [rectangle, triangle]) {

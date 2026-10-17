@@ -700,8 +700,11 @@ export function bendEntity(part: Part, bendId: string, surface: 0 | 1 | 2, hitPo
     const across = flat ? b.ba : b.angle * Math.hypot(off, b.up ? T + R - q.z : q.z + R);
     if (Math.min(f, 1 - f) * across < Math.min(Math.abs(w - hl), Math.abs(w - hr))) return stripEdgeWall(part, b, M, f < 0.5 ? 0 : 1, w, flat);
     const atStart = Math.abs(w - hl) <= Math.abs(w - hr);
-    if (atStart ? b.ext0 : b.ext1) throw new Error('Die Stirnseite einer geschlossenen Ecke ist gekrümmt. Bitte eine Kante oder die Biegefläche wählen.');
-    const end = atStart ? b.w0 : b.w1;
+    // a profiled end (closed corner, mitre, a bend cut back at a corner) is curved unless its offset is the same everywhere
+    const profile = atStart ? b.ext0 : b.ext1;
+    const offset = profile?.pieces.every((q) => q.b === 0 && q.c === 0 && q.a === profile.pieces[0].a) ? profile.pieces[0].a : profile ? null : 0;
+    if (offset === null) throw new Error('Die Stirnseite dieser Biegung ist gekrümmt. Bitte eine Kante oder die Biegefläche wählen.');
+    const end = atStart ? b.w0 - offset : b.w1 + offset;
     const normal = unit(applyDirA(M, atStart ? scale3(dir3, -1) : dir3)) ?? v3(0, 0, 1);
     if (flat) {
       const o = stripFlat(b, end, 0);
