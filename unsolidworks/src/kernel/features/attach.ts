@@ -68,6 +68,12 @@ export function attachToEdge(
   tagPrefix: string,
   /** Tag for the moved edge; defaults to the bend seam. Used for planar extensions. */
   farTag?: string,
+  /**
+   * When the bend is set back into the face (s < 0) and the material left
+   * between a relief and the corner would be narrower than this, the face is
+   * cut down to the corner instead (no sliver of sheet next to the bend).
+   */
+  minTab = 0,
 ): StripFrame {
   const face = edge.face;
   const ring = face.outer;
@@ -126,6 +132,15 @@ export function attachToEdge(
     } else if (s > 0) {
       path.push({ p: W(w0, 0), tag: tabTag });
       path.push({ p: W(w0, s), tag: seam });
+    } else if (minTab > 0 && w0 - (relief.type === 'tear' ? 0 : dr) < minTab) {
+      // cut the face down to the corner: the edge moves to the bend line like a full-width bend
+      const prev = ring.pts[(k - 1 + n) % n];
+      const lam = lineIntersect(W(0, s), d, prev, sub2(P, prev));
+      if (lam === null) throw new Error('Die Nachbarkante verläuft parallel zur gewählten Kante. Bitte eine Teilbreite verwenden.');
+      if (dot2(sub2(W(lam, s), prev), sub2(P, prev)) < 1e-6) throw new Error('Die Nachbarkante ist zu kurz für diese Laschenposition.');
+      path.length = 0;
+      path.push({ p: W(lam, s), tag: reliefTag });
+      path.push({ p: W(w0, s), tag: seam });
     } else if (relief.type === 'tear') {
       path.push({ p: W(w0, 0), tag: reliefTag });
       path.push({ p: W(w0, s), tag: seam });
@@ -164,6 +179,13 @@ export function attachToEdge(
     } else if (s > 0) {
       path.push({ p: W(w1, s), tag: tabTag });
       path.push({ p: W(w1, 0), tag: origTag });
+    } else if (minTab > 0 && len - w1 - (relief.type === 'tear' ? 0 : dr) < minTab) {
+      const next = ring.pts[(k + 2) % n];
+      const lam = lineIntersect(W(0, s), d, Q, sub2(next, Q));
+      if (lam === null) throw new Error('Die Nachbarkante verläuft parallel zur gewählten Kante. Bitte eine Teilbreite verwenden.');
+      if (dot2(sub2(W(lam, s), Q), sub2(next, Q)) > dot2(sub2(next, Q), sub2(next, Q)) - 1e-6) throw new Error('Die Nachbarkante ist zu kurz für diese Laschenposition.');
+      path.push({ p: W(w1, s), tag: reliefTag });
+      replaceQ = W(lam, s);
     } else if (relief.type === 'tear') {
       path.push({ p: W(w1, s), tag: reliefTag });
       path.push({ p: W(w1, 0), tag: origTag });

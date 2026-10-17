@@ -348,7 +348,7 @@ function hemPanel(host: PanelHost, f: HemFeature): HTMLElement[] {
     section(
       'Kanten',
       edgeList(host, f),
-      h('p', { class: 'note' }, 'Ober- oder Unterkante anklicken: Der Saum legt sich zu dieser Seite um.'),
+      h('p', { class: 'note' }, 'Ober- oder Unterkante anklicken: Der Saum legt sich zu dieser Seite um. Läuft er dabei in eine Nachbarlasche oder einen anderen Saum, wird er an diesem Ende gekürzt und hält 0,1 mm Abstand.'),
       checkField('Richtung umkehren', () => f.reverse, (v) => ((f.reverse = v), host.changed())),
     ),
     section(

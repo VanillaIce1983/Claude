@@ -5,8 +5,11 @@ import { crc32, makeZip } from '../src/kernel/export/zip';
 import { edgeFlangeGeometry } from '../src/kernel/features/flange';
 import type { EdgeFlangeFeature, Feature, HemFeature, JogFeature, SketchedBendFeature } from '../src/kernel/features/types';
 import { bendAllowance, outsideSetback } from '../src/kernel/sheet';
-import { rad } from '../src/kernel/vec';
-import { build, checkClosed, doc, expectedVolume, plate } from './helpers';
+import { HEM_CLEARANCE } from '../src/kernel/features/clearance';
+import { Part, computePlacements, stripPoint } from '../src/kernel/model';
+import { distPointSegment, pointInPolygon } from '../src/kernel/polygon';
+import { V3, applyA, invertRigid, rad, v2, v3 } from '../src/kernel/vec';
+import { build, checkClosed, doc, edgeRef, expectedVolume, plate } from './helpers';
 
 const T = 2;
 const R = 2;
@@ -249,6 +252,132 @@ describe('hem', () => {
   it('teardrop tail ends on the face at 270°', () => {
     const r = build(doc([plate(), hem({ hemType: 'teardrop', angle: 270, radius: 3 })]));
     expect(lowestOverBase(r)).toBeCloseTo(T, 6);
+  });
+});
+
+describe('hem next to other flanges', () => {
+  const tray = (position: EdgeFlangeFeature['position']): EdgeFlangeFeature => ({
+    id: 'fl',
+    name: 'Kantenlasche1',
+    type: 'edgeFlange',
+    edges: [
+      { tag: 'base:e0', at: { x: 50, y: 0 }, side: 'top' },
+      { tag: 'base:e1', at: { x: 100, y: 25 }, side: 'top' },
+      { tag: 'base:e2', at: { x: 50, y: 50 }, side: 'top' },
+      { tag: 'base:e3', at: { x: 0, y: 25 }, side: 'top' },
+    ],
+    angle: 90,
+    length: 30,
+    lengthRef: 'outer',
+    position,
+    reverse: false,
+    width: { mode: 'full', offset1: 0, offset2: 0, width: 0 },
+  });
+  const hemsOn = (part: Part, tags: string[], side: 'top' | 'bottom', over: Partial<HemFeature> = {}): HemFeature => ({
+    id: 'hem',
+    name: 'Saum1',
+    type: 'hem',
+    edges: tags.map((t) => ({ ...edgeRef(part, t, side), side })),
+    hemType: 'closed',
+    position: 'materialInside',
+    reverse: false,
+    length: 10,
+    gap: 1,
+    angle: 270,
+    radius: 2,
+    width: { mode: 'full', offset1: 0, offset2: 0, width: 0 },
+    ...over,
+  });
+
+  /** Points through the sheet of a bend strip and of its leg face. */
+  function hemPoints(part: Part, id: string): V3[] {
+    const pl = computePlacements(part);
+    const b = part.bends.get(id)!;
+    const MA = pl.get(b.faceA)!;
+    const pts: V3[] = [];
+    for (let i = 0; i <= 16; i++) for (let j = 0; j <= 40; j++) for (const h of [0, T / 2, T]) pts.push(applyA(MA, stripPoint(b, T, b.w0 + ((b.w1 - b.w0) * j) / 40, i / 16, h)));
+    const leg = b.faceB ? part.faces.get(b.faceB) : undefined;
+    if (leg) {
+      const MB = pl.get(leg.id)!;
+      const xs = leg.outer.pts.map((p) => p.x);
+      const ys = leg.outer.pts.map((p) => p.y);
+      for (let i = 0; i <= 40; i++) for (let j = 0; j <= 10; j++) {
+        const p = v2(Math.min(...xs) + ((Math.max(...xs) - Math.min(...xs)) * i) / 40, Math.min(...ys) + ((Math.max(...ys) - Math.min(...ys)) * j) / 10);
+        if (pointInPolygon(p, leg.outer.pts)) for (const h of [0, T / 2, T]) pts.push(applyA(MB, v3(p.x, p.y, h)));
+      }
+    }
+    return pts;
+  }
+
+  /** Distance from a point to the sheet of a planar face. */
+  function toFace(part: Part, faceId: string, p: V3): number {
+    const face = part.faces.get(faceId)!;
+    const q = applyA(invertRigid(computePlacements(part).get(faceId)!), p);
+    const pt = v2(q.x, q.y);
+    const pts = face.outer.pts;
+    const inPlane = pointInPolygon(pt, pts) ? 0 : Math.min(...pts.map((a, i) => distPointSegment(pt, a, pts[(i + 1) % pts.length])));
+    return Math.hypot(inPlane, Math.max(0, -q.z, q.z - T));
+  }
+
+  const clearance = (part: Part, hemId: string, faces: string[]): number => {
+    let min = Infinity;
+    for (const p of hemPoints(part, hemId)) for (const f of faces) min = Math.min(min, toFace(part, f, p));
+    return min;
+  };
+
+  for (const position of ['materialInside', 'virtualSharp', 'materialOutside'] as const) {
+    for (const hemType of ['closed', 'open', 'teardrop', 'rolled'] as const) {
+      it(`a ${hemType} hem curling into a ${position} tray is shortened to clear the side flanges`, () => {
+        const fl = tray(position);
+        const r1 = build(doc([plate(), fl]));
+        const r = build(doc([plate(), fl, hemsOn(r1.part, ['fl.0:end'], 'top', { hemType })]));
+        expectSolid(r);
+        const b = r.part.bends.get('hem')!;
+        expect(b.w0).toBeGreaterThan(0);
+        expect(b.w1).toBeLessThan(100);
+        expect(clearance(r.part, 'hem', ['fl.1', 'fl.3'])).toBeGreaterThanOrEqual(HEM_CLEARANCE - 1e-6);
+        // it is not shortened more than needed: back by the side flange (T) plus the gap at most
+        expect(b.w0).toBeLessThanOrEqual(T + HEM_CLEARANCE + 1e-6);
+        expect(100 - b.w1).toBeLessThanOrEqual(T + HEM_CLEARANCE + 1e-6);
+      });
+    }
+  }
+
+  it('a hem curling away from the side flanges keeps its full width', () => {
+    const fl = tray('materialInside');
+    const r1 = build(doc([plate(), fl]));
+    const r = build(doc([plate(), fl, hemsOn(r1.part, ['fl.0:end'], 'bottom')]));
+    const b = r.part.bends.get('hem')!;
+    expect(b.w0).toBe(0);
+    expect(b.w1).toBeCloseTo(100, 9);
+  });
+
+  it('hems on all four flanges of a tray stay clear of each other and of the flanges', () => {
+    for (const position of ['materialInside', 'bendOutside'] as const) {
+      const fl = tray(position);
+      const r1 = build(doc([plate(), fl]));
+      const r = build(doc([plate(), fl, hemsOn(r1.part, ['fl.0:end', 'fl.1:end', 'fl.2:end', 'fl.3:end'], 'top', { hemType: 'open' })]));
+      expectSolid(r);
+      const legs = ['hem.0', 'hem.1', 'hem.2', 'hem.3'];
+      legs.forEach((id, i) => {
+        const others = ['fl.0', 'fl.1', 'fl.2', 'fl.3', ...legs].filter((f) => f !== id && f !== `fl.${i}`);
+        expect(clearance(r.part, id, others)).toBeGreaterThanOrEqual(HEM_CLEARANCE - 1e-6);
+      });
+    }
+  });
+
+  it('a shortened hem leaves no sliver of the flange between itself and the corner', () => {
+    // the side flanges of a materialOutside tray touch fl.0's end, so the hem only gives way by the gap
+    const fl = tray('materialOutside');
+    const r1 = build(doc([plate(), fl]));
+    const r = build(doc([plate(), fl, hemsOn(r1.part, ['fl.0:end'], 'top')]));
+    expectSolid(r);
+    const b = r.part.bends.get('hem')!;
+    expect(b.w0).toBeCloseTo(HEM_CLEARANCE, 5);
+    // the flange is cut down to the hem's bend line right to its corner
+    const flange = r.part.faces.get('fl.0')!;
+    const top = Math.max(...flange.outer.pts.map((p) => (p.x - b.origin.x) * b.nrm.x + (p.y - b.origin.y) * b.nrm.y));
+    expect(top).toBeLessThanOrEqual(1e-9);
   });
 });
 

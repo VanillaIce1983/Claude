@@ -1,9 +1,10 @@
 // Kantenlasche (edge flange) and Saum (hem).
 
-import { Bend, Part, findEdge, seamTag } from '../model';
+import { Bend, Part, clonePart, findEdge, seamTag } from '../model';
 import { SheetSettings, bendAllowance, describeCalc, insideSetback, outsideSetback, resolveBendParams } from '../sheet';
 import { dist2, fmt, rad } from '../vec';
 import { attachToEdge, rectRing, requireFreeOuterEdge, resolveWidth } from './attach';
+import { clearWidth } from './clearance';
 import type { EdgeFlangeFeature, EdgeSelection, HemFeature } from './types';
 
 /** Bend direction and selected-edge height in the canonical "bend up" frame. */
@@ -182,33 +183,52 @@ export function applyHem(part: Part, sheet: SheetSettings, f: HemFeature): void 
       flat = th <= (3 * Math.PI) / 2 ? (R * (1 - Math.cos(th))) / -Math.sin(th) : (R - (R + T) * Math.cos(th)) / -Math.sin(th);
     }
 
-    const len = dist2(edge.a, edge.b);
-    const [w0, w1] = resolveWidth(f.width, len);
     const id = f.edges.length > 1 ? `${f.id}.${i}` : f.id;
-    const frame = attachToEdge(part, edge, w0, w1, s, base.relief, id, id);
-    let faceB: string | null = null;
-    if (flat > 1e-3) {
-      faceB = id;
-      const ring = rectRing(frame, ba, ba + flat, {
-        seam: seamTag(id, 'B'),
-        side0: `${id}:side0`,
-        end: `${id}:end`,
-        side1: `${id}:side1`,
+    const build = (w0: number, w1: number, minTab = 0): void => {
+      const e = findEdge(part, sel);
+      const frame = attachToEdge(part, e, w0, w1, s, base.relief, id, id, undefined, minTab);
+      let faceB: string | null = null;
+      if (flat > 1e-3) {
+        faceB = id;
+        const ring = rectRing(frame, ba, ba + flat, {
+          seam: seamTag(id, 'B'),
+          side0: `${id}:side0`,
+          end: `${id}:end`,
+          side1: `${id}:side1`,
+        });
+        part.faces.set(id, { id, feature: f.id, outer: ring, holes: [] });
+      }
+      part.bends.set(id, {
+        id,
+        feature: f.id,
+        kind: 'hem',
+        faceA: e.face.id,
+        faceB,
+        ...frame,
+        angle: th,
+        up,
+        radius: R,
+        ba,
+        calc: describeCalc(base.calc),
       });
-      part.faces.set(id, { id, feature: f.id, outer: ring, holes: [] });
-    }
-    part.bends.set(id, {
-      id,
-      feature: f.id,
-      kind: 'hem',
-      faceA: edge.face.id,
-      faceB,
-      ...frame,
-      angle: th,
-      up,
-      radius: R,
-      ba,
-      calc: describeCalc(base.calc),
-    });
+    };
+    const before = clonePart(part);
+    const restore = (): void => {
+      const c = clonePart(before);
+      part.faces = c.faces;
+      part.bends = c.bends;
+      part.circles = c.circles;
+    };
+    const [w0, w1] = resolveWidth(f.width, dist2(edge.a, edge.b));
+    build(w0, w1);
+    // a hem must not run into a neighbouring flange (or another hem): it is
+    // shortened at that end, like a real part, keeping a small gap
+    const own = new Set([id, edge.face.id]);
+    const narrow = clearWidth(part, id, own);
+    if (!narrow) return;
+    restore();
+    // no sliver of sheet narrower than the thickness stays between the hem and the corner
+    build(narrow[0], narrow[1], T);
+    if (clearWidth(part, id, own)) throw new Error('Der Saum würde in eine benachbarte Lasche laufen. Bitte die Saumbreite verringern oder die Lasche kürzen.');
   });
 }
