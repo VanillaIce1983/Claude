@@ -4,7 +4,10 @@ import type { CutFeature, EdgeFlangeFeature, Feature, JogFeature, SketchedBendFe
 import { bendAllowance, outsideSetback } from '../src/kernel/sheet';
 import { rad } from '../src/kernel/vec';
 import { exampleDoc } from '../src/ui/example';
+import { signedArea } from '../src/kernel/polygon';
 import { build, checkClosed, doc, edgeRef, expectedVolume, plate } from './helpers';
+import fourHoles from './fixtures/earcut-case145.json';
+import sixHoles from './fixtures/earcut-case44.json';
 
 const T = 2;
 const R = 2;
@@ -202,5 +205,18 @@ describe('mesh robustness', () => {
       expect(r.mesh.indices.length / 3).toBeLessThan(200);
     });
   }
-});
 
+  // found by fuzzing: earcut tiled these faces with overlapping triangles unless the outer ring started elsewhere
+  for (const [name, feats] of [
+    ['four', fourHoles],
+    ['six', sixHoles],
+  ] as const) {
+    it(`a face with ${name} holes is tiled exactly`, () => {
+      const r = build(doc(feats as unknown as Feature[]));
+      expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+      const base = r.part.faces.get('base')!;
+      const area = Math.abs(signedArea(base.outer.pts)) - base.holes.reduce((sum, h) => sum + Math.abs(signedArea(h.pts)), 0);
+      expect(r.fp.area).toBeCloseTo(area, 6);
+    });
+  }
+});

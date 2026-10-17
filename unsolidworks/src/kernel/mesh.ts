@@ -135,6 +135,50 @@ function augmentRing(ring: Ring, extra: V2[], allowedTag: (tag: string) => boole
   return { pts, tags };
 }
 
+/** Sum of the triangle areas: larger than the polygon's area when triangles overlap. */
+function coveredArea(coords: number[], idx: number[]): number {
+  let sum = 0;
+  for (let i = 0; i < idx.length; i += 3) {
+    const [a, b, c] = [2 * idx[i], 2 * idx[i + 1], 2 * idx[i + 2]];
+    sum += Math.abs((coords[b] - coords[a]) * (coords[c + 1] - coords[a + 1]) - (coords[c] - coords[a]) * (coords[b + 1] - coords[a + 1])) / 2;
+  }
+  return sum;
+}
+
+/**
+ * earcut can return overlapping triangles for some faces with several holes,
+ * depending on where the outer ring starts. The covered area shows it, so
+ * other start vertices are tried until the triangles tile the face exactly.
+ */
+function triangulate(coords: number[], holeIdx: number[]): number[] {
+  const n = holeIdx.length ? holeIdx[0] : coords.length / 2;
+  const ringArea = (from: number, to: number): number => {
+    let a = 0;
+    for (let i = from; i < to; i++) {
+      const j = i + 1 < to ? i + 1 : from;
+      a += coords[2 * i] * coords[2 * j + 1] - coords[2 * j] * coords[2 * i + 1];
+    }
+    return Math.abs(a) / 2;
+  };
+  const bounds = [0, ...holeIdx, coords.length / 2];
+  let want = ringArea(0, n);
+  for (let k = 1; k + 1 < bounds.length; k++) want -= ringArea(bounds[k], bounds[k + 1]);
+  const tol = 1e-9 * Math.max(1, want);
+  let best: number[] = [];
+  let bestErr = Infinity;
+  for (let rot = 0; rot < Math.min(n, 16); rot++) {
+    const c = rot === 0 ? coords : [...coords.slice(2 * rot, 2 * n), ...coords.slice(0, 2 * rot), ...coords.slice(2 * n)];
+    const idx = earcut(c, holeIdx, 2).map((i) => (i < n ? (i + rot) % n : i));
+    const err = Math.abs(coveredArea(coords, idx) - want);
+    if (err < bestErr) {
+      best = idx;
+      bestErr = err;
+    }
+    if (err <= tol) break;
+  }
+  return best;
+}
+
 /**
  * Make an earcut triangulation conforming: drop zero-area slivers (earcut makes
  * them at collinear points) and fan-split triangles whose edges pass through
@@ -313,7 +357,7 @@ export function buildMesh(part: Part): PartMesh {
       }
     }
     faceVerts.set(face.id, list);
-    const idx = conformTriangles(coords, earcut(coords, holeIdx, 2));
+    const idx = conformTriangles(coords, triangulate(coords, holeIdx));
     for (let i = 0; i < idx.length; i += 3) {
       let a = idx[i];
       let b = idx[i + 1];
