@@ -32,7 +32,66 @@ export interface FaceSketch {
   edge: EdgeRef;
   entities: SketchEntity[];
   anchor?: SketchAnchor;
+  /** Driving dimensions (smart dimensions); see sketchSolve.ts. */
+  dims?: SketchDim[];
 }
+
+/** A named point of a sketch entity: 'c' centre, 'p0'…'p3' rectangle corners, 'p1'/'p2' slot centres, 'v<i>' polygon or polyline vertices. */
+export interface SketchPointRef {
+  entity: string;
+  point: string;
+}
+
+/** A straight edge of a sketch entity: 'e<i>' (rectangle side, polygon or polyline segment, slot side). */
+export interface SketchLineRef {
+  entity: string;
+  line: string;
+}
+
+/** A corner of the part: the outline vertex between two tagged edges of a face, on one sheet surface. */
+export interface ModelPointRef {
+  prevTag: string;
+  nextTag: string;
+  /** Flat position, to tell apart corners with the same tags. */
+  at: V2;
+  side: 'top' | 'bottom';
+}
+
+/** A straight outline edge of the part, on one sheet surface. */
+export interface ModelLineRef {
+  tag: string;
+  at: V2;
+  side: 'top' | 'bottom';
+}
+
+export type DimTarget =
+  | { kind: 'point'; ref: SketchPointRef }
+  | { kind: 'line'; ref: SketchLineRef }
+  | { kind: 'modelPoint'; ref: ModelPointRef }
+  | { kind: 'modelLine'; ref: ModelLineRef };
+
+/** h: along the sketch x axis, v: along y, aligned: the true distance. Ignored where a line is involved (perpendicular distance). */
+export type DimOrient = 'h' | 'v' | 'aligned';
+
+export type SketchDim =
+  | {
+      id: string;
+      kind: 'distance';
+      a: DimTarget;
+      b: DimTarget;
+      orient: DimOrient;
+      value: number;
+      /** Where the label sits, relative to the middle of what is measured (sketch coordinates). */
+      place?: V2;
+    }
+  | {
+      /** Circle or polygon (circumscribed) diameter, slot width. */
+      id: string;
+      kind: 'diameter';
+      entity: string;
+      value: number;
+      place?: V2;
+    };
 
 export interface SketchFrame {
   face: Face;

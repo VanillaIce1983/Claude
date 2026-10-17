@@ -7,6 +7,7 @@ import type { MultiPolygon, Ring as PcRing } from 'polygon-clipping';
 import { Part, isSeamTag } from '../model';
 import { GEO_TOL, Ring, bbox2, cutClearance, distPointSegment, isSimple, orientRing, pointInPolygon, segmentDistance, segmentsIntersect, signedArea } from '../polygon';
 import { SketchEntity, SketchFrame, entityOutline, entityProblem, sketchFrame, sketchToFlat } from '../sketch';
+import { solvedEntities } from '../sketchSolve';
 import { V2, cross2, dist2, dot2, lerp2, sub2, v2 } from '../vec';
 import type { SketchCutFeature } from './types';
 
@@ -254,8 +255,10 @@ export function applySketchCut(part: Part, f: SketchCutFeature): void {
   const rings = [face.outer, ...face.holes];
   const origPts = rings.flatMap((r) => r.pts);
   const clear = cutClearance(face.outer.pts);
+  // dimensions to the part move the profiles with it
+  const entities = solvedEntities(part, f.sketch);
   const raw: V2[][] = [];
-  for (const e of f.sketch.entities) {
+  for (const e of entities) {
     const problem = entityProblem(e);
     if (problem) throw new Error(problem);
     raw.push(profileOutline(frame, e, clear));
@@ -264,7 +267,7 @@ export function applySketchCut(part: Part, f: SketchCutFeature): void {
   const size = Math.max(box.maxX - box.minX, box.maxY - box.minY, 1) / 64;
   const exact = conformLoops(rings.map((r) => r.pts), raw, size);
   const profiles = exact.profiles;
-  const profileSegs = f.sketch.entities.flatMap((e, i) => ringSegs({ pts: profiles[i], tags: profiles[i].map(() => `${f.id}:${e.id}`) }));
+  const profileSegs = entities.flatMap((e, i) => ringSegs({ pts: profiles[i], tags: profiles[i].map(() => `${f.id}:${e.id}`) }));
 
   const origSegs = rings.flatMap(ringSegs);
   const seams = origSegs.filter((s) => isSeamTag(s.tag));
@@ -299,7 +302,7 @@ export function applySketchCut(part: Part, f: SketchCutFeature): void {
 
   face.outer = outer;
   face.holes = holes;
-  for (const e of f.sketch.entities) {
+  for (const e of entities) {
     if (e.kind !== 'circle') continue;
     const tag = `${f.id}:${e.id}`;
     // only an intact circle is a true circle; merged or notched ones are plain contours
