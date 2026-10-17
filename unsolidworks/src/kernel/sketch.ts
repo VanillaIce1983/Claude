@@ -4,6 +4,7 @@
 // its place when earlier features change the size of the part.
 
 import { EdgeRef, Face, Part, findEdge } from './model';
+import { GEO_TOL } from './polygon';
 import { V2, add2, norm2, rotCCW, scale2, sub2, dot2, v2 } from './vec';
 
 export type SketchEntity =
@@ -19,9 +20,18 @@ export type SketchEntity =
 
 export type SketchEntityKind = SketchEntity['kind'];
 
+/**
+ * Where the origin sits on a reference edge that earlier features split into
+ * pieces: 'line' is the start of the whole edge line (sketches made since this
+ * option exists); without it, the start of the piece `at` lies on, as in older
+ * documents, so those keep their geometry.
+ */
+export type SketchAnchor = 'line';
+
 export interface FaceSketch {
   edge: EdgeRef;
   entities: SketchEntity[];
+  anchor?: SketchAnchor;
 }
 
 export interface SketchFrame {
@@ -34,10 +44,34 @@ export interface SketchFrame {
   y: V2;
 }
 
-export function sketchFrame(part: Part, edge: EdgeRef): SketchFrame {
+/** Pieces of one split edge may sit this far off its line (snapping during a cut). */
+const LINE_TOL = 10 * GEO_TOL;
+
+/**
+ * Frame of a face sketch (also used by Bohrung). A notch from an earlier
+ * feature splits the reference edge into pieces with the same tag, and `at`
+ * finds whichever piece is nearest. With anchor 'line' the origin is the start
+ * of the first piece along the edge line, not of the found piece, so moving or
+ * suppressing that notch does not move the sketch. A notch that removes the
+ * start of the edge still moves the origin to where the edge now begins.
+ */
+export function sketchFrame(part: Part, edge: EdgeRef, anchor?: SketchAnchor): SketchFrame {
   const e = findEdge(part, edge);
   const x = norm2(sub2(e.b, e.a));
-  return { face: e.face, origin: { ...e.a }, x, y: rotCCW(x) };
+  const y = rotCCW(x);
+  if (anchor !== 'line') return { face: e.face, origin: e.a, x, y };
+  let start = 0;
+  for (const ring of [e.face.outer, ...e.face.holes]) {
+    ring.pts.forEach((a, i) => {
+      if (ring.tags[i] !== e.tag) return;
+      const b = ring.pts[(i + 1) % ring.pts.length];
+      const da = sub2(a, e.a);
+      const db = sub2(b, e.a);
+      const onLine = Math.abs(dot2(da, y)) < LINE_TOL && Math.abs(dot2(db, y)) < LINE_TOL;
+      if (onLine && dot2(db, x) > dot2(da, x)) start = Math.min(start, dot2(da, x));
+    });
+  }
+  return { face: e.face, origin: add2(e.a, scale2(x, start)), x, y };
 }
 
 export function sketchToFlat(f: SketchFrame, p: V2): V2 {

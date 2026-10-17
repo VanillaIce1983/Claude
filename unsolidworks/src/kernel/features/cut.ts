@@ -1,9 +1,10 @@
-// Ausschnitt: holes (round, rectangular, slot) on one face, placed relative
+// Bohrung: holes (round, rectangular, slot) on one face, placed relative
 // to an edge of that face, optionally repeated along the edge.
 
-import { Part, findEdge } from '../model';
-import { Ring, circlePoints, orientRing, pointInPolygon, ringsCross } from '../polygon';
-import { V2, add2, norm2, rad, rotCCW, scale2, sub2, v2 } from '../vec';
+import type { Part } from '../model';
+import { Ring, circlePoints, cutClearance, orientRing, pointInPolygon, ringsWithin } from '../polygon';
+import { sketchFrame } from '../sketch';
+import { V2, add2, rad, scale2, v2 } from '../vec';
 import type { CutFeature } from './types';
 
 function circleSegments(r: number): number {
@@ -44,10 +45,10 @@ function shapeOutline(f: CutFeature): V2[] {
 }
 
 export function applyCut(part: Part, f: CutFeature): void {
-  const e = findEdge(part, f.edge);
-  const face = e.face;
-  const d = norm2(sub2(e.b, e.a));
-  const inward = rotCCW(d);
+  if (!f.edge.tag) throw new Error('Bitte auf die Fläche klicken, wo die Bohrung sitzen soll.');
+  // same anchor as a face sketch, so a notch in the reference edge does not move the hole
+  const { face, origin, x: d, y: inward } = sketchFrame(part, f.edge, f.anchor);
+  const clear = cutClearance(face.outer.pts);
   const count = Math.max(1, Math.round(f.count || 1));
   if (count > 1 && !(f.spacing > 0)) throw new Error('Der Abstand im Muster muss größer als 0 sein.');
   const local = shapeOutline(f);
@@ -56,7 +57,7 @@ export function applyCut(part: Part, f: CutFeature): void {
   const sa = Math.sin(a);
   for (let k = 0; k < count; k++) {
     const u = f.u + k * (f.spacing || 0);
-    const center = add2(add2(e.a, scale2(d, u)), scale2(inward, f.v));
+    const center = add2(add2(origin, scale2(d, u)), scale2(inward, f.v));
     const pts = local.map((p) => {
       const x = p.x * ca - p.y * sa;
       const y = p.x * sa + p.y * ca;
@@ -64,16 +65,17 @@ export function applyCut(part: Part, f: CutFeature): void {
     });
     const tag = `${f.id}:h${k}`;
     const ring: Ring = orientRing({ pts, tags: pts.map(() => tag) }, false);
-    if (!pts.every((p) => pointInPolygon(p, face.outer.pts)) || ringsCross(ring.pts, face.outer.pts)) {
+    // closer than `clear` counts as touching: the mesh would merge the hole into the edge
+    if (!pts.every((p) => pointInPolygon(p, face.outer.pts)) || ringsWithin(ring.pts, face.outer.pts, clear)) {
       throw new Error(
         count > 1
-          ? `Ausschnitt ${k + 1} liegt nicht vollständig auf der Fläche. Bitte Position oder Größe anpassen.`
-          : 'Der Ausschnitt liegt nicht vollständig auf der Fläche. Bitte Position oder Größe anpassen.',
+          ? `Bohrung ${k + 1} liegt nicht vollständig auf der Fläche. Bitte Position oder Größe anpassen.`
+          : 'Die Bohrung liegt nicht vollständig auf der Fläche. Bitte Position oder Größe anpassen.',
       );
     }
     for (const h of face.holes) {
-      if (ringsCross(ring.pts, h.pts) || pointInPolygon(ring.pts[0], h.pts) || pointInPolygon(h.pts[0], ring.pts)) {
-        throw new Error('Der Ausschnitt überschneidet einen vorhandenen Ausschnitt.');
+      if (ringsWithin(ring.pts, h.pts, clear) || pointInPolygon(ring.pts[0], h.pts) || pointInPolygon(h.pts[0], ring.pts)) {
+        throw new Error('Die Bohrung überschneidet eine vorhandene Bohrung oder einen Ausschnitt.');
       }
     }
     face.holes.push(ring);

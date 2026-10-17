@@ -1,5 +1,5 @@
 import type { EdgeRef } from '../model';
-import type { FaceSketch } from '../sketch';
+import type { FaceSketch, SketchAnchor } from '../sketch';
 import type { BendOverrides } from '../sheet';
 import type { V2 } from '../vec';
 
@@ -128,6 +128,8 @@ export interface CutFeature extends FeatureBase {
   /** Optional linear pattern along the edge. */
   count: number;
   spacing: number;
+  /** See SketchAnchor in sketch.ts. */
+  anchor?: SketchAnchor;
 }
 
 /** A corner of a face outline, identified by its two edges. */

@@ -119,3 +119,29 @@ export function parseDoc(text: string): Doc {
     features: d.features as Feature[],
   };
 }
+
+/**
+ * Parse a document from storage or a file. Unlike parseDoc (also used for
+ * undo snapshots), this upgrades documents saved by older versions.
+ */
+export function loadDoc(text: string): Doc {
+  const doc = parseDoc(text);
+  renameOldCuts(doc);
+  return doc;
+}
+
+/**
+ * Hole features ('cut') used to be named "Ausschnitt1, 2, …". That name now
+ * belongs to the sketched cut, so those defaults become the next free "BohrungN".
+ */
+function renameOldCuts(doc: Doc): void {
+  const names = new Set(doc.features.map((f) => f.name));
+  for (const f of doc.features) {
+    if (f.type !== 'cut' || !/^Ausschnitt\d+$/.test(f.name)) continue;
+    let n = 1;
+    while (names.has(`Bohrung${n}`)) n++;
+    names.delete(f.name);
+    f.name = `Bohrung${n}`;
+    names.add(f.name);
+  }
+}

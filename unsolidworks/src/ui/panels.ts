@@ -32,11 +32,13 @@ export interface PanelHost {
   /** Rebuild the panel (fields depend on a choice). */
   restructure(): void;
   edgeLabel(ref: { tag: string; at: { x: number; y: number } }, side?: 'top' | 'bottom'): string;
+  /** Whether a reference edge still exists in the part the feature is built on. */
+  edgeExists(ref: { tag: string; at: { x: number; y: number } }): boolean;
   cornerLabel(ref: { prevTag: string; nextTag: string; at: { x: number; y: number } }): string;
   openSketch(): void;
   /** Open the face sketch of the sketched cut being edited. */
   openFaceSketch(): void;
-  /** Forget the chosen face (and the sketch on it) so another face can be picked. */
+  /** Forget the chosen face, keeping the profiles, so another face can be picked. */
   resetSketchFace(): void;
 }
 
@@ -162,12 +164,15 @@ function edgeList(host: PanelHost, f: EdgeFlangeFeature | HemFeature): HTMLEleme
 }
 
 function sketchCutPanel(host: PanelHost, f: SketchCutFeature): HTMLElement[] {
-  if (!f.sketch.edge.tag) {
+  const { edge, entities } = f.sketch;
+  if (!edge.tag || !host.edgeExists(edge)) {
+    // nothing picked yet, or the reference vanished: a face click (re)attaches the sketch
     return [
       section(
         'Skizzenfläche',
-        h('div', { class: 'picklist empty' }, 'Fläche im 3D-Fenster anklicken'),
-        h('p', { class: 'note' }, 'Die nächstgelegene Kante der angeklickten Fläche wird zur Bezugskante: Dort liegt der Skizzenursprung, die X-Achse läuft entlang der Kante.'),
+        h('div', { class: 'picklist empty' }, edge.tag ? 'Bezugskante fehlt – Fläche im 3D-Fenster anklicken' : 'Fläche im 3D-Fenster anklicken'),
+        entities.length ? h('div', { class: 'infobox' }, `${sketchContents(entities)} – bleibt erhalten und wird auf die angeklickte Fläche gelegt`) : null,
+        h('p', { class: 'note' }, 'Die nächstgelegene gerade Kante der angeklickten Fläche wird zur Bezugskante: Dort liegt der Skizzenursprung, die X-Achse läuft entlang der Kante.'),
       ),
     ];
   }
@@ -461,7 +466,7 @@ function cutPanel(host: PanelHost, f: CutFeature): HTMLElement[] {
           host.changed();
           host.restructure();
         },
-        'Form des Ausschnitts',
+        'Form der Bohrung',
       ),
       ...shapeFields,
     ),

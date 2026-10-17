@@ -1,6 +1,6 @@
 // Application controller: document, undo/redo, commands, panels, viewport.
 
-import { Doc, RegenResult, newDoc, parseDoc, regenerate } from '../kernel/doc';
+import { Doc, RegenResult, loadDoc, newDoc, parseDoc, regenerate } from '../kernel/doc';
 import { flatToDxf } from '../kernel/export/dxf';
 import { partToStep } from '../kernel/export/step';
 import { meshToStl } from '../kernel/export/stl';
@@ -12,13 +12,27 @@ import { PartMesh, PickEdge, buildMesh, meshVolume, pickCorners, pickEdges } fro
 import { EdgeRef, Part, findEdge, isSeamTag } from '../kernel/model';
 import { distPointSegment } from '../kernel/polygon';
 import { describeCalc } from '../kernel/sheet';
-import { V2, dist2, dot2, norm2, rotCCW, sub2 } from '../kernel/vec';
+import { V2, dist2 } from '../kernel/vec';
 import { h, svgIcon } from './dom';
 import { exampleDoc } from './example';
 import { safeName, saveFile, initDownloads } from './exporter';
-import { newBaseFlange, newBreakCorner, newClosedCorner, newCut, newEdgeFlange, newHem, newJog, newSketchCut, newSketchedBend, newTab, summary } from './features';
+import {
+  newBaseFlange,
+  newBreakCorner,
+  newClosedCorner,
+  newCut,
+  newEdgeFlange,
+  newHem,
+  newJog,
+  newSketchCut,
+  newSketchedBend,
+  newTab,
+  pickPrompt,
+  referenceEdgeIndex,
+  summary,
+} from './features';
 import { FaceSketchContext, openFaceSketcher } from './faceSketcher';
-import { MAX_MEASURE_PICKS, MEASURE_ICON, MeasurePick, measurePanel, pickToMeasure } from './measure';
+import { MAX_MEASURE_PICKS, MEASURE_ICON, MeasurePick, addsUp, measurePanel, pickToMeasure } from './measure';
 import { MeasureResult, measure } from '../kernel/measure';
 import { flatToSketch, sketchFrame } from '../kernel/sketch';
 import { flatPanel } from './flatpanel';
@@ -130,7 +144,7 @@ export class App implements PanelHost {
   private loadStored(): Doc | null {
     try {
       const s = localStorage.getItem(STORAGE_KEY);
-      return s ? parseDoc(s) : null;
+      return s ? loadDoc(s) : null;
     } catch {
       return null;
     }
@@ -424,9 +438,9 @@ export class App implements PanelHost {
     const s = this.session;
     if (!s) return;
     if (s.draft) {
-      const st = this.model.regen.status.get(s.draft.id);
-      if (st && !st.ok) {
-        this.toast(st.error ?? 'Das Feature kann so nicht erstellt werden.', true);
+      const err = this.draftError(s);
+      if (err) {
+        this.toast(err, true);
         return;
       }
     } else if (this.model.regen.docError) {
@@ -533,13 +547,26 @@ export class App implements PanelHost {
     this.restructure();
   }
 
-  async openFaceSketch(): Promise<void> {
+  openFaceSketch(): void {
+    void this.sketchOnFace(null);
+  }
+
+  /**
+   * Open the face sketch dialog of the sketched cut being edited. `pickedFrom`
+   * is the reference before a face was just picked: cancelling the dialog then
+   * undoes that pick, so the session goes back to face selection.
+   */
+  private async sketchOnFace(pickedFrom: EdgeRef | null): Promise<void> {
     const s = this.session;
-    if (!s?.draft || s.draft.type !== 'sketchCut' || !s.pre.part || !s.draft.sketch.edge.tag) return;
+    if (!s?.draft || s.draft.type !== 'sketchCut' || !s.pre.part) return;
     const f = s.draft;
+    if (this.sketchFaceMissing(s)) {
+      this.toast('Bitte zuerst im 3D-Fenster die Fläche anklicken, auf der skizziert werden soll.', true);
+      return;
+    }
     let ctx: FaceSketchContext;
     try {
-      const frame = sketchFrame(s.pre.part, f.sketch.edge);
+      const frame = sketchFrame(s.pre.part, f.sketch.edge, f.sketch.anchor);
       const toS = (p: V2): V2 => flatToSketch(frame, p);
       const ring = frame.face.outer;
       const seams: [V2, V2][] = [];
@@ -558,18 +585,50 @@ export class App implements PanelHost {
       return;
     }
     const res = await openFaceSketcher(f.sketch.entities, ctx);
-    if (!res || this.session !== s) return;
-    f.sketch.entities = res;
+    if (this.session !== s) return;
+    if (res) f.sketch.entities = res;
+    else if (pickedFrom) f.sketch.edge = pickedFrom;
+    else return;
     this.changed();
     this.restructure();
   }
 
+  /** Forget the face but keep the profiles: the next face pick reopens them there. */
   resetSketchFace(): void {
     const s = this.session;
     if (!s?.draft || s.draft.type !== 'sketchCut') return;
-    s.draft.sketch = { edge: { tag: '', at: { x: 0, y: 0 } }, entities: [] };
+    s.draft.sketch = { ...s.draft.sketch, edge: { tag: '', at: { x: 0, y: 0 } } };
     this.changed();
     this.restructure();
+  }
+
+  /** Whether the sketched cut being edited still needs a face: none picked yet, or its reference edge is gone. */
+  private sketchFaceMissing(s: Session): boolean {
+    const d = s.draft;
+    if (d?.type !== 'sketchCut') return false;
+    return !d.sketch.edge.tag || !this.edgeExists(d.sketch.edge);
+  }
+
+  edgeExists(ref: EdgeRef): boolean {
+    const part = this.session?.pre.part ?? this.model.part;
+    if (!part || !ref.tag) return false;
+    try {
+      findEdge(part, ref);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Error of the feature being edited, worded for what the user has to do next. */
+  private draftError(s: Session): string | undefined {
+    if (!s.draft) return undefined;
+    const st = this.model.regen.status.get(s.draft.id);
+    if (!st || st.ok) return undefined;
+    const prompt = pickPrompt(s.draft);
+    if (prompt) return prompt;
+    if (this.sketchFaceMissing(s)) return 'Die Bezugskante der Skizze existiert nicht mehr. Bitte im 3D-Fenster eine Fläche anklicken – die Skizze bleibt erhalten.';
+    return st.error ?? 'Das Feature kann so nicht erstellt werden.';
   }
 
   // ---------------------------------------------------------------- picking
@@ -585,7 +644,8 @@ export class App implements PanelHost {
       return;
     }
     if (!s || !s.draft) {
-      this.viewer.setPickMode('none');
+      // faces select their feature only outside a session
+      this.viewer.setPickMode(s ? 'none' : 'select');
       this.viewer.setSelection([]);
       this.viewer.setHighlightFeature(this.flat ? null : this.selected);
       return;
@@ -641,7 +701,7 @@ export class App implements PanelHost {
       const e = d.edge.tag ? find(d.edge) : undefined;
       this.viewer.setSelection(e ? [{ edge: e, side: 'top' }] : []);
     } else if (d.type === 'sketchCut') {
-      const e = d.sketch.edge.tag ? find(d.sketch.edge) : undefined;
+      const e = this.sketchFaceMissing(s) ? undefined : find(d.sketch.edge);
       this.viewer.setPickMode(e ? 'none' : 'face');
       this.viewer.setSelection(e ? [{ edge: e, side: 'top' }] : []);
     } else {
@@ -666,14 +726,16 @@ export class App implements PanelHost {
       const i = this.picks.findIndex((x) => x.key === p.key);
       if (i >= 0) this.picks.splice(i, 1);
       else {
-        // a new pick after a complete pair starts a new measurement
-        if (this.picks.length >= MAX_MEASURE_PICKS) this.picks = [];
+        // after a complete measurement a new pick starts over, unless it adds to a sum
+        const sum = [...this.picks.map((x) => x.entity), p.entity];
+        if (this.picks.length >= MAX_MEASURE_PICKS || (this.picks.length >= 2 && !addsUp(sum))) this.picks = [];
         this.picks.push(p);
       }
       this.updateMeasure();
       return;
     }
     if (!s || !s.draft) {
+      if (s) return;
       if (hit?.kind === 'face') {
         const now = performance.now();
         if (this.lastPick.id === hit.feature && now - this.lastPick.t < 400) {
@@ -718,45 +780,32 @@ export class App implements PanelHost {
       else d.corners.push({ prevTag: c.prevTag, nextTag: c.nextTag, at: { ...hit.edge.flatA } });
       this.changed();
       this.restructure();
-    } else if (d.type === 'sketchCut' && !d.sketch.edge.tag && hit.kind === 'face' && hit.pieceKind === 'face' && hit.flat && s.pre.part) {
+    } else if (d.type === 'sketchCut' && this.sketchFaceMissing(s) && hit.kind === 'face' && hit.pieceKind === 'face' && hit.flat && s.pre.part) {
       const face = s.pre.part.faces.get(hit.id);
       if (!face) return;
-      // the outline edge nearest to the click becomes the sketch's reference edge
-      let best = 0;
-      let bd = Infinity;
-      face.outer.pts.forEach((p, i) => {
-        const dd = distPointSegment(hit.flat!, p, face.outer.pts[(i + 1) % face.outer.pts.length]);
-        if (dd < bd) {
-          bd = dd;
-          best = i;
-        }
-      });
+      // the nearest straight outline edge becomes the reference; drawn profiles move along to the new face
+      const best = referenceEdgeIndex(face, hit.flat);
       const a = face.outer.pts[best];
       const b = face.outer.pts[(best + 1) % face.outer.pts.length];
+      const before = d.sketch.edge;
       d.sketch.edge = { tag: face.outer.tags[best], at: mid(a, b) };
+      d.sketch.anchor = 'line';
       this.changed();
       this.restructure();
-      void this.openFaceSketch();
+      void this.sketchOnFace(before);
     } else if (d.type === 'cut' && hit.kind === 'face' && hit.pieceKind === 'face' && hit.flat && s.pre.part) {
       const face = s.pre.part.faces.get(hit.id);
       if (!face) return;
-      // nearest outline edge of that face becomes the reference
-      let best = -1;
-      let bd = Infinity;
-      face.outer.pts.forEach((p, i) => {
-        const q = face.outer.pts[(i + 1) % face.outer.pts.length];
-        const dd = distPointSegment(hit.flat!, p, q);
-        if (dd < bd) {
-          bd = dd;
-          best = i;
-        }
-      });
+      // nearest straight outline edge of that face becomes the reference
+      const best = referenceEdgeIndex(face, hit.flat);
       const a = face.outer.pts[best];
       const b = face.outer.pts[(best + 1) % face.outer.pts.length];
-      const dir = norm2(sub2(b, a));
       d.edge = { tag: face.outer.tags[best], at: mid(a, b) };
-      d.u = round2(dot2(sub2(hit.flat, a), dir));
-      d.v = round2(dot2(sub2(hit.flat, a), rotCCW(dir)));
+      d.anchor = 'line';
+      // the click in the same frame the kernel places the hole in
+      const p = flatToSketch(sketchFrame(s.pre.part, d.edge, d.anchor), hit.flat);
+      d.u = round2(p.x);
+      d.v = round2(p.y);
       this.changed();
       this.restructure();
     }
@@ -945,11 +994,7 @@ export class App implements PanelHost {
     const s = this.session;
     const box = this.els.errBox;
     if (!s || !box) return;
-    let err: string | undefined;
-    if (s.draft) {
-      const st = this.model.regen.status.get(s.draft.id);
-      err = st && !st.ok ? st.error : undefined;
-    } else err = this.model.regen.docError;
+    let err = s.draft ? this.draftError(s) : this.model.regen.docError;
     if (!err && this.model.meshError) err = this.model.meshError;
     box.textContent = err ?? '';
     box.hidden = !err;
@@ -986,10 +1031,14 @@ export class App implements PanelHost {
           text = s.draft.line.edge.tag ? 'Abstand und Optionen links einstellen' : 'Bezugskante anklicken – die Biegelinie läuft parallel dazu';
           break;
         case 'cut':
-          text = s.draft.edge.tag ? 'Erneut klicken zum Verschieben, Maße links' : 'Auf die Fläche klicken, wo der Ausschnitt sitzen soll';
+          text = s.draft.edge.tag ? 'Erneut klicken zum Verschieben, Maße links' : 'Auf die Fläche klicken, wo die Bohrung sitzen soll';
           break;
         case 'sketchCut':
-          text = s.draft.sketch.edge.tag ? 'Skizze links bearbeiten, dann mit ✓ übernehmen' : 'Fläche anklicken, auf der skizziert werden soll';
+          text = !this.sketchFaceMissing(s)
+            ? 'Skizze links bearbeiten, dann mit ✓ übernehmen'
+            : s.draft.sketch.entities.length
+              ? 'Fläche anklicken, auf die die Skizze gelegt werden soll'
+              : 'Fläche anklicken, auf der skizziert werden soll';
           break;
         case 'tab':
           text = s.draft.edges.length ? 'Weitere Kanten anklicken oder mit ✓ übernehmen' : 'Kante anklicken, die verlängert werden soll';
@@ -1068,7 +1117,7 @@ export class App implements PanelHost {
       input.remove();
       if (!file) return;
       try {
-        const doc = parseDoc(await file.text());
+        const doc = loadDoc(await file.text());
         const before = this.snapshot();
         this.doc = doc;
         this.flat = false;
@@ -1156,6 +1205,8 @@ export class App implements PanelHost {
       const tag = (e.target as HTMLElement)?.tagName;
       const typing = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
       const mod = e.ctrlKey || e.metaKey;
+      // a held Escape that just closed a dialog must not go on to cancel the command
+      if (e.key === 'Escape' && e.repeat) return;
       if (e.key === 'Escape' && this.session) {
         e.preventDefault();
         this.cancel();

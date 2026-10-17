@@ -16,7 +16,9 @@ import {
   JogFeature,
   SketchedBendFeature,
 } from '../kernel/features/types';
-import type { V2 } from '../kernel/vec';
+import type { Face } from '../kernel/model';
+import { distPointSegment } from '../kernel/polygon';
+import { V2, cross2, dist2, norm2, sub2 } from '../kernel/vec';
 import { num } from './format';
 
 let counter = 0;
@@ -132,6 +134,25 @@ export function newSketchCut(doc: Doc): SketchCutFeature {
   return { id: featureId('sketchCut'), name: nextName(doc, 'sketchCut'), type: 'sketchCut', sketch: { edge: { tag: '', at: { x: 0, y: 0 } }, entities: [] } };
 }
 
+/**
+ * Prompt for a draft whose reference has not been picked yet. The kernel can
+ * only say that the (empty) reference edge does not exist, which reads as if
+ * something had been lost.
+ */
+export function pickPrompt(f: Feature): string | undefined {
+  switch (f.type) {
+    case 'sketchCut':
+      return f.sketch.edge.tag ? undefined : 'Bitte im 3D-Fenster die Fläche anklicken, auf der skizziert werden soll.';
+    case 'cut':
+      return f.edge.tag ? undefined : 'Bitte im 3D-Fenster auf die Fläche klicken, wo die Bohrung sitzen soll.';
+    case 'sketchedBend':
+    case 'jog':
+      return f.line.edge.tag ? undefined : 'Bitte im 3D-Fenster die Bezugskante anklicken.';
+    default:
+      return undefined;
+  }
+}
+
 const ENTITY_LABELS: Record<string, [string, string]> = {
   rect: ['Rechteck', 'Rechtecke'],
   circle: ['Kreis', 'Kreise'],
@@ -146,6 +167,44 @@ export function sketchContents(entities: { kind: string }[]): string {
   const counts = new Map<string, number>();
   for (const e of entities) counts.set(e.kind, (counts.get(e.kind) ?? 0) + 1);
   return [...counts.entries()].map(([k, n]) => `${n} ${ENTITY_LABELS[k]?.[n === 1 ? 0 : 1] ?? k}`).join(', ');
+}
+
+/** Shorter edges (reliefs, small chamfers) make a poor sketch reference. */
+const MIN_REFERENCE_EDGE = 3;
+
+/**
+ * Outline edge of `face` that becomes the reference (origin and x axis) for a
+ * sketch or hole placed at `p`: the nearest straight edge. A chord of a
+ * tessellated arc (rounded corner, round notch) would tilt the frame and move
+ * it whenever the radius changes, so chords count only as a last resort.
+ */
+export function referenceEdgeIndex(face: Face, p: V2): number {
+  const { pts, tags } = face.outer;
+  const n = pts.length;
+  const next = (i: number): number => (i + 1) % n;
+  const dir = (i: number): V2 => norm2(sub2(pts[next(i)], pts[i]));
+  // arc chords share their tag with a neighbour that runs in another direction
+  const bentTo = (i: number, j: number): boolean => tags[i] === tags[j] && Math.abs(cross2(dir(i), dir(j))) > 1e-6;
+  const isChord = (i: number): boolean => bentTo(i, (i + n - 1) % n) || bentTo(i, next(i));
+  const tiers: ((i: number) => boolean)[] = [
+    (i) => !isChord(i) && dist2(pts[i], pts[next(i)]) >= MIN_REFERENCE_EDGE,
+    (i) => !isChord(i),
+    () => true,
+  ];
+  for (const usable of tiers) {
+    let best = -1;
+    let bd = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (!usable(i)) continue;
+      const d = distPointSegment(p, pts[i], pts[next(i)]);
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    }
+    if (best >= 0) return best;
+  }
+  return 0;
 }
 
 export function newTab(doc: Doc): TabFeature {

@@ -1,5 +1,5 @@
 // The example part the app opens with: a housing bracket that shows edge
-// flanges, a hem, a partial flange with bend reliefs and cut-outs.
+// flanges, a hem, a partial flange with bend reliefs and holes.
 
 import { Doc, newDoc, regenerate } from '../kernel/doc';
 import type { Feature } from '../kernel/features/types';
@@ -88,7 +88,7 @@ export function exampleDoc(): Doc {
   });
   add({
     id: 'cut1',
-    name: 'Ausschnitt1',
+    name: 'Bohrung1',
     type: 'cut',
     edge: refFor(doc, 'base:e3'),
     u: 30,
@@ -103,7 +103,7 @@ export function exampleDoc(): Doc {
   });
   add({
     id: 'cut2',
-    name: 'Ausschnitt2',
+    name: 'Bohrung2',
     type: 'cut',
     edge: refFor(doc, 'fl1.1:end'),
     u: 90,

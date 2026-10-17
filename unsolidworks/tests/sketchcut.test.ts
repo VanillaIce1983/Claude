@@ -5,10 +5,11 @@ import type { CutFeature, EdgeFlangeFeature, Feature, SketchCutFeature } from '.
 import { allEdges, findEdge } from '../src/kernel/model';
 import type { Part } from '../src/kernel/model';
 import { distPointSegment, signedArea } from '../src/kernel/polygon';
-import { SketchEntity, entityOutline } from '../src/kernel/sketch';
+import { SketchEntity, entityOutline, flatToSketch, sketchFrame } from '../src/kernel/sketch';
 import { build, checkClosed, doc, edgeRef, expectedVolume, plate } from './helpers';
 
 const BEND_MSG = 'Der Ausschnitt berührt eine Biegung. Ausschnitte über Biegungen sind nicht möglich – bitte die Skizze von der Biegelinie wegrücken.';
+const TOUCH_MSG = 'Der Ausschnitt berührt die Kontur oder einen anderen Ausschnitt nur in einem Punkt. Bitte die Skizze etwas verschieben.';
 
 const onE0 = { tag: 'base:e0', at: { x: 50, y: 0 } };
 const onE2 = { tag: 'base:e2', at: { x: 50, y: 50 } };
@@ -38,6 +39,34 @@ const flange = (over: Partial<EdgeFlangeFeature> = {}): EdgeFlangeFeature => ({
 });
 
 const outlineArea = (e: SketchEntity): number => Math.abs(signedArea(entityOutline(e)));
+
+const hole = (id: string, edge: { tag: string; at: { x: number; y: number } }, u: number, v: number, over: Partial<CutFeature> = {}): CutFeature => ({
+  id,
+  name: id,
+  type: 'cut',
+  edge,
+  u,
+  v,
+  shape: 'circle',
+  diameter: 8,
+  width: 0,
+  height: 0,
+  angle: 0,
+  count: 1,
+  spacing: 0,
+  ...over,
+});
+
+/** Base flange with a slanted right edge base:e1 from (100, 0) to (x2, 50). */
+const trapezoid = (x2: number): Feature => ({
+  ...plate(),
+  points: [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: x2, y: 50 },
+    { x: 0, y: 50 },
+  ],
+} as Feature);
 
 function expectSolid(r: ReturnType<typeof build>): void {
   expect(checkClosed(r.mesh.indices).bad).toBe(0);
@@ -230,5 +259,77 @@ describe('Ausschnitt (sketched cut)', () => {
       expect(distPointSegment(info.c, e.a, e.b)).toBeCloseTo(10, 9);
       expect(r.fp.loops.filter((l) => l.circle)).toHaveLength(1);
     }
+  });
+  it('a profile edge lying on a slanted outline edge notches cleanly', () => {
+    // rectangle dragged from base:e1 with grid snap: its lower edge is exactly on the edge
+    const onE1 = { tag: 'base:e1', at: { x: 85, y: 25 } };
+    const r = build(doc([trapezoid(70), sketchCut([rect('n', 20, 2, 8, 4)], onE1)]));
+    expectSolid(r);
+    expect(r.part.faces.get('base')!.holes).toHaveLength(0);
+    expect(r.fp.area).toBeCloseTo(4250 - 32, 6);
+    expect(tagsOf(r.part, 'base:e1')).toHaveLength(2);
+
+    // polyline through the edge's midpoint and end point, the face sketcher's own snap targets
+    for (const x2 of [56, 59, 64]) {
+      const ref = { tag: 'base:e1', at: { x: (100 + x2) / 2, y: 25 } };
+      const frame = sketchFrame(build(doc([trapezoid(x2)])).part, ref);
+      const mid = flatToSketch(frame, ref.at);
+      const end = flatToSketch(frame, { x: x2, y: 50 });
+      const tri: SketchEntity = { kind: 'polyline', id: 't', points: [mid, end, { x: mid.x, y: mid.y + 10 }] };
+      const rt = build(doc([trapezoid(x2), sketchCut([tri], ref)]));
+      expectSolid(rt);
+      expect(rt.fp.area).toBeCloseTo(((100 + x2) / 2) * 50 - (Math.hypot(100 - x2, 50) / 2) * 5, 6);
+    }
+  });
+
+  it('a sketch and a Bohrung keep their place when an earlier notch in their edge changes', () => {
+    // the reference point (65, 0) lies on the piece of base:e0 to the right of notch A
+    const right = { tag: 'base:e0', at: { x: 65, y: 0 } };
+    const notch = (cx: number, w = 10): SketchCutFeature => sketchCut([rect('n', cx, 0, w, 10)], onE0, 'A');
+    const sc = sketchCut([circle('c', 50, 25, 4)], right, 'B');
+    const b: SketchCutFeature = { ...sc, sketch: { ...sc.sketch, anchor: 'line' } };
+    const h = hole('H', right, 50, 15, { anchor: 'line' });
+    for (const a of [notch(25), notch(45), notch(65), notch(75), notch(25, 4), { ...notch(25), suppressed: true }, null]) {
+      const r = build(doc(a ? [plate(), a, b, h] : [plate(), b, h]));
+      expectSolid(r);
+      expect(r.part.circles.get('B:c')!.c).toEqual({ x: 50, y: 25 });
+      expect(r.part.circles.get('H:h0')!.c).toEqual({ x: 50, y: 15 });
+    }
+  });
+
+  it('documents saved before the line anchor keep measuring from the picked piece', () => {
+    // notch A splits base:e0 at x 20..30; the reference point lies on the right piece, which starts at x = 30
+    const right = { tag: 'base:e0', at: { x: 65, y: 0 } };
+    const a = sketchCut([rect('n', 25, 0, 10, 10)], onE0, 'A');
+    const r = build(doc([plate(), a, sketchCut([circle('c', 20, 25, 4)], right, 'B'), hole('H', right, 20, 15)]));
+    expectSolid(r);
+    expect(r.part.circles.get('B:c')!.c).toEqual({ x: 50, y: 25 });
+    expect(r.part.circles.get('H:h0')!.c).toEqual({ x: 50, y: 15 });
+  });
+
+  it('a cut closer to an outline edge or seam than the mesh can keep apart is rejected', () => {
+    // 5e-6 below base:e2: the mesh would merge the hole into the edge
+    expect(errorOf([plate(), sketchCut([rect('r', 50, 50 - 5e-6 - 5, 10, 10)])])).toBe(TOUCH_MSG);
+    expect(errorOf([plate(), sketchCut([rect('r', 50, 50 - 2e-5 - 5, 10, 10)])])).toBe(TOUCH_MSG);
+    // 1e-5 off the seam at y = 4 (sketch y runs down from base:e2)
+    expect(errorOf([plate(), flange(), sketchCut([rect('r', 50, 46 - 1e-5 - 5, 10, 10)], onE2)])).toBe(BEND_MSG);
+    expect(errorOf([plate(), flange(), sketchCut([rect('r', 50, 46 - 5e-6 - 5, 10, 10)], onE2)])).toBe(BEND_MSG);
+    // a notch that nearly reaches the opposite edge
+    expect(errorOf([plate(), sketchCut([rect('r', 50, 25 - 5e-6, 10, 50)])])).toBe(TOUCH_MSG);
+    const near = errorOf([plate(), hole('sc', onE0, 50, 50 - 5e-6 - 5, { shape: 'rect', width: 10, height: 10 })]);
+    expect(near).toMatch(/nicht vollständig auf der Fläche/);
+
+    // a clear gap still works and gives a closed solid
+    const r = build(doc([plate(), sketchCut([rect('r', 50, 50 - 1e-4 - 5, 10, 10)])]));
+    expectSolid(r);
+    expect(r.fp.area).toBeCloseTo(4900, 6);
+    const rh = build(doc([plate(), hole('h', onE0, 50, 50 - 1e-4 - 5, { shape: 'rect', width: 10, height: 10 })]));
+    expectSolid(rh);
+    expect(rh.fp.area).toBeCloseTo(4900, 6);
+  });
+
+  it('a new Ausschnitt or Bohrung without a face asks for a click on a face', () => {
+    expect(errorOf([plate(), sketchCut([], { tag: '', at: { x: 0, y: 0 } })])).toBe('Bitte die Fläche anklicken, auf der skizziert werden soll.');
+    expect(errorOf([plate(), hole('sc', { tag: '', at: { x: 0, y: 0 } }, 0, 0)])).toBe('Bitte auf die Fläche klicken, wo die Bohrung sitzen soll.');
   });
 });

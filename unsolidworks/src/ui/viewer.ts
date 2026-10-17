@@ -13,7 +13,12 @@ import type { PartMesh, PickEdge, Surface } from '../kernel/mesh';
 import type { CircleInfo, Part } from '../kernel/model';
 import { Affine, V2, V3, applyA, applyDirA, cross2, dot2, invertRigid, sub2, v3 } from '../kernel/vec';
 
-export type PickMode = 'none' | 'edge' | 'face' | 'measure';
+/**
+ * 'select': faces and bends are clickable to select their feature (no command running).
+ * 'face': flat faces only, for commands that place something on a face.
+ * 'none': nothing is clickable, so nothing lights up under the cursor.
+ */
+export type PickMode = 'none' | 'select' | 'edge' | 'face' | 'measure';
 
 export interface VertexHit {
   kind: 'vertex';
@@ -50,6 +55,14 @@ export type MeasureSelectionView =
 const EDGE_PX = 11;
 const MEASURE_EDGE_PX = 10;
 const VERTEX_PX = 8;
+/**
+ * Inside a narrow piece (a bend strip, a hem) the measure snap radius shrinks
+ * to this share of the piece's width on screen, so the middle of the piece
+ * stays pickable instead of always snapping to one of its border edges.
+ */
+const NARROW_SNAP_SHARE = 0.3;
+/** Smallest snap radius inside a narrow piece: an edge still wins when the cursor is right on it. */
+const MIN_SNAP_PX = 1.5;
 /** Below this turn, a vertex between two edges of one tag is a tessellated arc point, not a corner. */
 const SMOOTH_TURN = (20 * Math.PI) / 180;
 /** Measure overlays draw after the part, whatever their distance. */
@@ -152,7 +165,7 @@ export class Viewer {
         this.onHover(hit);
         this.updateOverlay();
       }
-      el.style.cursor = hit && (this.pickMode !== 'none' || hit.kind === 'face') ? 'pointer' : 'default';
+      el.style.cursor = hit ? 'pointer' : 'default';
     });
     el.addEventListener('pointerleave', () => {
       if (this.hover) {
@@ -574,12 +587,82 @@ export class Viewer {
   }
 
   private pickAt(x: number, y: number): Hit | null {
-    if (!this.state) return null;
+    if (!this.state || this.pickMode === 'none') return null;
     if (this.pickMode === 'edge') return this.pickEdge(x, y, EDGE_PX, this.edgeFilter);
     if (this.pickMode === 'measure') {
-      return this.pickVertex(x, y) ?? this.pickEdge(x, y, MEASURE_EDGE_PX, () => true) ?? this.pickFace(x, y);
+      const face = this.pickFace(x, y);
+      const snap = face ? this.snapRadius(face, x, y) : MEASURE_EDGE_PX;
+      return this.pickVertex(x, y, Math.min(VERTEX_PX, snap)) ?? this.pickEdge(x, y, snap, () => true) ?? face;
     }
-    return this.pickFace(x, y);
+    const face = this.pickFace(x, y);
+    // commands that ask for a face take flat faces only: a bend under the cursor is not clickable
+    return this.pickMode === 'face' && face?.pieceKind === 'bend' ? null : face;
+  }
+
+  /** Measure snap radius for edges while the cursor is over `face`: smaller inside narrow pieces. */
+  private snapRadius(face: FaceHit, x: number, y: number): number {
+    // a thin side wall between two edges is nearly always meant as one of them
+    if (face.surface === 2) return MEASURE_EDGE_PX;
+    const across = this.towardNearestBorder(face, x, y);
+    if (!across) return MEASURE_EDGE_PX;
+    // beyond this width the full radius applies anyway
+    const cap = MEASURE_EDGE_PX / NARROW_SNAP_SHARE;
+    const width = this.extent(face, x, y, across, cap) + this.extent(face, x, y, { x: -across.x, y: -across.y }, cap);
+    return Math.min(MEASURE_EDGE_PX, Math.max(MIN_SNAP_PX, NARROW_SNAP_SHARE * width));
+  }
+
+  /** Screen direction from the cursor to the nearest border edge of the hit piece (its seams, for a bend). */
+  private towardNearestBorder(face: FaceHit, x: number, y: number): V2 | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const seam = `seam:${face.id}:`;
+    const own = face.pieceKind === 'bend' ? (e: PickEdge) => e.tag.startsWith(seam) : (e: PickEdge) => !e.corner && e.faceId === face.id;
+    let best: V2 | null = null;
+    let bd = 4 * MEASURE_EDGE_PX;
+    for (const e of this.pickables) {
+      if (!own(e)) continue;
+      for (const side of ['top', 'bottom'] as const) {
+        const [a, b] = this.edgeSegment(e, side);
+        const sa = this.toScreen(a, r);
+        const sb = this.toScreen(b, r);
+        const ux = sb.x - sa.x;
+        const uy = sb.y - sa.y;
+        const l2 = ux * ux + uy * uy;
+        const t = l2 > 0 ? Math.max(0, Math.min(1, ((x - sa.x) * ux + (y - sa.y) * uy) / l2)) : 0;
+        const dx = sa.x + ux * t - x;
+        const dy = sa.y + uy * t - y;
+        const d = Math.hypot(dx, dy);
+        if (d > 1e-6 && d < bd) {
+          bd = d;
+          best = { x: dx / d, y: dy / d };
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * How far (in px, up to `cap`) the hit piece continues from the cursor in
+   * screen direction `dir`. Raycasts, so a curved surface ends at its
+   * silhouette and a piece also ends where another one covers it.
+   */
+  private extent(face: FaceHit, x: number, y: number, dir: V2, cap: number): number {
+    const same = (t: number): boolean => {
+      const h = this.pickFace(x + dir.x * t, y + dir.y * t);
+      return !!h && h.pieceKind === face.pieceKind && h.id === face.id;
+    };
+    let inside = 0;
+    let outside = 1;
+    while (same(outside)) {
+      inside = outside;
+      if (outside >= cap) return cap;
+      outside = Math.min(cap, outside * 2);
+    }
+    while (outside - inside > 0.5) {
+      const m = (inside + outside) / 2;
+      if (same(m)) inside = m;
+      else outside = m;
+    }
+    return inside;
   }
 
   private pickEdge(x: number, y: number, maxPx: number, filter: (e: PickEdge) => boolean): EdgeHit | null {
@@ -610,13 +693,13 @@ export class Viewer {
     return null;
   }
 
-  private pickVertex(x: number, y: number): VertexHit | null {
+  private pickVertex(x: number, y: number, maxPx = VERTEX_PX): VertexHit | null {
     const r = this.renderer.domElement.getBoundingClientRect();
     const candidates: { d: number; p: V3 }[] = [];
     for (const p of this.measureVertices()) {
       const s = this.toScreen(p, r);
       const d = Math.hypot(x - s.x, y - s.y);
-      if (d <= VERTEX_PX) candidates.push({ d, p });
+      if (d <= maxPx) candidates.push({ d, p });
     }
     candidates.sort((u, w) => u.d - w.d);
     const tol = this.occlusionTol();

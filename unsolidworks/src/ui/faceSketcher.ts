@@ -50,6 +50,8 @@ interface NumOpts {
 const NS = 'http://www.w3.org/2000/svg';
 const SNAP_PX = 9;
 const SLOT_WIDTH = 10;
+/** Canvas presses this soon after opening belong to the click that opened the dialog (at least the usual double-click time). */
+const OPEN_GRACE_MS = 500;
 const CLICKS: Record<Exclude<Tool, 'select' | 'polyline'>, number> = { rect: 2, crect: 2, circle: 2, polygon: 2, slot: 3 };
 
 const SNAPS: [string, number][] = [
@@ -230,6 +232,8 @@ export function openFaceSketcher(init: SketchEntity[], ctx: FaceSketchContext): 
     let showErrors = false;
     let done = false;
     const uid = `fs${++dialogSeq}`;
+    // the dialog opens under the cursor: the second click of a double-click on the face must not start a shape
+    const openedAt = performance.now();
     const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     const svg = document.createElementNS(NS, 'svg');
@@ -890,7 +894,7 @@ export function openFaceSketcher(init: SketchEntity[], ctx: FaceSketchContext): 
     };
 
     svg.addEventListener('pointerdown', (e) => {
-      if (e.button > 2) return;
+      if (e.button > 2 || performance.now() - openedAt < OPEN_GRACE_MS) return;
       svg.setPointerCapture(e.pointerId);
       const s = screenPos(e);
       pointers.set(e.pointerId, s);

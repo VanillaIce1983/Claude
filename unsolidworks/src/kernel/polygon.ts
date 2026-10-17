@@ -123,6 +123,39 @@ export function ringsCross(a: V2[], b: V2[]): boolean {
   return false;
 }
 
+/** Shortest distance between the segments ab and cd (0 when they touch or cross). */
+export function segmentDistance(a: V2, b: V2, c: V2, d: V2): number {
+  if (segmentsIntersect(a, b, c, d)) return 0;
+  // segments that do not cross are closest at an endpoint of one of them
+  return Math.min(distPointSegment(a, c, d), distPointSegment(b, c, d), distPointSegment(c, a, b), distPointSegment(d, a, b));
+}
+
+/** Whether two rings come closer than `gap` anywhere (touching and crossing included). */
+export function ringsWithin(a: V2[], b: V2[], gap: number): boolean {
+  const bb = bbox2(b);
+  for (let i = 0; i < a.length; i++) {
+    const p = a[i];
+    const q = a[(i + 1) % a.length];
+    if (Math.min(p.x, q.x) > bb.maxX + gap || Math.max(p.x, q.x) < bb.minX - gap) continue;
+    if (Math.min(p.y, q.y) > bb.maxY + gap || Math.max(p.y, q.y) < bb.minY - gap) continue;
+    for (let j = 0; j < b.length; j++) {
+      if (segmentDistance(p, q, b[j], b[(j + 1) % b.length]) < gap) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Smallest gap a new cut must keep to the other edges of its face. The mesh
+ * treats a point within 1e-7 × edge length of a triangle edge as lying on it
+ * (conformTriangles in mesh.ts), and a triangle edge can span the whole face,
+ * so a cut corner any closer would be merged into that edge and crack the solid.
+ */
+export function cutClearance(outline: V2[]): number {
+  const b = bbox2(outline);
+  return Math.max(GEO_TOL, 2e-7 * Math.max(1, Math.hypot(b.maxX - b.minX, b.maxY - b.minY)));
+}
+
 /** Remove vertices whose two edges are collinear and carry the same tag. */
 export function simplifyRing(r: Ring): Ring {
   let pts = r.pts.slice();

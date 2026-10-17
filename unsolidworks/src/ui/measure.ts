@@ -5,7 +5,8 @@
 //   viewer.setPickMode('measure', [...edges, ...corners]);
 //   onPick(hit): const p = pickToMeasure(hit, part, flat);
 //     a pick whose key is already in the list toggles it off; otherwise append
-//     it, starting over once MAX_MEASURE_PICKS are kept
+//     it, starting over once MAX_MEASURE_PICKS are kept or when a third pick
+//     would not add up with the pair (see addsUp)
 //   const result = measure(picks.map((p) => p.entity));
 //   viewer.setMeasureSelection(picks.map((p) => p.view));
 //   viewer.setMeasureOverlay(result.lines);
@@ -23,6 +24,16 @@ import type { Hit, MeasureSelectionView } from './viewer';
 
 /** Picks kept at once; the next click after that starts a new measurement. */
 export const MAX_MEASURE_PICKS = 3;
+
+/**
+ * Whether three or more entities give a result together: summed edge
+ * lengths, face areas or a point chain. Anything else is measured as a pair,
+ * so a further pick would have no visible effect.
+ */
+export function addsUp(entities: MeasureEntity[]): boolean {
+  const kind = entities[0]?.kind;
+  return (kind === 'edge' || kind === 'plane' || kind === 'point') && entities.every((e) => e.kind === kind);
+}
 
 export const MEASURE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
   <path d="M2.5 5.5h19v3h-19z" fill="currentColor" fill-opacity=".14"/>
@@ -159,7 +170,7 @@ export function measurePanel(
       h(
         'p',
         { class: 'note' },
-        `Ein Element allein zeigt Länge, Durchmesser oder Fläche, zwei Elemente Abstand und Winkel. Bis zu ${MAX_MEASURE_PICKS} Elemente bleiben gewählt, der nächste Klick beginnt eine neue Messung. Erneuter Klick auf ein Element entfernt es.`,
+        `Ein Element allein zeigt Länge, Durchmesser oder Fläche, zwei Elemente Abstand und Winkel. Bis zu ${MAX_MEASURE_PICKS} Kanten, Flächen oder Punkte ergeben eine Summe. Sonst beginnt der nächste Klick eine neue Messung. Erneuter Klick auf ein Element entfernt es.`,
       ),
     ),
   );
