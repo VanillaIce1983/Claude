@@ -2,13 +2,14 @@
 // picked entities. Pure geometry, no UI. All values in mm and degrees.
 
 import type { PickEdge } from './mesh';
-import { Bend, CircleInfo, Face, Part, computePlacements, isSeamTag, stripFlat, stripOutline, stripPoint, stripRange } from './model';
+import { Bend, CircleInfo, Face, Part, computePlacements, isSeamTag, seamTag, stripFlat, stripOutline, stripPoint, stripRange } from './model';
 import { Ring, distPointSegment, signedArea } from './polygon';
 import {
   Affine,
   EPS,
   V2,
   V3,
+  add2,
   add3,
   applyA,
   applyDirA,
@@ -18,7 +19,6 @@ import {
   dist3,
   dot2,
   dot3,
-  fmt,
   invertRigid,
   len3,
   rad,
@@ -61,6 +61,8 @@ export type MeasureEntity =
       /** Swept angle of the cylindrical face (degrees) and its length along the axis (mm). */
       angleDeg: number;
       length: number;
+      /** Area of the picked cylindrical face (mm²). */
+      area: number;
       label: string;
     };
 
@@ -96,7 +98,9 @@ const PARALLEL_DEG = 0.01;
 const RANK: Record<MeasureEntity['kind'], number> = { point: 0, edge: 1, plane: 2, cylinder: 3 };
 
 /** German number: comma, at most 2 decimals, no trailing zeros. */
-const num = (v: number): string => fmt(v, 2).replace('.', ',');
+const DE = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 });
+/** Same rounding and grouping as the panel (ui/format num), so a label always matches its row. */
+const num = (v: number): string => (Number.isFinite(v) ? DE.format(Math.abs(v) < 0.005 ? 0 : v) : '–');
 const mmText = (v: number): string => `${num(v)} mm`;
 
 const emptyResult = (): MeasureResult => ({ rows: [], lines: [] });
@@ -250,6 +254,7 @@ function single(e: MeasureEntity): MeasureResult {
       addRow(res, 'Winkel', e.angleDeg, '°');
       addRow(res, 'Bogenlänge', e.radius * rad(e.angleDeg), 'mm');
       addRow(res, 'Länge', e.length, 'mm');
+      addRow(res, 'Fläche', e.area, 'mm²');
       break;
   }
   return res;
@@ -413,7 +418,7 @@ function pair(x: MeasureEntity, y: MeasureEntity): MeasureResult {
 }
 
 const isEdge = (e: MeasureEntity): e is EdgeEnt => e.kind === 'edge';
-const isPlane = (e: MeasureEntity): e is PlaneEnt => e.kind === 'plane';
+const isSurface = (e: MeasureEntity): e is PlaneEnt | CylEnt => e.kind === 'plane' || e.kind === 'cylinder';
 const isPoint = (e: MeasureEntity): e is PointEnt => e.kind === 'point';
 
 /** Sums for three or more entities of one kind; null when the kinds are mixed. */
@@ -421,7 +426,7 @@ function totals(list: MeasureEntity[]): MeasureResult | null {
   const res = emptyResult();
   if (list.every(isEdge)) {
     addRow(res, 'Gesamtlänge', list.reduce((s, e) => s + edgeLength(e), 0), 'mm');
-  } else if (list.every(isPlane)) {
+  } else if (list.every(isSurface)) {
     addRow(res, 'Gesamtfläche', list.reduce((s, e) => s + e.area, 0), 'mm²');
   } else if (list.every(isPoint)) {
     let sum = 0;
@@ -525,6 +530,7 @@ interface NearEdge {
   hole: boolean;
 }
 
+/** Outline or hole edge nearest to p; at a corner the plain edge wins over a seam. */
 function nearestEdge(face: Face, p: V2, allowSeams: boolean): NearEdge | null {
   const rings: [Ring, boolean][] = [[face.outer, false], ...face.holes.map((h) => [h, true] as [Ring, boolean])];
   let best: NearEdge | null = null;
@@ -533,8 +539,9 @@ function nearestEdge(face: Face, p: V2, allowSeams: boolean): NearEdge | null {
     for (let i = 0; i < ring.pts.length; i++) {
       const a = ring.pts[i];
       const b = ring.pts[(i + 1) % ring.pts.length];
-      if ((!allowSeams && isSeamTag(ring.tags[i])) || dist2(a, b) < EPS) continue;
-      const d = distPointSegment(p, a, b);
+      const seam = isSeamTag(ring.tags[i]);
+      if ((!allowSeams && seam) || dist2(a, b) < EPS) continue;
+      const d = distPointSegment(p, a, b) + (seam ? 1e-6 : 0);
       if (d < bestD) {
         bestD = d;
         best = { ring, i, hole };
@@ -544,12 +551,46 @@ function nearestEdge(face: Face, p: V2, allowSeams: boolean): NearEdge | null {
   return best;
 }
 
+/** Interval of [lo, hi] not covered by `covered` that contains w (or lies nearest to it). */
+function freeInterval(lo: number, hi: number, covered: [number, number][], w: number): [number, number] | null {
+  const gaps: [number, number][] = [];
+  let at = lo;
+  for (const [c0, c1] of [...covered].sort((x, y) => x[0] - y[0])) {
+    if (c0 > at + 1e-6) gaps.push([at, Math.min(c0, hi)]);
+    at = Math.max(at, c1);
+  }
+  if (hi > at + 1e-6) gaps.push([at, hi]);
+  const dist = ([g0, g1]: [number, number]): number => Math.max(0, g0 - w, w - g1);
+  return gaps.reduce<[number, number] | null>((best, g) => (!best || dist(g) < dist(best) ? g : best), null);
+}
+
+const seamOf = (part: Part, tag: string): { bend: Bend; f: 0 | 1 } | null => {
+  const m = /^seam:(.+):([AB])$/.exec(tag);
+  const bend = m ? part.bends.get(m[1]) : undefined;
+  return bend ? { bend, f: m![2] === 'A' ? 0 : 1 } : null;
+};
+
 /** Side wall of a face at the outline or hole edge nearest to the hit point. */
 function sideWall(part: Part, face: Face, M: Affine, hitPoint: V3): MeasureEntity {
   const q = applyA(invertRigid(M), hitPoint);
   const p = v2(q.x, q.y);
-  // seam edges have no side wall: the bend strip continues there
-  const best = nearestEdge(face, p, false) ?? nearestEdge(face, p, true);
+  // a hit on a wall lies on its edge; a seam edge has a wall only where no bend strip continues it
+  let best = nearestEdge(face, p, true);
+  let span: [V2, V2] | null = null;
+  if (best && isSeamTag(best.ring.tags[best.i])) {
+    const a = best.ring.pts[best.i];
+    const b = best.ring.pts[(best.i + 1) % best.ring.pts.length];
+    const s = seamOf(part, best.ring.tags[best.i]);
+    if (s) {
+      const along = (x: V2): number => dot2(sub2(x, s.bend.origin), s.bend.dir);
+      const [wa, wb] = [along(a), along(b)];
+      const free = freeInterval(Math.min(wa, wb), Math.max(wa, wb), [stripRange(s.bend, s.f)], along(p));
+      // points on the seam at w, keeping the outline's direction
+      const at = (w: number): V2 => add2(a, scale2(sub2(b, a), (w - wa) / (wb - wa)));
+      if (free) span = wa < wb ? [at(free[0]), at(free[1])] : [at(free[1]), at(free[0])];
+    }
+    if (!span) best = nearestEdge(face, p, false);
+  }
   if (!best) throw new Error('An dieser Stelle wurde keine Seitenfläche gefunden. Bitte erneut auswählen.');
   const T = part.T;
   const c = best.hole ? holeCircle(part, face, best.ring.tags[best.i]) : undefined;
@@ -561,11 +602,11 @@ function sideWall(part: Part, face: Face, M: Affine, hitPoint: V3): MeasureEntit
       radius: c.r,
       angleDeg: 360,
       length: T,
+      area: 2 * Math.PI * c.r * T,
       label: diaLabel('Bohrung', c.r),
     };
   }
-  const a = best.ring.pts[best.i];
-  const b = best.ring.pts[(best.i + 1) % best.ring.pts.length];
+  const [a, b] = span ?? [best.ring.pts[best.i], best.ring.pts[(best.i + 1) % best.ring.pts.length]];
   const len = dist2(a, b);
   // CCW outline and CW holes: rotCW points away from the material in both cases
   const out = rotCW(scale2(sub2(b, a), 1 / len));
@@ -591,6 +632,54 @@ function hitFraction(b: Bend, T: number, q: V3, flat: boolean): number {
   return Math.min(1, Math.max(0, f));
 }
 
+/** ∫ (wr − wl) dφ over the bend: the strip width integrated across the bend, exact for mitred ends. */
+function sweptWidth(b: Bend): number {
+  const integral = (end: Bend['ext0']): number =>
+    (end?.pieces ?? []).reduce((sum, q) => {
+      const p0 = b.angle * q.f0;
+      const p1 = b.angle * q.f1;
+      return sum + q.a * (p1 - p0) + q.b * (Math.cos(p0) - Math.cos(p1)) + q.c * (Math.sin(p1) - Math.sin(p0));
+    }, 0);
+  return (b.w1 - b.w0) * b.angle + integral(b.ext0) + integral(b.ext1);
+}
+
+/**
+ * Side wall along a strip edge (f = 0 or 1) where no face continues the
+ * strip, e.g. the free end of a rolled hem or a strip that runs past its face.
+ */
+function stripEdgeWall(part: Part, b: Bend, M: Affine, f: 0 | 1, w: number, flat: boolean): MeasureEntity {
+  const T = part.T;
+  const [hl, hr] = stripRange(b, f);
+  const faceId = f === 0 ? b.faceA : b.faceB;
+  const face = faceId ? part.faces.get(faceId) : undefined;
+  const covered: [number, number][] = [];
+  const tag = seamTag(b.id, f === 0 ? 'A' : 'B');
+  const along = (x: V2): number => dot2(sub2(x, b.origin), b.dir);
+  for (const ring of face ? [face.outer] : []) {
+    ring.pts.forEach((a, i) => {
+      if (ring.tags[i] !== tag) return;
+      const [wa, wb] = [along(a), along(ring.pts[(i + 1) % ring.pts.length])];
+      covered.push([Math.min(wa, wb), Math.max(wa, wb)]);
+    });
+  }
+  const [s0, s1] = freeInterval(hl, hr, covered, w) ?? [hl, hr];
+  const len = s1 - s0;
+  let normal: V3;
+  let origin: V3;
+  if (flat) {
+    normal = applyDirA(M, v3(f === 0 ? -b.nrm.x : b.nrm.x, f === 0 ? -b.nrm.y : b.nrm.y, 0));
+    const o = stripFlat(b, s0, f);
+    origin = applyA(M, v3(o.x, o.y, 0));
+  } else {
+    // the strip tangent across the bend at that edge, pointing away from the strip
+    const phi = b.angle * f;
+    const k = f === 0 ? -1 : 1;
+    normal = applyDirA(M, v3(k * b.nrm.x * Math.cos(phi), k * b.nrm.y * Math.cos(phi), k * (b.up ? Math.sin(phi) : -Math.sin(phi))));
+    origin = applyA(M, stripPoint(b, T, s0, f, 0));
+  }
+  return { kind: 'plane', origin, normal: unit(normal) ?? v3(0, 0, 1), area: len * T, perimeter: 2 * (len + T), label: 'Seitenfläche' };
+}
+
 export function bendEntity(part: Part, bendId: string, surface: 0 | 1 | 2, hitPoint: V3, flat: boolean): MeasureEntity {
   const b = part.bends.get(bendId);
   if (!b) throw new Error('Die gewählte Biegung existiert nicht mehr. Bitte neu auswählen.');
@@ -602,10 +691,14 @@ export function bendEntity(part: Part, bendId: string, surface: 0 | 1 | 2, hitPo
   const [wl, wr] = stripRange(b, 0.5);
   const L = wr - wl;
   if (surface === 2) {
-    // end wall at w0 or w1, whichever the hit is closer to
     const q = applyA(invertRigid(M), hitPoint);
     const w = dot2(sub2(v2(q.x, q.y), b.origin), b.dir);
-    const [hl, hr] = stripRange(b, hitFraction(b, T, q, flat));
+    const f = hitFraction(b, T, q, flat);
+    const [hl, hr] = stripRange(b, f);
+    // a side wall either closes a strip end (w at hl or hr) or runs along a free strip edge (f at 0 or 1)
+    const off = dot2(sub2(v2(q.x, q.y), b.origin), b.nrm);
+    const across = flat ? b.ba : b.angle * Math.hypot(off, b.up ? T + R - q.z : q.z + R);
+    if (Math.min(f, 1 - f) * across < Math.min(Math.abs(w - hl), Math.abs(w - hr))) return stripEdgeWall(part, b, M, f < 0.5 ? 0 : 1, w, flat);
     const atStart = Math.abs(w - hl) <= Math.abs(w - hr);
     if (atStart ? b.ext0 : b.ext1) throw new Error('Die Stirnseite einer geschlossenen Ecke ist gekrümmt. Bitte eine Kante oder die Biegefläche wählen.');
     const end = atStart ? b.w0 : b.w1;
@@ -646,6 +739,7 @@ export function bendEntity(part: Part, bendId: string, surface: 0 | 1 | 2, hitPo
     radius: b.up === top ? R : R + T,
     angleDeg: deg(b.angle),
     length: L,
+    area: (b.up === top ? R : R + T) * sweptWidth(b),
     label: 'Biegung',
   };
 }

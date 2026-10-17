@@ -31,8 +31,10 @@ export const MAX_MEASURE_PICKS = 3;
  * so a further pick would have no visible effect.
  */
 export function addsUp(entities: MeasureEntity[]): boolean {
-  const kind = entities[0]?.kind;
-  return (kind === 'edge' || kind === 'plane' || kind === 'point') && entities.every((e) => e.kind === kind);
+  // flat faces and curved ones (bends, hole walls) add up to a total area
+  const group = (e: MeasureEntity): string => (e.kind === 'cylinder' ? 'plane' : e.kind);
+  const kind = entities[0] && group(entities[0]);
+  return (kind === 'edge' || kind === 'plane' || kind === 'point') && entities.every((e) => group(e) === kind);
 }
 
 export const MEASURE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">

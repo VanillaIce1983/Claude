@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { CutFeature, EdgeFlangeFeature, HemFeature } from '../src/kernel/features/types';
+import type { ClosedCornerFeature, CutFeature, EdgeFlangeFeature, HemFeature } from '../src/kernel/features/types';
 import { MeasureEntity, MeasureResult, bendEntity, edgeEntity, faceEntity, measure, pointEntity } from '../src/kernel/measure';
 import { PickEdge, pickCorners, pickEdges } from '../src/kernel/mesh';
 import { Part, computePlacements } from '../src/kernel/model';
 import { V3, dist3, v3 } from '../src/kernel/vec';
-import { build, doc, plate } from './helpers';
+import { build, doc, edgeRef, plate } from './helpers';
 
 const T = 2;
 const R = 2;
@@ -42,6 +42,7 @@ const cyl = (axisPoint: V3, axisDir: V3, radius = 1): MeasureEntity => ({
   radius,
   angleDeg: 90,
   length: 10,
+  area: radius * (Math.PI / 2) * 10,
   label: 'Zylinder',
 });
 
@@ -112,7 +113,7 @@ describe('measure: pairs', () => {
 
   it('dimension text rounds to two decimals with a comma', () => {
     expect(measure([pt(0, 0, 0), pt(1 / 3, 0, 0)]).lines[0].text).toBe('0,33 mm');
-    expect(measure([pt(0, 0, 0), pt(1000, 0, 0)]).lines[0].text).toBe('1000 mm');
+    expect(measure([pt(0, 0, 0), pt(1000, 0, 0)]).lines[0].text).toBe('1.000 mm');
   });
 
   it('point to segment: perpendicular inside, endpoint outside', () => {
@@ -428,3 +429,61 @@ describe('measure: picks on a part', () => {
     expect(value(measure([e]), 'Länge')).toBeCloseTo(T, 9);
   });
 });
+
+describe('measure: walls and areas found in review', () => {
+  const near = (a: V3, b: V3): boolean => dist3(a, b) < 1e-6;
+
+  it('the free end of a rolled hem is the wall at its end, not a bend end wall', () => {
+    const rolled: HemFeature = { ...hem, edges: [{ tag: 'base:e2', at: { x: 50, y: 50 }, side: 'top' }], hemType: 'rolled' };
+    const { part } = build(doc([plate(), rolled]));
+    const e = bendEntity(part, 'hem', 2, v3(50, 5, -41), false);
+    expect(e.kind).toBe('plane');
+    if (e.kind !== 'plane') return;
+    expect(near(e.normal, v3(0, -1, 0))).toBe(true);
+    expect(e.area).toBeCloseTo(100 * T, 9);
+    expect(e.perimeter).toBeCloseTo(2 * (100 + T), 9);
+    const toBase = measure([e, faceEntity(part, 'base', 0, v3(50, T, -25), false)]);
+    expect(value(toBase, 'Winkel')).toBeCloseTo(0, 9);
+    expect(value(toBase, 'Abstand')).toBeCloseTo(3, 9);
+  });
+
+  it('a strip that runs past its face has a wall along that free part', () => {
+    const two = flange({ edges: [{ tag: 'base:e0', at: { x: 50, y: 0 }, side: 'top' }, { tag: 'base:e1', at: { x: 100, y: 25 }, side: 'top' }] });
+    const { part } = build(doc([plate(), two]));
+    // strip fl.0 runs to x = 100, the trimmed base only to x = 96: the bottom of that piece is free
+    const e = bendEntity(part, 'fl.0', 2, v3(98, 1, -4), false);
+    expect(e.kind).toBe('plane');
+    if (e.kind !== 'plane') return;
+    expect(near(e.normal, v3(0, 0, -1))).toBe(true);
+    expect(e.area).toBeCloseTo(4 * T, 9);
+  });
+
+  it('a seam edge that no strip continues measures as its own short wall', () => {
+    const two = flange({ edges: [{ tag: 'base:e0', at: { x: 50, y: 0 }, side: 'top' }, { tag: 'base:e1', at: { x: 100, y: 25 }, side: 'top' }] });
+    const r1 = build(doc([plate(), two]));
+    const cc: ClosedCornerFeature = { id: 'cc', name: 'Geschlossene Ecke1', type: 'closedCorner', edges: [edgeRef(r1.part, 'fl.1:side0')], gap: 0.1, kind: 'underlap', openBend: true };
+    const { part } = build(doc([plate(), two, cc]));
+    const e = faceEntity(part, 'fl.1', 2, v3(99.333, 4, -2.733), false);
+    expect(e.kind).toBe('plane');
+    if (e.kind !== 'plane') return;
+    expect(near(e.normal, v3(0, -1, 0))).toBe(true);
+    expect(e.area).toBeCloseTo(1.9 * T, 9);
+    expect(e.perimeter).toBeCloseTo(2 * (1.9 + T), 9);
+  });
+
+  it('the dimension label shows the same number as the panel row', () => {
+    expect(measure([edge(O, v3(100.005, 0, 0))]).lines[0].text).toBe('100,01 mm');
+    expect(measure([edge(O, v3(1234.5, 0, 0))]).lines[0].text).toBe('1.234,5 mm');
+    expect(measure([pt(0, 0, 0), pt(2.675, 0, 0)]).lines[0].text).toBe('2,68 mm');
+  });
+
+  it('folded bend and hole walls carry their area, so face totals include them', () => {
+    const { part } = build(doc([plate(), flange()]));
+    const bend = bendEntity(part, 'fl', 0, v3(50, 2, 0), false);
+    expect(value(measure([bend]), 'Fläche')).toBeCloseTo(R * (Math.PI / 2) * 100, 9);
+    const sum = measure([faceEntity(part, 'base', 0, v3(50, T, -25), false), bend, faceEntity(part, 'fl', 0, v3(50, 20, 2), false)]);
+    expect(labels(sum)).toEqual(['Gesamtfläche']);
+    expect(value(sum, 'Gesamtfläche')).toBeCloseTo(4600 + R * (Math.PI / 2) * 100 + 2600, 6);
+  });
+});
+
