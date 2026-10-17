@@ -23,7 +23,7 @@ import { h, svgIcon } from './dom';
 import { HEM_LABELS, JOG_DIM_LABELS, LENGTH_LABELS, POSITION_LABELS, sketchContents } from './features';
 import { num } from './format';
 import { checkField, numberField, section, segField, selectField, wideSelect } from './forms';
-import { CORNER_DIAGRAMS, ICONS, POSITION_DIAGRAMS } from './icons';
+import { CORNER_DIAGRAMS, EDGE_CORNER_DIAGRAMS, ICONS, POSITION_DIAGRAMS } from './icons';
 
 export interface PanelHost {
   doc: Doc;
@@ -329,18 +329,33 @@ function edgeFlangePanel(host: PanelHost, f: EdgeFlangeFeature): HTMLElement[] {
     ),
     widthSection(host, f.width),
     section(
-      'Gehrung',
-      checkField('Ecken auf Gehrung', () => f.miterGap !== undefined, (v) => {
-        if (v) f.miterGap = 0.25;
-        else delete f.miterGap;
-        host.changed();
-        host.restructure();
-      }),
-      ...(f.miterGap !== undefined ? [numberField('Gehrungsspalt', () => f.miterGap ?? 0, (v) => ((f.miterGap = v), host.changed()), { unit: 'mm', min: 0 })] : []),
+      'Ecken',
+      segField(
+        [
+          { value: 'open' as const, label: 'Offen', icon: EDGE_CORNER_DIAGRAMS.open },
+          { value: 'mitre' as const, label: '45°', icon: EDGE_CORNER_DIAGRAMS.mitre },
+          { value: 'straight' as const, label: 'Gerade', icon: EDGE_CORNER_DIAGRAMS.straight },
+        ],
+        () => (f.miterGap === undefined ? 'open' : (f.cornerStyle ?? 'mitre')),
+        (v) => {
+          if (v === 'open') {
+            delete f.miterGap;
+            delete f.cornerStyle;
+          } else {
+            f.miterGap ??= 0.25;
+            if (v === 'straight') f.cornerStyle = 'straight';
+            else delete f.cornerStyle;
+          }
+          host.changed();
+          host.restructure();
+        },
+        'Ecken',
+      ),
+      ...(f.miterGap !== undefined ? [numberField('Spalt', () => f.miterGap ?? 0, (v) => ((f.miterGap = v), host.changed()), { unit: 'mm', min: 0 })] : []),
       h(
         'p',
         { class: 'note' },
-        'Wo zwei der gewählten Kanten zusammenstoßen, laufen beide Laschen bis zur Ebene, die den Winkel zwischen ihnen halbiert, und halten dort den Spalt. Der Schnitt steht senkrecht zum Blech, die Biegeradien treffen sich ebenfalls. Lässt sich eine Ecke so nicht schneiden, bleibt sie offen.',
+        'Wo zwei der gewählten Kanten zusammenstoßen oder die Lasche in eine vorhandene Lasche liefe, werden die Laschen automatisch freigestellt. 45°: beide werden an der Winkelhalbierenden geschnitten. Gerade: eine läuft durch, die andere endet gerade davor. Das gilt auch für Laschen in einer Ebene, etwa nach innen zeigende Rücklaschen. Der Schnitt steht senkrecht zum Blech, die Biegezonen werden mitgeschnitten. Lässt sich eine Ecke so nicht freistellen, bleibt sie, wie sie war.',
       ),
     ),
     overridesSection(host, host.doc.sheet, () => f.overrides, (o) => (f.overrides = o), { radius: true, relief: true }),

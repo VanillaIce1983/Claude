@@ -8,7 +8,7 @@ import { Bend, Part, computePlacements, endOffset, stripOutline, stripPoint, str
 import { distPointSegment, isSimple, pointInPolygon, signedArea } from '../src/kernel/polygon';
 import { V2, V3, applyA, applyDirA, dot3, invertRigid, norm3, sub3, v2, v3 } from '../src/kernel/vec';
 import { exampleDoc } from '../src/ui/example';
-import { build, checkClosed, doc, edgeRef, expectedVolume, plate } from './helpers';
+import { build, checkClosed, doc, edgeRef, expectedVolume, interpenetration, plate } from './helpers';
 
 const T = 2;
 
@@ -813,7 +813,7 @@ describe('Kantenlasche an Plattenecken', () => {
     const r = build(trayDoc(rectangle, { miterGap: undefined }));
     expect([...r.part.bends.values()].some((b) => b.ext0 || b.ext1)).toBe(false);
     const bad = regenerate(trayDoc(rectangle, { miterGap: -1 }));
-    expect(bad.status.get('fl')).toEqual({ ok: false, error: 'Der Gehrungsspalt darf nicht negativ sein.' });
+    expect(bad.status.get('fl')).toEqual({ ok: false, error: 'Der Spalt an den Ecken darf nicht negativ sein.' });
   });
   const octagon = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => P(60 + 50 * Math.cos((i * Math.PI) / 4), 50 + 50 * Math.sin((i * Math.PI) / 4)));
   const triangle = [P(0, 0), P(120, 0), P(60, 60 * Math.sqrt(3))];
@@ -962,5 +962,89 @@ describe('Kantenlasche an Plattenecken', () => {
       expect(flatOverlap(r.part)).toBeLessThan(1e-4);
       expect(clearance(r.part, 'fl.0', 'fl.1')).toBeGreaterThanOrEqual(0.2 - 1e-6);
     }
+  });
+  describe('automatic relief of colliding flanges', () => {
+    // a 200 × 120 box: walls on all edges, then return flanges on their free edges
+    const box = { ...plate(200, 120) } as Feature;
+    const walls = (): EdgeFlangeFeature => {
+      const r0 = build(doc([box]));
+      return { ...twoFlanges, id: 'fl', length: 25, edges: [0, 1, 2, 3].map((i) => edgeRef(r0.part, `base:e${i}`)), miterGap: 0.25 };
+    };
+    const returns = (side: 'top' | 'bottom', o: Partial<EdgeFlangeFeature> = {}): Feature[] => {
+      const fl = walls();
+      const r1 = build(doc([box, fl]));
+      return [box, fl, { ...twoFlanges, id: 'rf', length: 25, edges: [0, 1, 2, 3].map((i) => edgeRef(r1.part, `fl.${i}:end`, side)), miterGap: 0.25, ...o }];
+    };
+
+    it('inward return flanges overlap at the corners when left open', () => {
+      const r = build(doc(returns('top', { miterGap: undefined })));
+      const pen = interpenetration(r.part);
+      expect(pen.volume).toBeGreaterThan(100);
+      expect(pen.pairs).toContain('face:rf.0~face:rf.1');
+    });
+
+    for (const style of ['mitre', 'straight'] as const) {
+      it(`relieves inward return flanges in one plane (${style})`, () => {
+        const r = build(doc(returns('top', { cornerStyle: style })));
+        expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+        expect(interpenetration(r.part).volume).toBe(0);
+        expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+        for (let i = 0; i < 4; i++) expect(clearance(r.part, `rf.${i}`, `rf.${(i + 1) % 4}`)).toBeCloseTo(0.25, 6);
+        if (style === 'straight') {
+          // the first one runs through both corners and keeps its outline
+          const open = build(doc(returns('top', { miterGap: undefined })));
+          expect(r.part.faces.get('rf.0')!.outer).toEqual(open.part.faces.get('rf.0')!.outer);
+          expect(r.part.bends.get('rf.0')!.ext0 ?? r.part.bends.get('rf.0')!.ext1).toBeUndefined();
+        }
+      });
+
+      it(`closes outward return flanges at the corners (${style})`, () => {
+        const open = build(doc(returns('bottom', { miterGap: undefined })));
+        const r = build(doc(returns('bottom', { cornerStyle: style })));
+        expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+        expect(interpenetration(r.part).volume).toBe(0);
+        expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+        expect(r.volume).toBeGreaterThan(open.volume);
+        for (let i = 0; i < 4; i++) expect(clearance(r.part, `rf.${i}`, `rf.${(i + 1) % 4}`)).toBeCloseTo(0.25, 6);
+      });
+    }
+
+    it('joins walls straight: one runs through, the other stops the gap before it', () => {
+      const fl: EdgeFlangeFeature = { ...walls(), cornerStyle: 'straight' };
+      const r = build(doc([box, fl]));
+      expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+      expect(interpenetration(r.part).volume).toBe(0);
+      expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+      for (let i = 0; i < 4; i++) expect(clearance(r.part, `fl.${i}`, `fl.${(i + 1) % 4}`)).toBeCloseTo(0.25, 6);
+    });
+
+    it('relieves a flange that runs into a flange of an earlier feature', () => {
+      // the four return flanges added one by one
+      const fl = walls();
+      let feats: Feature[] = [box, fl];
+      for (let i = 0; i < 4; i++) {
+        const r = build(doc(feats));
+        feats = [...feats, { ...twoFlanges, id: `r${i}`, length: 25, edges: [edgeRef(r.part, `fl.${i}:end`, 'top')], miterGap: 0.25 }];
+      }
+      const r = build(doc(feats));
+      expect(checkClosed(r.mesh.indices)).toEqual({ open: 0, bad: 0 });
+      expect(interpenetration(r.part).volume).toBe(0);
+      expect(flatOverlap(r.part)).toBeLessThan(1e-4);
+      for (let i = 0; i < 4; i++) expect(clearance(r.part, `r${i}`, `r${(i + 1) % 4}`)).toBeGreaterThanOrEqual(0.25 - 1e-6);
+      // without the option they collide
+      const plain = build(doc(feats.map((f) => (f.id.startsWith('r') ? { ...f, miterGap: undefined } : f)) as Feature[]));
+      expect(interpenetration(plain.part).volume).toBeGreaterThan(100);
+    });
+
+    it('leaves flanges of earlier features alone when they only touch', () => {
+      const r0 = build(doc([box]));
+      const fa: EdgeFlangeFeature = { ...twoFlanges, id: 'fa', edges: [edgeRef(r0.part, 'base:e0')] };
+      const r1 = build(doc([box, fa]));
+      const fb: EdgeFlangeFeature = { ...twoFlanges, id: 'fb', edges: [edgeRef(r1.part, 'base:e1')] };
+      const plain = build(doc([box, fa, fb]));
+      const r = build(doc([box, fa, { ...fb, miterGap: 0.25 }]));
+      expect(r.part.faces.get('fa')!.outer).toEqual(plain.part.faces.get('fa')!.outer);
+      expect(r.part.faces.get('fb')!.outer).toEqual(plain.part.faces.get('fb')!.outer);
+    });
   });
 });

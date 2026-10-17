@@ -63,3 +63,10 @@ export const CORNER_DIAGRAMS: Record<'butt' | 'overlap' | 'underlap', string> = 
   overlap: `<svg viewBox="0 0 34 26"><path d="M4 21h25v-4H4z" fill="currentColor" fill-opacity=".55" stroke="currentColor"/><path d="M25 3h4v13h-4z" fill="currentColor" fill-opacity=".2" stroke="currentColor"/></svg>`,
   underlap: `<svg viewBox="0 0 34 26"><path d="M4 21h20v-4H4z" fill="currentColor" fill-opacity=".55" stroke="currentColor"/><path d="M25 3h4v18h-4z" fill="currentColor" fill-opacity=".2" stroke="currentColor"/></svg>`,
 };
+
+/** Top views of the corner between two flanges of one edge flange: open, 45° mitre, straight. */
+export const EDGE_CORNER_DIAGRAMS: Record<'open' | 'mitre' | 'straight', string> = {
+  open: `<svg viewBox="0 0 34 26"><path d="M4 21h19v-4H4z" fill="currentColor" fill-opacity=".35" stroke="currentColor"/><path d="M25 3h4v13h-4z" fill="currentColor" fill-opacity=".35" stroke="currentColor"/></svg>`,
+  mitre: `<svg viewBox="0 0 34 26"><path d="M4 21h23.5l-4-4H4z" fill="currentColor" fill-opacity=".35" stroke="currentColor"/><path d="M25 3h4v16.5l-4-4z" fill="currentColor" fill-opacity=".35" stroke="currentColor"/></svg>`,
+  straight: `<svg viewBox="0 0 34 26"><path d="M4 21h25v-4H4z" fill="currentColor" fill-opacity=".55" stroke="currentColor"/><path d="M25 3h4v13h-4z" fill="currentColor" fill-opacity=".25" stroke="currentColor"/></svg>`,
+};

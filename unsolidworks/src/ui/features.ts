@@ -253,7 +253,7 @@ export function summary(f: Feature): string {
     case 'baseFlange':
       return f.closed ? `Platte · ${f.points.length} Ecken` : `Profil · ${f.points.length - 1} Segmente · Tiefe ${num(f.depth)} mm`;
     case 'edgeFlange':
-      return `${num(f.angle)}° · ${num(f.length)} mm · ${POSITION_LABELS[f.position]}${f.edges.length > 1 ? ` · ${f.edges.length} Kanten` : ''}${f.edges.length > 1 && f.miterGap !== undefined ? ` · Gehrung ${num(f.miterGap)} mm` : ''}`;
+      return `${num(f.angle)}° · ${num(f.length)} mm · ${POSITION_LABELS[f.position]}${f.edges.length > 1 ? ` · ${f.edges.length} Kanten` : ''}${f.miterGap !== undefined ? ` · Ecken ${f.cornerStyle === 'straight' ? 'gerade' : '45°'} ${num(f.miterGap)} mm` : ''}`;
     case 'hem':
       return `${HEM_LABELS[f.hemType]} · ${f.hemType === 'teardrop' || f.hemType === 'rolled' ? `${num(f.angle)}° R${num(f.radius)}` : `${num(f.length)} mm`}`;
     case 'sketchedBend':

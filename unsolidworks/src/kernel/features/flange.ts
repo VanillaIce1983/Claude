@@ -5,7 +5,7 @@ import { SheetSettings, bendAllowance, describeCalc, insideSetback, outsideSetba
 import { dist2, fmt, rad } from '../vec';
 import { attachToEdge, rectRing, requireFreeOuterEdge, resolveWidth } from './attach';
 import { clearWidth } from './clearance';
-import { mitreCorner, yieldToBend } from './corner';
+import { facesCollide, relieveCorner, yieldToBend } from './corner';
 import type { EdgeFlangeFeature, EdgeSelection, HemFeature } from './types';
 
 /** Bend direction and selected-edge height in the canonical "bend up" frame. */
@@ -121,33 +121,44 @@ export function applyEdgeFlange(part: Part, sheet: SheetSettings, f: EdgeFlangeF
     part.bends.set(id, bend);
     yieldToBend(part, id);
   });
-  if (f.miterGap !== undefined && f.edges.length > 1) mitreCorners(part, f, f.miterGap);
+  if (f.miterGap !== undefined) relieveCorners(part, f, f.miterGap);
 }
 
 /**
- * Mitres the corners between this feature's flanges where two selected edges
- * meet, like SolidWorks' edge flange on several edges: both flanges run up
- * to the plane halving the angle between them, with the gap in between, and
- * their bends meet on the same plane. A corner that cannot be mitred (it
- * would cut off a bend, overlap in the flat pattern, …) stays open.
+ * Relieves the corners of this feature's flanges, like SolidWorks' edge
+ * flange on several edges: where two of them meet, or where one runs into a
+ * flange of an earlier feature, they are cut at 45° (mitre) or straight,
+ * with the gap in between, and their bends follow. A corner that cannot be
+ * relieved (it would cut off a bend, overlap in the flat pattern, …) stays
+ * as it was.
  */
-function mitreCorners(part: Part, f: EdgeFlangeFeature, gap: number): void {
-  if (!(gap >= 0)) throw new Error('Der Gehrungsspalt darf nicht negativ sein.');
-  const ids = f.edges.map((_, i) => `${f.id}.${i}`);
-  const partners = new Set(ids);
+function relieveCorners(part: Part, f: EdgeFlangeFeature, gap: number): void {
+  if (!(gap >= 0)) throw new Error('Der Spalt an den Ecken darf nicht negativ sein.');
+  const style = f.cornerStyle ?? 'mitre';
+  const ids = f.edges.map((_, i) => (f.edges.length > 1 ? `${f.id}.${i}` : f.id));
   const done = new Set<string>();
-  for (const id of ids) {
+  const rank = (id: string): number => ids.indexOf(id);
+  const attempt = (id: string, partners: Set<string>): void => {
     for (const tag of [`${id}:side0`, `${id}:side1`]) {
       const e = allEdges(part).find((x) => x.face.id === id && x.tag === tag);
       if (!e) continue;
       const before = clonePart(part);
       try {
-        mitreCorner(part, { tag, at: { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 } }, gap, partners, done);
+        relieveCorner(part, { tag, at: { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 } }, { style, gap, partners, done, rank });
       } catch {
         part.faces = before.faces;
         part.bends = before.bends;
         part.circles = before.circles;
       }
+    }
+  };
+  const own = new Set(ids);
+  for (const id of ids) attempt(id, own);
+  // a flange of an earlier feature this one runs into: it ranks first in a straight joint
+  for (const id of ids) {
+    for (const other of [...part.faces.keys()]) {
+      if (own.has(other) || !part.faces.has(id) || !allEdges(part).some((e) => e.face.id === other && (e.tag === `${other}:side0` || e.tag === `${other}:side1`))) continue;
+      if (facesCollide(part, id, other)) attempt(id, new Set([other]));
     }
   }
 }

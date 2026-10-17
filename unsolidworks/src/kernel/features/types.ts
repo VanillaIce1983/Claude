@@ -55,11 +55,14 @@ export interface EdgeFlangeFeature extends FeatureBase {
   width: WidthSpec;
   overrides?: BendOverrides;
   /**
-   * Gap (mm) at corners where two of the selected edges meet: both flanges
-   * and their bends run up to the plane halving the angle between them and
-   * keep this gap. Missing: corners stay open (documents from before this option).
+   * Gap (mm) at corners where two of the selected edges meet, or where a new
+   * flange runs into a flange of an earlier feature: the flanges and their
+   * bends are cut so they keep this gap (see cornerStyle). Missing: corners
+   * stay open (documents from before this option).
    */
   miterGap?: number;
+  /** 45° mitre (default) or a straight joint where one flange runs through. */
+  cornerStyle?: 'mitre' | 'straight';
 }
 
 export type HemType = 'closed' | 'open' | 'teardrop' | 'rolled';
