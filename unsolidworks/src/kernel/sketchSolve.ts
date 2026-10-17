@@ -309,23 +309,30 @@ function solveLinear(A: number[][], b: number[]): number[] | null {
 }
 
 interface System {
-  ents: SketchEntity[];
-  /** Index of each entity's first parameter in the variable vector. */
-  offset: number[];
+  /** Parameter slots in the variable vector: entity index and position within getParams. */
+  slots: { ent: number; k: number; name: string }[];
   x0: number[];
   build: (x: number[]) => Map<string, SketchEntity>;
 }
 
-function system(entities: SketchEntity[]): System {
-  const offset: number[] = [];
+/** The variables: the parameters `free` lets move; the others stay as they are. */
+function system(entities: SketchEntity[], free: (e: SketchEntity, name: string) => boolean = () => true): System {
+  const slots: System['slots'] = [];
   const x0: number[] = [];
-  for (const e of entities) {
-    offset.push(x0.length);
-    x0.push(...getParams(e));
-  }
-  const build = (x: number[]): Map<string, SketchEntity> =>
-    new Map(entities.map((e, i) => [e.id, withParams(e, x.slice(offset[i], offset[i] + getParams(e).length))]));
-  return { ents: entities, offset, x0, build };
+  const base = entities.map(getParams);
+  entities.forEach((e, i) => {
+    paramNames(e).forEach((name, k) => {
+      if (!free(e, name)) return;
+      slots.push({ ent: i, k, name });
+      x0.push(base[i][k]);
+    });
+  });
+  const build = (x: number[]): Map<string, SketchEntity> => {
+    const vals = base.map((v) => v.slice());
+    slots.forEach((s, j) => (vals[s.ent][s.k] = x[j]));
+    return new Map(entities.map((e, i) => [e.id, withParams(e, vals[i])]));
+  };
+  return { slots, x0, build };
 }
 
 function jacobian(f: (x: number[]) => number[], x: number[], r0: number[]): number[][] {
@@ -358,57 +365,30 @@ function rowBasis(J: number[][], tol = 1e-9): number[][] {
   return basis;
 }
 
+const normOf = (r: number[]): number => Math.hypot(...r);
+
 /**
- * Moves the entities as little as possible so every dimension holds. `ctx`
- * resolves dimensions to the part (null when there are none). Returns the
- * moved entities, whether all dimensions hold, and which entities are fully
- * defined.
+ * Levenberg–Marquardt with least-change steps: Δ = D Jᵀ (J D Jᵀ + μ I)⁻¹ (−r),
+ * D = diag(1/w²), so a parameter with a larger weight moves less.
  */
-export function solveSketch(entities: SketchEntity[], dims: SketchDim[], ctx: SketchContext | null): SolveResult {
-  const sys = system(entities);
-  if (dims.length === 0) return { entities, ok: true, defined: new Set() };
-  let resolved: Resolved;
-  try {
-    resolved = resolveTargets(ctx, dims);
-  } catch (e) {
-    return { entities, ok: false, problem: (e as Error).message, defined: new Set() };
-  }
-  // keep each signed measure on the side it is now
-  const start = sys.build(sys.x0);
-  let signs: number[];
-  try {
-    signs = dims.map((d) => (unsigned(d, start, resolved) ? 1 : measureDim(d, start, resolved) < 0 ? -1 : 1));
-  } catch (e) {
-    return { entities, ok: false, problem: (e as Error).message, defined: new Set() };
-  }
-  const residual = (x: number[]): number[] => {
-    const ents = sys.build(x);
-    return dims.map((d, i) => measureDim(d, ents, resolved) - signs[i] * d.value);
-  };
-  const norm = (r: number[]): number => Math.hypot(...r);
-  let x = sys.x0.slice();
-  let r: number[];
-  try {
-    r = residual(x);
-  } catch (e) {
-    return { entities, ok: false, problem: (e as Error).message, defined: new Set() };
-  }
+function leastChange(f: (x: number[]) => number[], x0: number[], weights: number[]): { x: number[]; r: number[] } {
+  const D = weights.map((w) => 1 / (w * w));
+  let x = x0.slice();
+  let r = f(x);
   let mu = 1e-9;
-  for (let iter = 0; iter < 100 && norm(r) > 1e-10; iter++) {
-    const J = jacobian(residual, x, r);
+  for (let iter = 0; iter < 100 && normOf(r) > 1e-10; iter++) {
+    const J = jacobian(f, x, r);
     let improved = false;
     for (let tries = 0; tries < 12; tries++) {
-      // least-change step: Δ = Jᵀ (J Jᵀ + μ I)⁻¹ (−r)
-      const A = J.map((ri, i) => J.map((rj, j) => ri.reduce((s, v, k) => s + v * rj[k], 0) + (i === j ? mu : 0)));
+      const A = J.map((ri, i) => J.map((rj, j) => ri.reduce((s, v, k) => s + v * D[k] * rj[k], 0) + (i === j ? mu : 0)));
       const y = solveLinear(A, r.map((v) => -v));
       if (!y) {
         mu = Math.max(mu * 10, 1e-9);
         continue;
       }
-      const step = x.map((_, k) => J.reduce((s, row, i) => s + row[k] * y[i], 0));
-      const xn = x.map((v, k) => v + step[k]);
-      const rn = residual(xn);
-      if (norm(rn) < norm(r)) {
+      const xn = x.map((v, k) => v + D[k] * J.reduce((s, row, i) => s + row[k] * y[i], 0));
+      const rn = f(xn);
+      if (normOf(rn) < normOf(r)) {
         x = xn;
         r = rn;
         mu = Math.max(mu / 10, 1e-12);
@@ -419,10 +399,78 @@ export function solveSketch(entities: SketchEntity[], dims: SketchDim[], ctx: Sk
     }
     if (!improved) break;
   }
-  const ents = sys.build(x);
-  const solved = entities.map((e) => ents.get(e.id)!);
+  return { x, r };
+}
+
+export interface SolveOptions {
+  /**
+   * Each signed measure keeps the side it has in this state (the last solved
+   * one while the user drags or types) instead of the side it has in the
+   * entities passed in.
+   */
+  sidesFrom?: SketchEntity[];
+  /** Parameters that give way only when nothing else can: the entity being dragged, or the field being typed in (all its parameters without `params`). */
+  sticky?: { entity: string; params?: string[] };
+}
+
+/**
+ * Moves the entities as little as possible so every dimension holds. `ctx`
+ * resolves dimensions to the part (null when there are none). Sizes stay
+ * when moving things is enough: only if the dimensions cannot hold otherwise
+ * do sizes change as well, so changing a position dimension moves a shape
+ * instead of also stretching it. Returns the moved entities, whether all
+ * dimensions hold, and which entities are fully defined.
+ */
+export function solveSketch(entities: SketchEntity[], dims: SketchDim[], ctx: SketchContext | null, opts: SolveOptions = {}): SolveResult {
+  if (dims.length === 0) return { entities, ok: true, defined: new Set() };
+  let resolved: Resolved;
+  try {
+    resolved = resolveTargets(ctx, dims);
+  } catch (e) {
+    return { entities, ok: false, problem: (e as Error).message, defined: new Set() };
+  }
+  const start = new Map(entities.map((e) => [e.id, e]));
+  const ref = opts.sidesFrom ? new Map([...start, ...opts.sidesFrom.map((e) => [e.id, e] as const)]) : start;
+  let signs: number[];
+  try {
+    signs = dims.map((d) => {
+      if (unsigned(d, start, resolved)) return 1;
+      const m = measureDim(d, ref, resolved);
+      // exactly on the line: take the side it is on now
+      return (Math.abs(m) > 1e-9 ? m : measureDim(d, start, resolved)) < 0 ? -1 : 1;
+    });
+  } catch (e) {
+    return { entities, ok: false, problem: (e as Error).message, defined: new Set() };
+  }
+  const sticky = (e: SketchEntity, name: string): boolean => opts.sticky?.entity === e.id && (!opts.sticky.params || opts.sticky.params.includes(name));
   const scale = Math.max(1, ...dims.map((d) => Math.abs(d.value)));
-  if (norm(r) > 1e-7 * scale) {
+  const attempt = (free: (e: SketchEntity, name: string) => boolean): { sys: System; x: number[]; r: number[] } | { error: string } => {
+    const sys = system(entities, free);
+    const residual = (x: number[]): number[] => {
+      const ents = sys.build(x);
+      return dims.map((d, i) => measureDim(d, ents, resolved) - signs[i] * d.value);
+    };
+    try {
+      const weights = sys.slots.map((s) => (sticky(entities[s.ent], s.name) ? 10 : 1));
+      return { sys, ...leastChange(residual, sys.x0, weights) };
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
+  };
+  const isSize = (e: SketchEntity, name: string): boolean => sizeParams(e).includes(name);
+  // from the smallest change to the largest: move the others, then the held parameters, then resize
+  const tries: ((e: SketchEntity, name: string) => boolean)[] = opts.sticky
+    ? [(e, n) => !isSize(e, n) && !sticky(e, n), (e, n) => !isSize(e, n) || sticky(e, n), (e, n) => !sticky(e, n), () => true]
+    : [(e, n) => !isSize(e, n), () => true];
+  let res: ReturnType<typeof attempt> = { error: '' };
+  for (const free of tries) {
+    res = attempt(free);
+    if (!('error' in res) && normOf(res.r) <= 1e-7 * scale) break;
+  }
+  if ('error' in res) return { entities, ok: false, problem: res.error, defined: new Set() };
+  const ents = res.sys.build(res.x);
+  const solved = entities.map((e) => ents.get(e.id)!);
+  if (normOf(res.r) > 1e-7 * scale) {
     return { entities: solved, ok: false, problem: 'Die Maße widersprechen sich. Bitte eine Bemaßung löschen oder ändern.', defined: new Set() };
   }
   for (const e of solved) {
@@ -432,16 +480,21 @@ export function solveSketch(entities: SketchEntity[], dims: SketchDim[], ctx: Sk
     }
   }
   // fully defined: every parameter of the entity lies in the row space of the dimension Jacobian
-  const basis = rowBasis(jacobian(residual, x, r));
-  const determined = x.map((_, k) => {
+  const full = system(solved);
+  const f = (x: number[]): number[] => {
+    const m = full.build(x);
+    return dims.map((d) => measureDim(d, m, resolved));
+  };
+  const basis = rowBasis(jacobian(f, full.x0, f(full.x0)));
+  const determined = full.x0.map((_, k) => {
     let rest = 1;
     for (const q of basis) rest -= q[k] * q[k];
     return rest < 1e-6;
   });
   const defined = new Set<string>();
-  entities.forEach((e, i) => {
-    const n = getParams(e).length;
-    if (n > 0 && determined.slice(sys.offset[i], sys.offset[i] + n).every(Boolean)) defined.add(e.id);
+  solved.forEach((e, i) => {
+    const mine = full.slots.map((s, k) => (s.ent === i ? k : -1)).filter((k) => k >= 0);
+    if (mine.length > 0 && mine.every((k) => determined[k])) defined.add(e.id);
   });
   return { entities: solved, ok: true, defined };
 }
@@ -460,6 +513,12 @@ export function overDefines(entities: SketchEntity[], dims: SketchDim[], extra: 
   };
   const J = jacobian(f, sys.x0, f(sys.x0));
   return rowBasis(J).length < rowBasis(J.slice(0, -1)).length + 1;
+}
+
+/** What a dimension measures now, as a positive value (the value it would get when added). */
+export function dimValue(d: SketchDim, entities: SketchEntity[], ctx: SketchContext | null): number {
+  const ents = new Map(entities.map((e) => [e.id, e]));
+  return Math.abs(measureDim(d, ents, resolveTargets(ctx, [d])));
 }
 
 /** Entity ids a dimension depends on. */

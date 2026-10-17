@@ -1,0 +1,246 @@
+/* Sketch mode in the 3D viewport ("Skizze"): tool grid, status, dimension list,
+   element cards, and the dimension labels on the part. All colours come from
+   the theme tokens in styles.css. */
+.fs-tools {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+.fs-tools .tb {
+  min-width: 0;
+  padding: 5px 2px;
+  font-size: 11px;
+}
+.btn.fs-small {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.fs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fs-list > .note {
+  margin: 0;
+}
+.fs-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 7px 10px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel-2);
+}
+.fs-card.on {
+  border-color: var(--sel);
+  box-shadow: inset 0 0 0 1px var(--sel);
+}
+.fs-card.bad {
+  border-color: var(--danger);
+}
+.fs-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fs-idx {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: var(--font-label);
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 1;
+}
+.fs-card.on .fs-idx {
+  background: var(--sel);
+  color: var(--panel);
+}
+.fs-kind {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-label);
+  font-weight: 600;
+}
+.fs-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+.fs-f {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.fs-card .num {
+  background: var(--panel);
+  color: var(--fg);
+}
+.fs-card .num input {
+  padding: 4px 5px;
+}
+.num.fs-bad {
+  border-color: var(--danger);
+}
+.fs-points {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fs-card-err {
+  color: var(--danger);
+  font-size: 12.5px;
+}
+.sk-pm .pm-title small {
+  color: var(--muted);
+  font-weight: 500;
+}
+.sk-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+.sk-status {
+  padding: 6px 10px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-weight: 600;
+}
+.sk-status.under {
+  color: var(--sel);
+  border-color: var(--sel);
+  background: var(--sel-soft);
+}
+.sk-status.full {
+  color: var(--fg);
+}
+.sk-status.bad {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  font-weight: 500;
+}
+.sk-pm .section .btnrow {
+  margin-top: 8px;
+}
+.sk-dims {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sk-dims > .note {
+  margin: 0;
+}
+.sk-dimrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel-2);
+}
+.sk-dimrow.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.sk-dimname {
+  overflow: hidden;
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sk-dimrow .num {
+  background: var(--panel);
+}
+.sk-dimrow .num input {
+  padding: 3px 5px;
+}
+.sk-def {
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.sk-def.under {
+  background: var(--sel-soft);
+  color: var(--sel);
+}
+.sk-def.full {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+}
+
+/* labels on the part */
+.sk-dim {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+  font-family: var(--font-num);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sk-dim.hover,
+.sk-dim.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sk-dim.preview {
+  border-color: var(--sel);
+  color: var(--sel);
+  cursor: default;
+}
+.sk-dim.edit {
+  padding: 0;
+  border-color: var(--accent);
+}
+.sk-dim-in {
+  width: 78px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.sk-tip {
+  margin: -22px 0 0 46px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--sel);
+  box-shadow: var(--shadow);
+  font-family: var(--font-num);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.fs-tools .field {
+  grid-column: 1 / -1;
+}

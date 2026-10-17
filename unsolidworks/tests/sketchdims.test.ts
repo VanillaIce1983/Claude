@@ -116,4 +116,55 @@ describe('sketch dimensions', () => {
     const r = res.entities[0] as Extract<SketchEntity, { kind: 'rect' }>;
     expect(k.cx - (r.cx + r.w / 2)).toBeCloseTo(5, 6);
   });
+  it('moves a shape for a position dimension instead of also resizing it', () => {
+    const corner: DimTarget = { kind: 'modelPoint', ref: { prevTag: 'base:e3', nextTag: 'base:e0', at: { x: 0, y: 0 }, side: 'top' } };
+    const { features } = cutDoc([], []);
+    const part = build(doc([features[0]])).part;
+    const ctx = sketchContext(part, { edge: { tag: 'base:e0', at: { x: 50, y: 0 } }, anchor: 'line', entities: [] });
+    // the left side of the rectangle 10 from the corner: only the rectangle's position may change
+    const res = solveSketch([rect('r', 50, 25, 30, 20)], [dist('x', corner, pt('r', 'p0'), 'h', 10)], ctx);
+    expect(res.ok).toBe(true);
+    const r = res.entities[0] as Extract<SketchEntity, { kind: 'rect' }>;
+    expect(r.w).toBe(30);
+    expect(r.h).toBe(20);
+    expect(r.cx).toBeCloseTo(25, 9);
+    // when moving is not enough, sizes give way
+    const both = solveSketch([rect('r', 50, 25, 30, 20)], [dist('x', corner, pt('r', 'p0'), 'h', 10), dist('w', pt('r', 'p0'), pt('r', 'p1'), 'h', 40)], ctx);
+    expect(both.ok).toBe(true);
+    const r2 = both.entities[0] as Extract<SketchEntity, { kind: 'rect' }>;
+    expect([r2.cx - r2.w / 2, r2.w]).toEqual([expect.closeTo(10, 9), expect.closeTo(40, 9)]);
+  });
+
+  it('keeps each signed dimension on the side it had before a drag', () => {
+    const before = [circle('a', 10, 10, 2), circle('b', 40, 10, 2)];
+    const dims = [dist('x', pt('a', 'c'), pt('b', 'c'), 'h', 30)];
+    // b dragged past a: the dimension pulls it back to the right of a, not to the left
+    const dragged = [before[0], circle('b', -5, 10, 2)];
+    const keep = solveSketch(dragged, dims, null, { sidesFrom: before, sticky: { entity: 'b' } });
+    expect(keep.ok).toBe(true);
+    const [a, b] = keep.entities as Extract<SketchEntity, { kind: 'circle' }>[];
+    expect(b.cx - a.cx).toBeCloseTo(30, 9);
+    // the dragged circle holds still as far as it can; the other one follows
+    expect(b.cx).toBeCloseTo(-5, 9);
+    const flip = solveSketch(dragged, dims, null);
+    expect((flip.entities[1] as Extract<SketchEntity, { kind: 'circle' }>).cx - (flip.entities[0] as Extract<SketchEntity, { kind: 'circle' }>).cx).toBeCloseTo(-30, 9);
+  });
+
+  it('holds a sticky parameter while the others give way', () => {
+    const ents = [circle('a', 10, 10, 2), circle('b', 40, 10, 2)];
+    const dims = [dist('x', pt('a', 'c'), pt('b', 'c'), 'h', 30)];
+    const edited = [circle('a', 20, 10, 2), ents[1]];
+    const res = solveSketch(edited, dims, null, { sidesFrom: ents, sticky: { entity: 'a', params: ['cx'] } });
+    const [a, b] = res.entities as Extract<SketchEntity, { kind: 'circle' }>[];
+    expect(a.cx).toBeCloseTo(20, 9);
+    expect(b.cx - a.cx).toBeCloseTo(30, 9);
+    // a held parameter that the dimensions fix gives way after all
+    const part = build(doc([plate(100, 50)])).part;
+    const ctx = sketchContext(part, { edge: { tag: 'base:e0', at: { x: 50, y: 0 } }, anchor: 'line', entities: [] });
+    const corner: DimTarget = { kind: 'modelPoint', ref: { prevTag: 'base:e3', nextTag: 'base:e0', at: { x: 0, y: 0 }, side: 'top' } };
+    const pinned = solveSketch(edited, [...dims, dist('p', corner, pt('a', 'c'), 'h', 10)], ctx, { sidesFrom: ents, sticky: { entity: 'a', params: ['cx'] } });
+    expect(pinned.ok).toBe(true);
+    expect((pinned.entities[0] as Extract<SketchEntity, { kind: 'circle' }>).cx).toBeCloseTo(10, 9);
+    expect((pinned.entities[1] as Extract<SketchEntity, { kind: 'circle' }>).cx).toBeCloseTo(40, 9);
+  });
 });

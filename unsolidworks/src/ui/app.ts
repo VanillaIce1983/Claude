@@ -7,7 +7,7 @@ import { meshToStl } from '../kernel/export/stl';
 import { flatToSvg } from '../kernel/export/svg';
 import { partTo3mf } from '../kernel/export/threemf';
 import { FlatPattern, flatPattern } from '../kernel/flat';
-import { FEATURE_LABELS, Feature, FeatureType } from '../kernel/features/types';
+import { FEATURE_LABELS, Feature, FeatureType, SketchCutFeature } from '../kernel/features/types';
 import { PartMesh, PickEdge, buildMesh, meshVolume, pickCorners, pickEdges } from '../kernel/mesh';
 import { EdgeRef, Part, findEdge, isSeamTag } from '../kernel/model';
 import { distPointSegment } from '../kernel/polygon';
@@ -31,10 +31,10 @@ import {
   referenceEdgeIndex,
   summary,
 } from './features';
-import { FaceSketchContext, openFaceSketcher } from './faceSketcher';
 import { MAX_MEASURE_PICKS, MEASURE_ICON, MeasurePick, addsUp, measurePanel, pickToMeasure } from './measure';
 import { MeasureResult, measure } from '../kernel/measure';
 import { flatToSketch, sketchFrame } from '../kernel/sketch';
+import { FaceSketchResult, SketchMode, SketchSide } from './sketchMode';
 import { flatPanel } from './flatpanel';
 import { num } from './format';
 import { ICONS, IconName } from './icons';
@@ -107,6 +107,9 @@ export class App implements PanelHost {
   private model!: Model;
   private flat = false;
   private session: Session | null = null;
+  /** Sketch mode of the sketched cut being edited: draws in the viewport, owns the side panel. */
+  private sketch: SketchMode | null = null;
+  private sketchHint = '';
   private measuring = false;
   private picks: MeasurePick[] = [];
   private measureResult: MeasureResult | null = null;
@@ -213,7 +216,9 @@ export class App implements PanelHost {
           ['right', 'Rechts'],
           ['normal', 'Normal'],
         ] as const
-      ).map(([v, l]) => h('button', { type: 'button', title: `Ansicht ${l}`, onclick: () => this.viewer.setView(v) }, l)),
+      ).map(([v, l]) =>
+        h('button', { type: 'button', title: `Ansicht ${l}`, onclick: () => (v === 'normal' && this.sketch ? this.sketch.lookNormal() : this.viewer.setView(v)) }, l),
+      ),
       h('button', { type: 'button', title: 'Einpassen', onclick: () => this.viewer.fit() }, 'Einpassen'),
     );
     stage.append(views, hint, legend, empty);
@@ -328,7 +333,9 @@ export class App implements PanelHost {
   changed(): void {
     this.model = buildModel(this.doc);
     const m = this.model;
-    this.viewer.setModel(m.mesh, m.part, false);
+    // a sketch shows the part before its feature, as SolidWorks rolls back while a sketch is edited
+    const shown = this.sketch && this.session ? this.session.pre : m;
+    this.viewer.setModel(shown.mesh, shown.part, false);
     this.viewer.setFlatBendLines(null, m.part);
     this.updatePicking();
     this.updateSessionError();
@@ -436,7 +443,7 @@ export class App implements PanelHost {
 
   ok(): void {
     const s = this.session;
-    if (!s) return;
+    if (!s || this.sketch) return;
     if (s.draft) {
       const err = this.draftError(s);
       if (err) {
@@ -455,6 +462,7 @@ export class App implements PanelHost {
   cancel(): void {
     const s = this.session;
     if (!s) return;
+    this.closeSketch();
     this.doc = parseDoc(s.before);
     this.session = null;
     this.refresh();
@@ -548,49 +556,85 @@ export class App implements PanelHost {
   }
 
   openFaceSketch(): void {
-    void this.sketchOnFace(null);
+    this.enterSketch(null);
   }
 
   /**
-   * Open the face sketch dialog of the sketched cut being edited. `pickedFrom`
-   * is the reference before a face was just picked: cancelling the dialog then
-   * undoes that pick, so the session goes back to face selection.
+   * Sketch on the face of the sketched cut being edited, right in the 3D view.
+   * `pickedFrom` is the reference before a face was just picked: discarding
+   * the sketch then undoes that pick, so the session goes back to face
+   * selection. `side` is the sheet surface to draw on; by default the one
+   * facing the camera.
    */
-  private async sketchOnFace(pickedFrom: EdgeRef | null): Promise<void> {
+  private enterSketch(pickedFrom: EdgeRef | null, side?: SketchSide): void {
     const s = this.session;
-    if (!s?.draft || s.draft.type !== 'sketchCut' || !s.pre.part) return;
+    if (!s?.draft || s.draft.type !== 'sketchCut' || !s.pre.part || this.sketch) return;
     const f = s.draft;
     if (this.sketchFaceMissing(s)) {
       this.toast('Bitte zuerst im 3D-Fenster die Fläche anklicken, auf der skizziert werden soll.', true);
       return;
     }
-    let ctx: FaceSketchContext;
-    try {
-      const frame = sketchFrame(s.pre.part, f.sketch.edge, f.sketch.anchor);
-      const toS = (p: V2): V2 => flatToSketch(frame, p);
-      const ring = frame.face.outer;
-      const seams: [V2, V2][] = [];
-      ring.pts.forEach((p, i) => {
-        if (isSeamTag(ring.tags[i])) seams.push([toS(p), toS(ring.pts[(i + 1) % ring.pts.length])]);
-      });
-      const owner = this.doc.features.find((x) => x.id === frame.face.feature);
-      ctx = {
-        title: `Skizze auf ${owner?.name ?? 'Fläche'}`,
-        outline: ring.pts.map(toS),
-        holes: frame.face.holes.map((hRing) => hRing.pts.map(toS)),
-        seams,
-      };
-    } catch (e) {
-      this.toast((e as Error).message, true);
+    if (!s.pre.mesh) {
+      this.toast(s.pre.meshError ?? 'Das Teil lässt sich nicht darstellen.', true);
       return;
     }
-    const res = await openFaceSketcher(f.sketch.entities, ctx);
+    const part = s.pre.part;
+    let mode: SketchMode;
+    try {
+      const frame = sketchFrame(part, f.sketch.edge, f.sketch.anchor);
+      const owner = this.doc.features.find((x) => x.id === frame.face.feature);
+      this.viewer.setModel(s.pre.mesh, part, false);
+      this.viewer.setPickMode('none');
+      this.viewer.setSelection([]);
+      this.viewer.setHighlightFeature(null);
+      mode = new SketchMode(
+        {
+          viewer: this.viewer,
+          part,
+          faceName: owner?.name ?? 'Fläche',
+          css: (n) => this.css(n),
+          toast: (t, err) => this.toast(t, err),
+          setHint: (t) => {
+            this.sketchHint = t;
+            this.renderStageOverlays();
+          },
+          exit: (res, finish) => this.leaveSketch(s, f, pickedFrom, res, finish),
+        },
+        f.sketch,
+        side ?? this.viewer.facingSide(s.pre.mesh.placements.get(frame.face.id)),
+      );
+    } catch (e) {
+      this.toast((e as Error).message, true);
+      this.changed();
+      return;
+    }
+    this.sketch = mode;
+    this.renderSide();
+    this.renderStageOverlays();
+  }
+
+  private leaveSketch(s: Session, f: SketchCutFeature, pickedFrom: EdgeRef | null, res: FaceSketchResult | null, finish: boolean): void {
+    this.sketch = null;
+    this.sketchHint = '';
     if (this.session !== s) return;
-    if (res) f.sketch.entities = res;
-    else if (pickedFrom) f.sketch.edge = pickedFrom;
-    else return;
+    if (res) {
+      f.sketch.entities = res.entities;
+      if (res.dims.length) f.sketch.dims = res.dims;
+      else delete f.sketch.dims;
+    } else if (pickedFrom) f.sketch.edge = pickedFrom;
     this.changed();
-    this.restructure();
+    this.renderSide();
+    this.renderStageOverlays();
+    if (finish) this.ok();
+  }
+
+  /** Leave sketch mode without keeping its changes (the session is being left as a whole). */
+  private closeSketch(): void {
+    const k = this.sketch;
+    if (!k) return;
+    this.sketch = null;
+    this.sketchHint = '';
+    k.destroy();
   }
 
   /** Forget the face but keep the profiles: the next face pick reopens them there. */
@@ -635,6 +679,12 @@ export class App implements PanelHost {
 
   private updatePicking(): void {
     const s = this.session;
+    if (this.sketch) {
+      this.viewer.setPickMode('none');
+      this.viewer.setSelection([]);
+      this.viewer.setHighlightFeature(null);
+      return;
+    }
     if (!s && this.measuring && this.model.part) {
       this.viewer.setHighlightFeature(null);
       this.viewer.setSelection([]);
@@ -792,7 +842,8 @@ export class App implements PanelHost {
       d.sketch.anchor = 'line';
       this.changed();
       this.restructure();
-      void this.sketchOnFace(before);
+      // the side wall belongs to no surface: draw on the one facing the camera
+      this.enterSketch(before, hit.surface === 0 ? 'top' : hit.surface === 1 ? 'bottom' : undefined);
     } else if (d.type === 'cut' && hit.kind === 'face' && hit.pieceKind === 'face' && hit.flat && s.pre.part) {
       const face = s.pre.part.faces.get(hit.id);
       if (!face) return;
@@ -838,6 +889,10 @@ export class App implements PanelHost {
     const side = this.els.side;
     this.els.errBox = null;
     this.els.okBtn = null;
+    if (this.session && this.sketch) {
+      side.replaceChildren(this.sketch.panel);
+      return;
+    }
     if (this.session) {
       side.replaceChildren(this.sessionPanel(this.session));
       this.updateSessionError();
@@ -1034,8 +1089,10 @@ export class App implements PanelHost {
           text = s.draft.edge.tag ? 'Erneut klicken zum Verschieben, Maße links' : 'Auf die Fläche klicken, wo die Bohrung sitzen soll';
           break;
         case 'sketchCut':
-          text = !this.sketchFaceMissing(s)
-            ? 'Skizze links bearbeiten, dann mit ✓ übernehmen'
+          text = this.sketch
+            ? this.sketchHint
+            : !this.sketchFaceMissing(s)
+            ? 'Mit „Skizze bearbeiten“ ändern, dann mit ✓ übernehmen'
             : s.draft.sketch.entities.length
               ? 'Fläche anklicken, auf die die Skizze gelegt werden soll'
               : 'Fläche anklicken, auf der skizziert werden soll';
@@ -1202,6 +1259,8 @@ export class App implements PanelHost {
   private keyboard(): void {
     window.addEventListener('keydown', (e) => {
       if (document.querySelector('.modal')) return;
+      // the sketch handles its own keys; the app must not cancel the feature or undo around it
+      if (this.sketch && (e.key === 'Escape' || e.ctrlKey || e.metaKey)) return;
       const tag = (e.target as HTMLElement)?.tagName;
       const typing = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
       const mod = e.ctrlKey || e.metaKey;

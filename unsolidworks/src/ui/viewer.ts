@@ -79,6 +79,38 @@ export interface ViewColors {
 
 export type ViewName = 'iso' | 'top' | 'front' | 'right' | 'normal';
 
+/**
+ * Raw pointer input while sketching: the left button (one finger on touch)
+ * goes to the sketch instead of rotating the view or picking.
+ */
+export interface SketchPointerHandler {
+  down(x: number, y: number, ev: PointerEvent): void;
+  move(x: number, y: number, ev: PointerEvent): void;
+  up(x: number, y: number, ev: PointerEvent): void;
+  /** The pointer left the viewport. */
+  leave(): void;
+  /** A second finger turned the gesture into a pan or zoom: drop what the first one started. */
+  cancel(): void;
+}
+
+export interface OverlayLines {
+  /** Segment pairs, flat [ax, ay, az, bx, by, bz, …] in world space. */
+  seg: number[];
+  color: string;
+  width: number;
+  dashed?: boolean;
+  /** Drawn over the part (dimensions, highlights); otherwise hidden behind it like its edges. */
+  onTop?: boolean;
+}
+
+/** What a sketch draws into the viewport; rebuilt as a whole by setSketchOverlay. */
+export interface SketchOverlay {
+  lines: OverlayLines[];
+  points: { pts: V3[]; color: string; size: number }[];
+  /** HTML elements kept at world points; they may be interactive. */
+  labels: { el: HTMLElement; at: V3 }[];
+}
+
 interface ModelState {
   mesh: PartMesh;
   part: Part;
@@ -110,8 +142,16 @@ export class Viewer {
   private frameRequested = false;
   private downAt: { x: number; y: number } | null = null;
   private fitted = false;
+  private sketchGroup: THREE.Group = new THREE.Group();
+  private sketchLabels: { el: HTMLElement; at: V3 }[] = [];
+  private sketchHandler: SketchPointerHandler | null = null;
+  private pointers = new Set<number>();
+  private viewChanged = false;
+  private rendering = false;
   onPick: (hit: Hit | null, ev: PointerEvent) => void = () => {};
   onHover: (hit: Hit | null) => void = () => {};
+  /** Called before a frame is drawn after the camera moved (sketch arrows are sized in pixels). */
+  onViewChange: () => void = () => {};
 
   constructor(private host: HTMLElement, colors: ViewColors) {
     this.colors = colors;
@@ -137,20 +177,41 @@ export class Viewer {
     const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
     fillLight.position.set(-1, -0.4, 0.4);
     this.camera.add(fillLight);
-    this.scene.add(this.model, this.overlay);
+    this.scene.add(this.model, this.overlay, this.sketchGroup);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;
     this.controls.screenSpacePanning = true;
     this.controls.zoomToCursor = true;
     this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
-    this.controls.addEventListener('change', () => this.requestRender());
+    this.controls.addEventListener('change', () => {
+      this.viewChanged = true;
+      this.requestRender();
+    });
 
     const el = this.renderer.domElement;
     el.addEventListener('pointerdown', (e) => {
+      this.pointers.add(e.pointerId);
+      const sk = this.sketchHandler;
+      if (sk) {
+        if (this.pointers.size > 1) sk.cancel();
+        else if (e.button === 0) sk.down(e.clientX, e.clientY, e);
+        return;
+      }
       this.downAt = { x: e.clientX, y: e.clientY };
     });
+    el.addEventListener('pointercancel', (e) => {
+      this.pointers.delete(e.pointerId);
+      this.sketchHandler?.cancel();
+    });
     el.addEventListener('pointerup', (e) => {
+      const multi = this.pointers.size > 1;
+      this.pointers.delete(e.pointerId);
+      const sk = this.sketchHandler;
+      if (sk) {
+        if (e.button === 0 && !multi) sk.up(e.clientX, e.clientY, e);
+        return;
+      }
       if (!this.downAt) return;
       const moved = Math.hypot(e.clientX - this.downAt.x, e.clientY - this.downAt.y);
       this.downAt = null;
@@ -158,6 +219,11 @@ export class Viewer {
       this.onPick(this.pickAt(e.clientX, e.clientY), e);
     });
     el.addEventListener('pointermove', (e) => {
+      const sk = this.sketchHandler;
+      if (sk) {
+        if (this.pointers.size <= 1) sk.move(e.clientX, e.clientY, e);
+        return;
+      }
       if (this.downAt) return;
       const hit = this.pickAt(e.clientX, e.clientY);
       if (!sameHit(hit, this.hover)) {
@@ -168,6 +234,10 @@ export class Viewer {
       el.style.cursor = hit ? 'pointer' : 'default';
     });
     el.addEventListener('pointerleave', () => {
+      if (this.sketchHandler) {
+        this.sketchHandler.leave();
+        return;
+      }
       if (this.hover) {
         this.hover = null;
         this.onHover(null);
@@ -199,16 +269,26 @@ export class Viewer {
       const m = (o as { material?: unknown }).material;
       if (m instanceof LineMaterial) m.resolution.set(w, h);
     });
+    this.viewChanged = true;
     this.requestRender();
   }
 
   requestRender(): void {
-    if (this.frameRequested) return;
+    if (this.frameRequested || this.rendering) return;
     this.frameRequested = true;
     requestAnimationFrame(() => {
       this.frameRequested = false;
-      this.renderer.render(this.scene, this.camera);
-      this.placeLabels();
+      this.rendering = true;
+      try {
+        if (this.viewChanged) {
+          this.viewChanged = false;
+          this.onViewChange();
+        }
+        this.renderer.render(this.scene, this.camera);
+        this.placeLabels();
+      } finally {
+        this.rendering = false;
+      }
     });
   }
 
@@ -267,15 +347,144 @@ export class Viewer {
 
   /** Labels are HTML, so they follow the camera here instead of in the scene. */
   private placeLabels(): void {
-    if (!this.labels.length) return;
+    if (!this.labels.length && !this.sketchLabels.length) return;
     const c = this.renderer.domElement;
     const v = new THREE.Vector3();
-    for (const l of this.labels) {
+    for (const l of [...this.labels, ...this.sketchLabels]) {
       v.set(l.at.x, l.at.y, l.at.z).project(this.camera);
       const x = Math.round(c.offsetLeft + ((v.x + 1) / 2) * c.clientWidth);
       const y = Math.round(c.offsetTop + ((1 - v.y) / 2) * c.clientHeight);
       l.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
     }
+  }
+
+  /**
+   * Hand the left button and one-finger touches to a sketch (null gives them
+   * back to rotating and picking). The middle button rotates and the right
+   * button pans meanwhile, as in SolidWorks.
+   */
+  setSketchInput(h: SketchPointerHandler | null): void {
+    this.sketchHandler = h;
+    this.downAt = null;
+    const el = this.renderer.domElement;
+    if (h) {
+      this.controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+      this.controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_PAN };
+      el.style.cursor = 'crosshair';
+      if (this.hover) {
+        this.hover = null;
+        this.onHover(null);
+        this.updateOverlay();
+      }
+    } else {
+      this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+      this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+      el.style.cursor = 'default';
+    }
+  }
+
+  /** Cursor over the viewport while sketching (crosshair, pointer over a pickable item, move while dragging). */
+  setSketchCursor(cursor: string): void {
+    if (this.sketchHandler) this.renderer.domElement.style.cursor = cursor;
+  }
+
+  /** Replace the sketch graphics; null removes them. */
+  setSketchOverlay(o: SketchOverlay | null): void {
+    this.disposeGroup(this.sketchGroup);
+    const keep = new Set(o?.labels.map((l) => l.el) ?? []);
+    for (const l of this.sketchLabels) if (!keep.has(l.el)) l.el.remove();
+    this.sketchLabels = o?.labels ?? [];
+    for (const l of this.sketchLabels) {
+      if (l.el.parentElement !== this.labelLayer) {
+        Object.assign(l.el.style, { position: 'absolute', left: '0', top: '0' });
+        this.labelLayer.append(l.el);
+      }
+    }
+    if (o) {
+      for (const l of o.lines) {
+        if (!l.seg.length) continue;
+        const line = this.fatLines(l.seg, this.fatMaterial(l.color, l.width, { dashed: l.dashed, depthTest: !l.onTop }));
+        if (l.onTop) line.renderOrder = OVERLAY_ORDER;
+        this.sketchGroup.add(line);
+      }
+      for (const p of o.points) if (p.pts.length) this.sketchGroup.add(this.dots(p.pts, p.color, p.size));
+    }
+    this.placeLabels();
+    this.requestRender();
+  }
+
+  /** Client position of a world point. */
+  worldToScreen(p: V3): { x: number; y: number } {
+    const s = this.toScreen(p);
+    return { x: s.x, y: s.y };
+  }
+
+  /** Where the view ray through a client position meets a plane; null when the plane is seen edge-on. */
+  screenToPlane(x: number, y: number, origin: V3, normal: V3): V3 | null {
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(this.ndc(x, y), this.camera);
+    const n = new THREE.Vector3(normal.x, normal.y, normal.z).normalize();
+    if (Math.abs(n.dot(ray.ray.direction)) < 1e-6) return null;
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, new THREE.Vector3(origin.x, origin.y, origin.z));
+    // the orthographic ray starts at the camera plane: intersect the whole line, not just the half ray
+    const t = -(plane.distanceToPoint(ray.ray.origin) / n.dot(ray.ray.direction));
+    const q = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t);
+    return v3(q.x, q.y, q.z);
+  }
+
+  /** The sheet surface of a face (placement M) that faces the camera. */
+  facingSide(M: Affine | undefined): 'top' | 'bottom' {
+    if (!M) return 'top';
+    const n = applyDirA(M, v3(0, 0, 1));
+    const toCam = new THREE.Vector3().subVectors(this.camera.position, this.controls.target);
+    return toCam.x * n.x + toCam.y * n.y + toCam.z * n.z >= 0 ? 'top' : 'bottom';
+  }
+
+  /** Whether the part hides a world point from the camera. */
+  isHidden(p: V3): boolean {
+    return this.occluded(p, this.occlusionTol());
+  }
+
+  /** World length of one screen pixel. */
+  pixelSize(): number {
+    const h = Math.max(1, this.renderer.domElement.clientHeight);
+    return (this.camera.top - this.camera.bottom) / this.camera.zoom / h;
+  }
+
+  /**
+   * Look straight onto a plane ("Normal auf"): `normal` points towards the
+   * viewer, `up` becomes screen up; `pts` (world) are zoomed to fill the view.
+   */
+  lookNormal(normal: V3, up: V3, pts: V3[]): void {
+    const box = new THREE.Box3().setFromPoints(pts.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const r = Math.max(sphere.radius, 10);
+    const all = this.bounds().getBoundingSphere(new THREE.Sphere());
+    const dir = new THREE.Vector3(normal.x, normal.y, normal.z).normalize();
+    this.camera.up.set(up.x, up.y, up.z).normalize();
+    this.syncUp();
+    this.controls.target.copy(sphere.center);
+    // outside the whole part, so the ray origin of the orthographic raycaster lies in front of it
+    this.camera.position.copy(sphere.center).addScaledVector(dir, Math.max(all.radius, r) * 4 + 200);
+    this.camera.lookAt(sphere.center);
+    const w = this.camera.right - this.camera.left;
+    const h = this.camera.top - this.camera.bottom;
+    this.camera.zoom = Math.min(w, h) / (2.6 * r);
+    const reach = Math.max(all.radius, r) * 50 + 10000;
+    this.camera.near = -reach;
+    this.camera.far = reach;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.viewChanged = true;
+    this.requestRender();
+  }
+
+  /** OrbitControls caches the up direction at construction; orbiting after a view with another up needs it refreshed. */
+  private syncUp(): void {
+    const c = this.controls as unknown as { _quat?: THREE.Quaternion; _quatInverse?: THREE.Quaternion };
+    if (!c._quat || !c._quatInverse) return;
+    c._quat.setFromUnitVectors(this.camera.up, new THREE.Vector3(0, 1, 0));
+    c._quatInverse.copy(c._quat).invert();
   }
 
   setHighlightFeature(id: string | null): void {
@@ -779,6 +988,7 @@ export class Viewer {
     const size = box.getSize(new THREE.Vector3()).length() || 200;
     this.camera.position.copy(center).addScaledVector(dir, size * 2 + 100);
     this.camera.up.copy(up);
+    this.syncUp();
     this.controls.target.copy(center);
     this.camera.lookAt(center);
     this.fit();
@@ -798,6 +1008,7 @@ export class Viewer {
     this.camera.far = r * 50 + 10000;
     this.camera.updateProjectionMatrix();
     this.controls.update();
+    this.viewChanged = true;
     this.requestRender();
   }
 
