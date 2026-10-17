@@ -418,24 +418,24 @@ function sameEnd(x: StripEnd | undefined, y: StripEnd | undefined): boolean {
 
 const profileSamples = (b: Bend): number[] => uniqFractions([...Array.from({ length: 65 }, (_, i) => i / 64), ...stripFractions(b)]);
 
-function requireStripWidth(b: Bend): void {
-  for (const f of profileSamples(b)) {
+function wideEnough(b: Bend): boolean {
+  return profileSamples(b).every((f) => {
     const [wl, wr] = stripRange(b, f);
-    if (wr - wl < 1e-3) throw new Error('Die Biegung wäre an der Ecke zu schmal. Bitte den Spalt verkleinern oder den Biegebereich offen lassen.');
-  }
+    return wr - wl >= 1e-3;
+  });
 }
 
 /**
  * The mitre only separates the two bends. With different radii the grown
  * strip can still reach into the other flange's sheet; no continuous end
- * profile follows that boundary, so such corners are refused.
+ * profile follows that boundary.
  */
-function requireClearOfFlange(part: Part, placements: Map<string, Affine>, c: CornerBend, other: CornerBend): void {
+function clearOfFlange(part: Part, placements: Map<string, Affine>, c: CornerBend, other: CornerBend): boolean {
   const flangeId = other.fF === 0 ? other.bend.faceA : other.bend.faceB;
   const flange = flangeId ? part.faces.get(flangeId) : undefined;
   const MF = flangeId ? placements.get(flangeId) : undefined;
   const MA = placements.get(c.bend.faceA);
-  if (!flange || !MF || !MA) return;
+  if (!flange || !MF || !MA) return true;
   const toFlange = composeA(invertRigid(MF), MA);
   const T = part.T;
   const tol = 1e-4;
@@ -448,11 +448,19 @@ function requireClearOfFlange(part: Part, placements: Map<string, Affine>, c: Co
         const p = v2(q.x, q.y);
         const pts = flange.outer.pts;
         if (q.z <= tol || q.z >= T - tol || !pointInPolygon(p, pts)) continue;
-        if (pts.every((a, i) => distPointSegment(p, a, pts[(i + 1) % pts.length]) > tol)) {
-          throw new Error('Die Biegung würde an der Ecke in die andere Lasche laufen. Bitte einen anderen Eckentyp wählen oder den Biegebereich offen lassen.');
-        }
+        if (pts.every((a, i) => distPointSegment(p, a, pts[(i + 1) % pts.length]) > tol)) return false;
       }
     }
+  }
+  return true;
+}
+
+function clearInFlat(part: Part, b: Bend): boolean {
+  try {
+    checkFlatOverlap(part, bendKey(b.id));
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -460,8 +468,9 @@ function requireClearOfFlange(part: Part, placements: Map<string, Affine>, c: Co
  * Runs both bend strips into the corner up to the mitre plane, each staying
  * half the gap away from it. The cut is perpendicular to the sheet, so the
  * inner or the outer fibre limits it, and no strip runs past its flange's
- * seam. Returns whether a profile changed; corners without such a bend pair
- * are skipped silently.
+ * seam. Returns whether a profile changed. Corners without such a bend pair,
+ * or where a grown strip would get too narrow, reach into the other flange
+ * or overlap in the flat pattern, keep their bend region open, as before.
  */
 function closeBendRegion(part: Part, pair: [CornerBend, CornerBend], gap: number): boolean {
   const placements = computePlacements(part);
@@ -469,21 +478,23 @@ function closeBendRegion(part: Part, pair: [CornerBend, CornerBend], gap: number
   if (!mitre) return false;
   const caps = pair.map((c) => seamReach(part, c));
   if (caps[0] === null || caps[1] === null) return false;
+  const key = (c: CornerBend): 'ext0' | 'ext1' => (c.s > 0 ? 'ext1' : 'ext0');
+  const before = pair.map((c) => c.bend[key(c)]);
   let changed = false;
   pair.forEach((c, i) => {
     const n = i === 0 ? mitre.n : scale3(mitre.n, -1);
     const terms = [...fibreLimits(part, placements, c, n, mitre.p0, gap), { a: caps[i]!, b: 0, c: 0 }];
     const end: StripEnd = { pieces: lowerEnvelope(terms, c.bend.angle) };
-    const key = c.s > 0 ? 'ext1' : 'ext0';
-    if (!sameEnd(c.bend[key], end)) changed = true;
-    c.bend[key] = end;
+    if (!sameEnd(c.bend[key(c)], end)) changed = true;
+    c.bend[key(c)] = end;
   });
+  const fits = pair.every((c, i) => wideEnough(c.bend) && clearOfFlange(part, placements, c, pair[1 - i]) && clearInFlat(part, c.bend));
+  if (fits) return changed;
   pair.forEach((c, i) => {
-    requireStripWidth(c.bend);
-    requireClearOfFlange(part, placements, c, pair[1 - i]);
-    checkFlatOverlap(part, bendKey(c.bend.id));
+    if (before[i]) c.bend[key(c)] = before[i];
+    else delete c.bend[key(c)];
   });
-  return changed;
+  return false;
 }
 
 function findCorner(part: Part, c: CornerRef): { ring: Ring; index: number; faceId: string } {

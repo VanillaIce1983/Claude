@@ -487,10 +487,10 @@ describe('Geschlossene Ecke: Biegebereich', () => {
     }
   });
 
-  it('two flange features with different radii close, or are refused when a bend would run into the other flange', () => {
+  it('two flange features with different radii close, or keep the bend region open when a bend would run into the other flange', () => {
     const first: EdgeFlangeFeature = { ...twoFlanges, id: 'f1', edges: [twoFlanges.edges[0]] };
     let closedCount = 0;
-    let refused = 0;
+    let keptOpen = 0;
     for (const radius of [1, 5]) {
       for (const position of ['materialInside', 'bendOutside'] as const) {
         const f1 = { ...first, position };
@@ -500,13 +500,17 @@ describe('Geschlossene Ecke: Biegebereich', () => {
         for (const kind of kinds) {
           for (const side of ['f1:side1', 'f2:side0']) {
             const d = doc([plate(), f1, f2, closed(r1.part, side, kind, 0.5)]);
-            const st = regenerate(d).status.get('cc')!;
-            if (!st.ok) {
-              expect(st.error).toMatch(/in die andere Lasche laufen/);
-              refused++;
+            expect(regenerate(d).status.get('cc')!.ok).toBe(true);
+            const r = build(d);
+            if (!r.part.bends.get('f1')!.ext1) {
+              // the flanges still close; only the bend region stays open, as with openBend
+              expect(r.part.bends.get('f2')!.ext0).toBeUndefined();
+              const open = build(doc([plate(), f1, f2, { ...closed(r1.part, side, kind, 0.5), openBend: true }]));
+              expect(r.fp.area).toBeCloseTo(open.fp.area, 9);
+              expect(checkClosed(r.mesh.indices).bad).toBe(0);
+              keptOpen++;
               continue;
             }
-            const r = build(d);
             expect(r.part.bends.get('f1')!.ext1).toBeDefined();
             expect(r.part.bends.get('f2')!.ext0).toBeDefined();
             expectClosedCorner(r, 'f1', 'f2', 0.5);
@@ -516,7 +520,7 @@ describe('Geschlossene Ecke: Biegebereich', () => {
       }
     }
     expect(closedCount).toBeGreaterThan(0);
-    expect(refused).toBeGreaterThan(0);
+    expect(keptOpen).toBeGreaterThan(0);
   });
 
   it('a box with four flanges closes all corners in one feature', () => {
