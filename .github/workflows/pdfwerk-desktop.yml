@@ -1,0 +1,149 @@
+# PDFwerk als Desktop-Programm bauen (Windows, macOS, Linux), gepackt testen und als Artefakt bereitstellen.
+# Tags pdfwerk-v* (z. B. pdfwerk-v1.0.0, passend zur Version in package.json) werden zusätzlich als GitHub-Release veröffentlicht.
+name: pdfwerk-desktop
+
+on:
+  push:
+    branches: ['**']
+    tags: ['pdfwerk-v*']
+    paths:
+      - 'pdfwerk/**'
+      - '.github/workflows/pdfwerk-desktop.yml'
+  pull_request:
+    paths:
+      - 'pdfwerk/**'
+      - '.github/workflows/pdfwerk-desktop.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: pdfwerk
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows
+            os: windows-latest
+            artifact: pdfwerk-windows
+            script: dist:win
+            exe: release/win-unpacked/PDFwerk.exe
+          - label: macOS
+            os: macos-latest
+            artifact: pdfwerk-macos
+            script: dist:mac
+            exe: release/mac-arm64/PDFwerk.app/Contents/MacOS/PDFwerk
+          - label: Linux
+            os: ubuntu-latest
+            artifact: pdfwerk-linux
+            script: dist:linux
+            exe: release/linux-unpacked/pdfwerk
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: pdfwerk/package-lock.json
+
+      - name: Tag und Version abgleichen
+        if: startsWith(github.ref, 'refs/tags/pdfwerk-v')
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "pdfwerk-v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME passt nicht zur Version $version in package.json"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Pakete bauen
+        id: dist
+        run: npm run ${{ matrix.script }}
+        env:
+          # macOS: ohne Zertifikat nicht im Schlüsselbund suchen; ad-hoc signieren auch bei Pull Requests
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ runner.os == 'macOS' && 'false' || '' }}
+          CSC_FOR_PULL_REQUEST: ${{ runner.os == 'macOS' && 'true' || '' }}
+
+      - name: Ergebnis auflisten
+        run: ls -la release
+
+      - name: Signatur und Dateizuordnung prüfen (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for app in release/mac/PDFwerk.app release/mac-arm64/PDFwerk.app; do
+            echo "== $app"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            codesign -dv "$app" 2>&1
+          done
+          plutil -p release/mac-arm64/PDFwerk.app/Contents/Info.plist | grep -A20 CFBundleDocumentTypes
+
+      - name: Sandbox und Bildschirm vorbereiten (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # Ubuntu 24.04 sperrt unprivilegierte User-Namespaces, die Chromium-Sandbox braucht sie
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          command -v xvfb-run >/dev/null || { sudo apt-get update && sudo apt-get install -y xvfb; }
+
+      - name: Gepacktes Programm testen
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a npm run test:desktop; else npm run test:desktop; fi
+        env:
+          PDFWERK_EXE: ${{ github.workspace }}/pdfwerk/${{ matrix.exe }}
+
+      # auch bei rotem Test hochladen, damit sich der Fehler am Paket nachvollziehen lässt; das Release braucht trotzdem grüne Läufe
+      - name: Artefakte hochladen
+        if: ${{ !cancelled() && steps.dist.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            pdfwerk/release/*.exe
+            pdfwerk/release/*.zip
+            pdfwerk/release/*.dmg
+            pdfwerk/release/*.AppImage
+            !pdfwerk/release/*__uninstaller*
+          retention-days: 30
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/pdfwerk-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: pdfwerk-*
+          path: pakete
+          merge-multiple: true
+
+      - name: Version aus dem Tag
+        id: version
+        working-directory: .
+        run: |
+          echo "version=${GITHUB_REF_NAME#pdfwerk-v}" >> "$GITHUB_OUTPUT"
+          ls -la pakete
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          name: PDFwerk ${{ steps.version.outputs.version }}
+          files: pakete/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

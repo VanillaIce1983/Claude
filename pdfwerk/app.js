@@ -2262,7 +2262,8 @@ async function openHostFiles(list) {
   if (!list?.length) return;
   const MIME = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
   const files = list.map((f) => new File([f.data], f.name, { type: MIME[(f.name.split('.').pop() || '').toLowerCase()] || '' }));
-  await openFiles(files, list.map((f) => f.path));
+  // auch wenn das Öffnen scheitert: die Hülle muss wieder wissen, ob das Fenster noch das unberührte Beispiel zeigt
+  try { await openFiles(files, list.map((f) => f.path)); } finally { syncDoc(); }
 }
 function confirmDiscard() {
   return dialog({ title: 'Ungespeicherte Änderungen', ok: 'Verwerfen und öffnen', body: h('p', { style: 'margin:0' }, `Die Änderungen an „${S.name}“ sind noch nicht gespeichert.`) });

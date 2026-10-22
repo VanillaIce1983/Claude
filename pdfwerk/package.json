@@ -32,10 +32,65 @@
   "build": {
     "appId": "app.pdfwerk.desktop",
     "productName": "PDFwerk",
+    "copyright": "© PDFwerk",
     "directories": { "output": "release", "buildResources": "build" },
     "files": ["desktop/**/*", "!desktop/*.d.ts", "dist/desktop/**/*", "package.json"],
+    "asar": true,
+    "npmRebuild": false,
+    "publish": null,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": false
+    },
     "fileAssociations": [
       { "ext": "pdf", "name": "PDF-Dokument", "description": "PDF-Dokument", "mimeType": "application/pdf", "role": "Editor" }
-    ]
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64", "arm64"] },
+        { "target": "zip", "arch": ["x64", "arm64"] }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "PDFwerk-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PDFwerk",
+      "uninstallDisplayName": "PDFwerk",
+      "language": "1031",
+      "installerLanguages": ["de_DE"],
+      "multiLanguageInstaller": false,
+      "buildUniversalInstaller": false,
+      "artifactName": "PDFwerk-Setup-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] },
+        { "target": "zip", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "darkModeSupport": true,
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "notarize": false,
+      "artifactName": "PDFwerk-${version}-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "artifactName": "PDFwerk-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Office",
+      "icon": "build/icon.png",
+      "artifactName": "PDFwerk-${version}-${arch}.${ext}"
+    }
   }
 }
