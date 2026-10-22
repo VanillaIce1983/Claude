@@ -54,7 +54,7 @@ Dieselbe Oberfläche als installierbares Programm ([Electron](https://www.electr
 
 ### Herunterladen
 
-- **Versionen:** Zu jedem Tag `pdfwerk-v…` (z. B. `pdfwerk-v1.0.0`, muss zur Version in `package.json` passen) liegen die Pakete im Repository unter „Releases“.
+- **Versionen:** Zu jedem Tag `pdfwerk-v…` (z. B. `pdfwerk-v1.0.0`, muss zur Version in `package.json` passen) liegen die Pakete im Repository unter „Releases“. Ein Release entsteht beim Push eines solchen Tags oder beim manuellen Start der Pipeline „pdfwerk-desktop“ mit „Als Release veröffentlichen“; dann legt die Pipeline den Tag zur Version in `package.json` selbst an.
 - **Zwischenstände:** Im Repository unter „Actions“ den Workflow „pdfwerk-desktop“ wählen, einen grünen Lauf öffnen und unten unter „Artifacts“ `pdfwerk-windows`, `pdfwerk-macos` oder `pdfwerk-linux` laden. Das ist ein ZIP, in dem die eigentlichen Pakete liegen. Dafür ist eine Anmeldung bei GitHub nötig, die Artefakte bleiben 30 Tage erhalten. Artefakte mit `fehlerhaft-` am Anfang sind Pakete, deren Test fehlgeschlagen ist; sie dienen nur der Fehlersuche.
 
 | System | Datei |

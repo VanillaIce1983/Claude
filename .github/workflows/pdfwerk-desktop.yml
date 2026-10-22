@@ -1,5 +1,6 @@
 # PDFwerk als Desktop-Programm bauen (Windows, macOS, Linux), gepackt testen und als Artefakt bereitstellen.
 # Tags pdfwerk-v* (z. B. pdfwerk-v1.0.0, passend zur Version in package.json) werden zusätzlich als GitHub-Release veröffentlicht.
+# Ohne eigenen Tag: manuell starten mit „Als Release veröffentlichen“; dann legt der Lauf Tag und Release pdfwerk-v<Version> an.
 # Ausgeliefert werden die Pakete aus npm run dist:* (ohne Node-Inspector, siehe scripts/release-config.cjs). Weil Playwright
 # das Programm über --inspect steuert, läuft der Test auf einem sonst gleichen Testpaket aus release-test/.
 name: pdfwerk-desktop
@@ -16,6 +17,11 @@ on:
       - 'pdfwerk/**'
       - '.github/workflows/pdfwerk-desktop.yml'
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Als Release veröffentlichen (Tag pdfwerk-v<Version aus package.json>)'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -145,7 +151,7 @@ jobs:
   release:
     name: Release
     needs: build
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/pdfwerk-v') && needs.build.result == 'success' }}
+    if: ${{ !cancelled() && needs.build.result == 'success' && (startsWith(github.ref, 'refs/tags/pdfwerk-v') || (github.event_name == 'workflow_dispatch' && inputs.release)) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -156,15 +162,25 @@ jobs:
           path: pakete
           merge-multiple: true
 
-      - name: Version aus dem Tag
+      - uses: actions/checkout@v7
+        with:
+          path: quelle
+          sparse-checkout: pdfwerk/package.json
+          sparse-checkout-cone-mode: false
+
+      - name: Version bestimmen
         id: version
         working-directory: .
         run: |
-          echo "version=${GITHUB_REF_NAME#pdfwerk-v}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/pdfwerk-v* ]]; then version="${GITHUB_REF_NAME#pdfwerk-v}"
+          else version=$(node -p "require('./quelle/pdfwerk/package.json').version"); fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           ls -la pakete
 
       - uses: softprops/action-gh-release@v3
         with:
+          tag_name: pdfwerk-v${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           name: PDFwerk ${{ steps.version.outputs.version }}
           files: pakete/*
           fail_on_unmatched_files: true
