@@ -1,7 +1,7 @@
 // Rauchtest der Desktop-Fassung: startet die Electron-Hülle und spielt Öffnen, Speichern, Schließen und die Sicherheitsregeln durch.
 // Voraussetzung: npm run build. Ohne Bildschirm: xvfb-run -a npm run test:desktop
 // PDFWERK_EXE=<Programmdatei> prüft statt des Quellordners das fertige Paket (z. B. release/linux-unpacked/pdfwerk).
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -297,6 +297,19 @@ const img1 = makePng('bild1.png'), img2 = makePng('bild2.PNG');
     ok(r.path === dropped && r.none === null && r.saved.name === 'abgelegt.pdf', 'abgelegte Datei wird per adoptDroppedFile freigegeben');
     const bad = await p.evaluate(() => pdfwerkHost.saveFile('/tmp/x.pdf', [1, 2]).then(() => 'angenommen', (e) => e.message));
     ok(bad !== 'angenommen', 'Daten müssen Uint8Array sein');
+    // root darf auch schreibgeschützte Dateien ändern, daher nur ohne root (in der CI auf allen Systemen)
+    if (process.getuid?.() !== 0) {
+      const locked = await makePdf('schreibgeschuetzt.pdf');
+      const before = readFileSync(locked);
+      chmodSync(locked, 0o444);
+      await p.setInputFiles('#testDrop', locked);
+      const m = await p.evaluate(async () => {
+        const f = document.querySelector('#testDrop').files[0];
+        return pdfwerkHost.saveFile(pdfwerkHost.adoptDroppedFile(f), new Uint8Array([37, 80, 68, 70])).then(() => 'gespeichert', (e) => e.message);
+      });
+      chmodSync(locked, 0o644);
+      ok(m === 'Die Datei ist schreibgeschützt oder in einem anderen Programm geöffnet.' && readFileSync(locked).equals(before), 'schreibgeschützte Datei bleibt unverändert, Meldung auf Deutsch');
+    }
   });
   await step('Schließen mit Änderungen', async () => {
     await stubOpen(app, [c1]);
