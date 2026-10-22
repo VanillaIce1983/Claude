@@ -5,7 +5,7 @@
 interface HostFile {
   /** Dateiname mit Endung, z. B. "Vertrag.pdf" */
   name: string;
-  /** Absoluter Pfad auf der Festplatte; die Hülle hat ihn für saveFile freigegeben */
+  /** Absoluter Pfad auf der Festplatte; die Hülle hat ihn für saveFile freigegeben. Eine entsperrte Kopie (geschützte PDF) übernimmt ihn nicht. */
   path: string | null;
   data: Uint8Array;
 }
@@ -13,6 +13,7 @@ interface HostFile {
 /** Zustand des Dokuments im Fenster, meldet die Oberfläche bei jeder Änderung. */
 interface HostDocState {
   name: string;
+  /** Speicherort; die Hülle übernimmt nur Pfade, die sie kennt (geöffnet, gespeichert oder per adoptDroppedFile abgelegt). null = neues Dokument, Speichern fragt nach dem Ort */
   path: string | null;
   /** ungespeicherte Änderungen: Hülle fragt beim Schließen nach, Fenstertitel und macOS-Punkt im Schließknopf */
   dirty: boolean;
@@ -40,20 +41,28 @@ interface PdfwerkHost {
   /** Öffnet den nativen Öffnen-Dialog (PDF und Bilder, Mehrfachauswahl). Ergebnis kommt über onOpenFiles bzw. in neuen Fenstern. */
   openDialog(): Promise<void>;
 
-  /** Überschreibt eine freigegebene Datei (zuvor geöffnet, im Dialog gewählt oder per adoptDroppedFile übernommen) sicher über eine temporäre Datei. Wirft Error mit deutscher Meldung. */
+  /** Überschreibt eine freigegebene Datei (zuvor geöffnet oder im Dialog gewählt) sicher über eine temporäre Datei. Eine per adoptDroppedFile abgelegte Datei
+   *  gibt erst eine Rückfrage der Hülle beim ersten Speichern frei. Ist die Datei nicht mehr da (umbenannt, verschoben), wird sie nicht neu angelegt. Wirft Error mit deutscher Meldung. */
   saveFile(path: string, data: Uint8Array): Promise<{ path: string; name: string }>;
-  /** Nativer Speichern-unter-Dialog; schreibt data an den gewählten Ort. null = abgebrochen. Dateifilter folgt der Endung von defaultName. */
+  /** Nativer Speichern-unter-Dialog im Ordner des Dokuments (ohne Pfad: der zuletzt geöffneten Datei); schreibt data an den gewählten Ort. null = abgebrochen.
+   *  Dateifilter folgt der Endung von defaultName. Eine in einem anderen Fenster geöffnete Datei wird abgelehnt. */
   saveDialog(opts: { defaultName: string; data: Uint8Array; title?: string }): Promise<{ path: string; name: string } | null>;
-  /** Pfad einer per Ziehen abgelegten Datei (webUtils.getPathForFile) und Freigabe für saveFile; null, wenn die Datei keinen Pfad hat. */
+  /** Pfad einer per Ziehen abgelegten Datei (webUtils.getPathForFile); die Hülle merkt ihn vor (siehe saveFile). null, wenn die Datei keinen Pfad hat. */
   adoptDroppedFile(file: File): string | null;
+  /** Ist die Datei in einem anderen Fenster offen, holt die Hülle dieses nach vorn und liefert true. */
+  focusOpenFile(path: string): Promise<boolean>;
 
   /** Fenstertitel, macOS documentEdited und representedFilename, Rückfrage beim Schließen, Wahl des Zielfensters. */
   setDocument(state: HostDocState): void;
-  /** Druckt ein vollständiges HTML-Dokument (Seiten als Bilder) mit dem Druckdialog des Systems. */
-  print(html: string): Promise<void>;
+  /** Drucken mit dem Druckdialog des Systems: printBegin liefert eine Kennung, dann jede Seite als JPEG per printPage,
+   *  printEnd zeigt den Dialog und räumt danach auf; printAbort verwirft einen abgebrochenen Auftrag. Jede Seite füllt das gewählte Papier. */
+  printBegin(): Promise<string>;
+  printPage(job: string, jpeg: Uint8Array): Promise<void>;
+  printEnd(job: string): Promise<void>;
+  printAbort(job: string): void;
   /** Menübefehle */
   onCommand(cb: (cmd: HostCommand) => void): void;
-  /** Schließt dieses Fenster ohne weitere Rückfrage (nach erfolgreichem saveAndClose). */
+  /** Schließt dieses Fenster ohne weitere Rückfrage (nach saveAndClose, wenn alles gespeichert ist). */
   close(): void;
 }
 

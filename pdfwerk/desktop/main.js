@@ -7,11 +7,15 @@ const fsp = fs.promises;
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const { execFile } = require('node:child_process');
 
 const ORIGIN = 'app://pdfwerk';
 const ROOT = path.join(__dirname, '../dist/desktop');
 const isMac = process.platform === 'darwin', isWin = process.platform === 'win32';
 const TEST = process.env.PDFWERK_TEST === '1';
+// Fernsteuerung über das DevTools-Protokoll im Paket ablehnen. Erlaubt nur zusammen mit einem laufenden Node-Inspector:
+// den gibt es nur in Testpaketen (Playwright), in ausgelieferten Paketen ist die Fuse EnableNodeCliInspectArguments aus.
+const remoteControl = app.isPackaged && ['remote-debugging-port', 'remote-debugging-pipe'].some((s) => app.commandLine.hasSwitch(s)) && !require('node:inspector').url();
 const IMAGES = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
 const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'";
 const MIME = {
@@ -86,11 +90,25 @@ const grant = (p) => granted.add(grantKey(p));
 const isGranted = (p) => granted.has(grantKey(p));
 
 function saveError(e) {
+  if (isMac && e?.stage === 'tmp' && ['EPERM', 'EACCES'].includes(e?.code)) return 'PDFwerk darf in diesem Ordner nicht schreiben. Freigabe unter Systemeinstellungen → Datenschutz & Sicherheit → Dateien und Ordner → PDFwerk.';
+  if (isWin && e?.stage === 'rename' && ['EPERM', 'EACCES'].includes(e?.code)) return 'Die Datei ist in einem anderen Programm geöffnet, oder PDFwerk darf sie in diesem Ordner nicht ersetzen.';
   if (['EBUSY', 'EPERM', 'EACCES', 'EROFS'].includes(e?.code)) return 'Die Datei ist schreibgeschützt oder in einem anderen Programm geöffnet.';
   if (['ENOSPC', 'EDQUOT'].includes(e?.code)) return 'Nicht genug Speicherplatz.';
   return 'Die Datei konnte nicht gespeichert werden.' + (e?.code ? ` (${e.code})` : '');
 }
-// Schreibt erst eine temporäre Datei im Zielordner und ersetzt dann das Ziel in einem Schritt
+// Legt die temporäre Datei als Kopie des Ziels an, damit sie dessen Metadaten trägt: Finder-Tags, Kommentare, Quarantäne,
+// ACL und erweiterte Attribute. Danach wird nur der Inhalt ersetzt. Ergibt false, wenn das nicht geht (dann ohne Metadaten).
+async function copyWithMeta(target, tmp) {
+  if (isWin) return false;
+  for (const args of isMac ? [['-c', '-p'], ['-p']] : [['-p', '--preserve=xattr', '--reflink=auto']]) {
+    if (await new Promise((resolve) => execFile('/bin/cp', [...args, target, tmp], { timeout: 60000 }, (err) => resolve(!err)))) return true;
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+  }
+  return false;
+}
+// Schreibt erst eine temporäre Datei im Zielordner und ersetzt dann das Ziel in einem Schritt.
+// Erhalten bleiben Modus, unter macOS/Linux die erweiterten Attribute, unter Windows der Mark of the Web (Zone.Identifier).
+// Nicht erhalten bleiben harte Links sowie Besitzer und eigene ACL unter Windows (dafür bräuchte es ReplaceFileW).
 async function writeAtomic(target, data) {
   try { target = await fsp.realpath(target); } catch { /* neue Datei */ }
   let mode;
@@ -103,15 +121,24 @@ async function writeAtomic(target, data) {
   const tmp = path.join(path.dirname(target), `.pdfwerk-${crypto.randomBytes(6).toString('hex')}.tmp`);
   let fh;
   try {
-    fh = await fsp.open(tmp, 'wx', mode ?? 0o666);
+    const cloned = mode !== undefined && await copyWithMeta(target, tmp);
+    try { fh = await fsp.open(tmp, cloned ? 'r+' : 'wx', mode ?? 0o666); }
+    catch (e) { e.stage = 'tmp'; throw e; }
+    if (cloned) await fh.truncate(0);
     await fh.writeFile(data);
     await fh.sync();
     await fh.close(); fh = null;
     if (mode !== undefined) await fsp.chmod(tmp, mode).catch(() => {});
+    if (isWin && mode !== undefined) {
+      try { await fsp.writeFile(tmp + ':Zone.Identifier', await fsp.readFile(target + ':Zone.Identifier')); } catch { /* kein Mark of the Web */ }
+    }
     // Windows: Virenscanner und Indexdienst halten Dateien kurz fest
     for (let i = 0; ; i++) {
       try { await fsp.rename(tmp, target); break; }
-      catch (e) { if (!isWin || i >= 5 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e; await new Promise((r) => setTimeout(r, 100 * (i + 1))); }
+      catch (e) {
+        if (!isWin || i >= 5 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) { e.stage = 'rename'; throw e; }
+        await new Promise((r) => setTimeout(r, 100 * (i + 1)));
+      }
     }
   } catch (e) {
     await fh?.close().catch(() => {});
@@ -168,13 +195,22 @@ function createWindow(paths = []) {
       additionalArguments: [`--pdfwerk-version=${app.getVersion()}`],
     },
   });
-  wins.set(win, { pending: paths.slice(), loading: false, ready: false, doc: null, reopen: null, asking: false, forceClose: false, afterSave: null });
+  // opening: Pfade, die die Oberfläche gerade lädt (bis sie das Dokument meldet); dir: Ordner der zuletzt geöffneten oder gespeicherten Datei
+  wins.set(win, { pending: paths.slice(), opening: [], dir: null, loading: false, ready: false, doc: null, reopen: null, asking: false, forceClose: false, afterSave: null });
   count('windows');
   win.once('ready-to-show', () => { if (maximized) win.maximize(); win.show(); });
   win.on('focus', () => { focusOrder = [win, ...focusOrder.filter((w) => w !== win)]; });
   win.on('page-title-updated', (e) => e.preventDefault());
   win.on('close', (e) => onClose(win, e));
-  win.on('closed', () => { wins.delete(win); focusOrder = focusOrder.filter((w) => w !== win); });
+  win.on('closed', () => { wins.delete(win); focusOrder = focusOrder.filter((w) => w !== win); abortPrints(win); });
+  // Windows: Abmelden, Herunterfahren und Neustart lösen weder close noch before-quit aus. Mit ungespeicherten Änderungen
+  // das Ende der Sitzung aufhalten (Windows zeigt „PDFwerk verhindert das Herunterfahren“) und die übliche Rückfrage zeigen.
+  win.on('query-session-end', (e) => {
+    if (quitApproved || e.reasons?.includes('critical') || ![...wins.values()].some((s) => s.doc?.dirty && !s.forceClose)) return;
+    e.preventDefault();
+    quitFlow ??= runQuit().catch(() => {}).finally(() => { quitFlow = null; });
+  });
+  win.on('session-end', () => rememberBounds(win));
   const wc = win.webContents;
   wc.setVisualZoomLevelLimits(1, 1).catch(() => {});
   wc.on('will-prevent-unload', (e) => e.preventDefault());
@@ -196,6 +232,7 @@ async function crashed(win, details) {
   if (!st || st.forceClose || details.reason === 'clean-exit') return;
   st.reopen = st.doc?.path || null;
   st.doc = null;
+  st.opening = [];
   const { response } = await dialog.showMessageBox(win, {
     type: 'error', buttons: ['Neu laden', 'Fenster schließen'], defaultId: 0, cancelId: 1, noLink: true,
     message: 'Das Fenster wurde unerwartet beendet.',
@@ -239,8 +276,14 @@ async function confirmClose(win) {
 function onClose(win, e) {
   const st = stateOf(win);
   if (!st) return;
-  if (st.forceClose || quitApproved || !st.doc?.dirty) { rememberBounds(win); return; }
+  if (st.forceClose || !st.doc?.dirty) { rememberBounds(win); return; }
   e.preventDefault();
+  if (quitApproved) {
+    // beim Beenden erst nach der letzten Rückfrage geändert: Beenden abbrechen und erneut fragen
+    quitApproved = false;
+    quitFlow ??= runQuit().catch(() => {}).finally(() => { quitFlow = null; });
+    return;
+  }
   if (st.asking) return;
   st.afterSave?.(false);   // erneutes Schließen bricht ein wartendes Beenden ab
   confirmClose(win).catch(() => {});
@@ -266,11 +309,12 @@ function waitSaved(win) {
     wc.on('before-mouse-event', onMouse);
   });
 }
+// Fragt so lange nach, bis kein geändertes Fenster mehr übrig ist: auch Fenster, die während einer Rückfrage geändert wurden
 async function runQuit() {
-  for (const win of [...wins.keys()]) {
-    const st = stateOf(win);
-    if (!st?.doc?.dirty) continue;
-    if (st.asking) return;
+  for (;;) {
+    const win = [...wins.keys()].find((w) => { const s = stateOf(w); return s?.doc?.dirty && !s.forceClose; });
+    if (!win) break;
+    if (stateOf(win).asking) return;
     const r = await confirmClose(win);
     if (r === 'cancel') return;
     if (r === 'saving' && stateOf(win) && !(await waitSaved(win))) return;
@@ -302,10 +346,13 @@ async function readFiles(paths, win) {
     } catch (e) { errors.push(openErrorText(p, e)); }
   }
   showOpenErrors(errors, win);
+  const st = stateOf(win);
+  if (st && out.length) st.dir = path.dirname(out[0].path);
   return out;
 }
 function windowWithFile(p) {
-  for (const [win, st] of wins) if (!win.isDestroyed() && (sameFile(st.doc?.path, p) || st.pending.some((q) => sameFile(q, p)))) return win;
+  const has = (list) => list.some((q) => sameFile(q, p));
+  for (const [win, st] of wins) if (!win.isDestroyed() && (sameFile(st.doc?.path, p) || has(st.pending) || has(st.opening))) return win;
   return null;
 }
 function isPristine(win) {
@@ -319,7 +366,10 @@ async function deliver(win, paths) {
   if (st.doc) st.doc.pristine = false;
   if (!st.ready) { st.pending.push(...paths); focusWin(win); return; }
   focusWin(win);
+  // bis die Oberfläche das Dokument meldet, gilt die Datei als in diesem Fenster geöffnet (kein zweites Fenster bei Doppelklick)
+  st.opening = [...paths];
   const files = await readFiles(paths, win);
+  st.opening = files.length && stateOf(win) ? files.map((f) => f.path) : [];
   if (files.length && stateOf(win)) win.webContents.send('pdfwerk:open-files', files);
 }
 // Einziger Weg für Dateien ins Programm: Startargumente, zweite Instanz, open-file, Öffnen-Dialog, Zuletzt geöffnet
@@ -358,7 +408,7 @@ async function openDialog(win) {
   const parent = stateOf(win) ? win : null;
   const opts = {
     title: 'Öffnen', buttonLabel: 'Öffnen', properties: ['openFile', 'multiSelections'],
-    defaultPath: stateOf(win)?.doc?.path ? path.dirname(stateOf(win).doc.path) : app.getPath('documents'),
+    defaultPath: stateOf(win)?.doc?.path ? path.dirname(stateOf(win).doc.path) : stateOf(win)?.dir || app.getPath('documents'),
     filters: [{ name: 'PDF und Bilder', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif'] }, { name: 'Alle Dateien', extensions: ['*'] }],
   };
   const res = parent ? await dialog.showOpenDialog(parent, opts) : await dialog.showOpenDialog(opts);
@@ -410,6 +460,8 @@ function buildMenu() {
   // app.js führt diese Kürzel selbst per keydown aus: unter Windows/Linux nur anzeigen, sonst liefe der Befehl doppelt
   const page = (accelerator) => (isMac ? { accelerator } : { accelerator, registerAccelerator: false });
   const label = (s) => (isMac ? s : s.replace(/&/g, '&&'));
+  // Windows/Linux: Alt+Buchstabe öffnet das Hauptmenü (unterstrichener Buchstabe)
+  const top = (s) => (isMac ? s : '&' + s);
   const recentMenu = isMac
     ? { label: 'Zuletzt geöffnet', role: 'recentDocuments', submenu: [{ label: 'Liste leeren', role: 'clearRecentDocuments' }] }
     : { label: 'Zuletzt geöffnet', submenu: [
@@ -428,7 +480,7 @@ function buildMenu() {
       { label: 'PDFwerk ausblenden', role: 'hide' }, { label: 'Andere ausblenden', role: 'hideOthers' }, { label: 'Alle einblenden', role: 'unhide' }, sep,
       { label: 'PDFwerk beenden', role: 'quit' },
     ] }] : []),
-    { label: 'Datei', submenu: [
+    { label: top('Datei'), submenu: [
       { label: 'Öffnen…', ...page('CmdOrCtrl+O'), click: send('open') },
       recentMenu, sep,
       { label: 'Speichern', ...page('CmdOrCtrl+S'), click: send('save') },
@@ -438,7 +490,7 @@ function buildMenu() {
       { label: 'Fenster schließen', role: 'close' },
       ...(isMac ? [] : [sep, { label: 'Beenden', role: 'quit' }]),
     ] },
-    { label: 'Bearbeiten', submenu: [
+    { label: top('Bearbeiten'), submenu: [
       { label: 'Rückgängig', ...page('CmdOrCtrl+Z'), click: send('undo') },
       { label: 'Wiederholen', ...page(isMac ? 'Shift+Cmd+Z' : 'Ctrl+Y'), click: send('redo') }, sep,
       { label: 'Ausschneiden', role: 'cut' },
@@ -447,7 +499,7 @@ function buildMenu() {
       { label: 'Alles auswählen', role: 'selectAll', ...(isMac ? {} : { registerAccelerator: false }) }, sep,
       { label: 'Suchen…', ...page('CmdOrCtrl+F'), click: send('find') },
     ] },
-    { label: 'Ansicht', submenu: [
+    { label: top('Ansicht'), submenu: [
       { label: 'Lesen', ...page('CmdOrCtrl+1'), click: send('mode:read') },
       { label: 'Bearbeiten', ...page('CmdOrCtrl+2'), click: send('mode:comment') },
       { label: 'Seiten', ...page('CmdOrCtrl+3'), click: send('mode:pages') },
@@ -466,7 +518,7 @@ function buildMenu() {
       { label: 'Im Dock ablegen', role: 'minimize' }, { label: 'Zoomen', role: 'zoom' }, sep,
       { label: 'Alle nach vorne bringen', role: 'front' },
     ] }] : []),
-    { label: 'Hilfe', role: 'help', submenu: [
+    { label: top('Hilfe'), role: 'help', submenu: [
       { label: 'Tastenkürzel', click: send('shortcuts') },
       isMac ? { label: 'Über PDFwerk', role: 'about' } : { label: 'Über PDFwerk', click: (_i, win) => about(win) },
     ] },
@@ -492,21 +544,30 @@ const listen = (channel, fn) => ipcMain.on(channel, (e, ...args) => { const win 
 
 handle('pdfwerk:ready', async (win) => {
   const st = stateOf(win);
-  // Neu geladen (z. B. nach Absturz): zuletzt gespeicherte Fassung wieder öffnen
-  const again = st.ready ? st.reopen || st.doc?.path : null;
+  // Nach einem Absturz neu geladen: zuletzt gespeicherte Fassung wieder öffnen (nur diesen von der Hülle gemerkten Pfad)
+  const again = st.ready ? st.reopen : null;
   if (again && !st.pending.length && isGranted(again)) st.pending.push(again);
   st.reopen = null;
   st.doc = null;
   st.loading = true;
-  try { return await readFiles(st.pending.slice(), win); }
-  finally { st.pending = []; st.loading = false; st.ready = true; }
+  try {
+    const files = await readFiles(st.pending.slice(), win);
+    st.opening = files.map((f) => f.path);
+    return files;
+  } finally { st.pending = []; st.loading = false; st.ready = true; }
 });
 handle('pdfwerk:open-dialog', (win) => openDialog(win));
 handle('pdfwerk:save-file', async (win, file, data) => {
   count('saveFile');
   const bytes = asBytes(data);
   if (typeof file !== 'string' || !path.isAbsolute(file) || !bytes) throw new Error('Ungültige Daten zum Speichern.');
-  if (!isGranted(file)) throw new Error('Diese Datei darf PDFwerk nicht überschreiben.');
+  if (!isGranted(file) && !dropped.has(grantKey(file))) throw new Error('Diese Datei darf PDFwerk nicht überschreiben.');
+  // umbenannt, verschoben oder gelöscht: nicht stillschweigend unter dem alten Namen neu anlegen
+  try { if (!(await fsp.stat(file)).isFile()) throw new Error(); } catch { throw new Error('Die Datei wurde verschoben, umbenannt oder gelöscht.'); }
+  if (!isGranted(file)) {
+    if (!(await confirmDropped(win, file))) throw new Error('Speichern abgebrochen.');
+    grant(file);
+  }
   try { await writeAtomic(file, bytes); } catch (e) { throw new Error(saveError(e)); }
   if (extOf(file) === 'pdf') addRecent(file);
   return { path: file, name: path.basename(file) };
@@ -519,13 +580,14 @@ handle('pdfwerk:save-dialog', async (win, opts) => {
   const defaultName = (String(opts.defaultName || '').split(/[\\/]/).pop() || '').replace(/[\x00-\x1f<>:"|?*]/g, '_').trim().slice(0, 200) || 'Dokument.pdf';
   const ext = extOf(defaultName) === 'jpeg' ? 'jpg' : extOf(defaultName);
   const filter = SAVE_FILTERS[ext];
-  const dir = st.doc?.path ? path.dirname(st.doc.path) : app.getPath('documents');
+  const dir = st.doc?.path ? path.dirname(st.doc.path) : st.dir || app.getPath('documents');
   const res = await dialog.showSaveDialog(win, {
     title: opts.title ? String(opts.title).slice(0, 200) : 'Speichern unter',
     buttonLabel: 'Speichern',
     defaultPath: path.join(dir, defaultName),
     filters: [...(filter ? [filter] : []), { name: 'Alle Dateien', extensions: ['*'] }],
     properties: ['createDirectory', 'showOverwriteConfirmation'],
+    showsTagField: false,   // macOS: Electron übernimmt eingetragene Tags nicht
   });
   if (res.canceled || !res.filePath) { st.afterSave?.(false); return null; }
   let file = path.resolve(res.filePath);
@@ -539,23 +601,52 @@ handle('pdfwerk:save-dialog', async (win, opts) => {
       if (response !== 0) { st.afterSave?.(false); return null; }
     }
   }
+  // in einem anderen Fenster offen: das würde beim nächsten Speichern dort wieder überschrieben
+  const other = windowWithFile(file);
+  if (other && other !== win) { st.afterSave?.(false); throw new Error(`„${path.basename(file)}“ ist in einem anderen PDFwerk-Fenster geöffnet. Bitte dort speichern oder einen anderen Namen wählen.`); }
   try { await writeAtomic(file, bytes); }
   catch (e) { st.afterSave?.(false); throw new Error(saveError(e)); }
   grant(file);
+  st.dir = path.dirname(file);
   if (extOf(file) === 'pdf') addRecent(file);
   return { path: file, name: path.basename(file) };
 });
-handle('pdfwerk:print', (_win, html) => printHtml(String(html)));
+handle('pdfwerk:print-begin', (win) => printBegin(win));
+handle('pdfwerk:print-page', (win, id, data) => printPage(win, id, data));
+handle('pdfwerk:print-end', (win, id) => printEnd(win, id));
+listen('pdfwerk:print-abort', (win, id) => { const job = printJobs.get(id); if (job?.win === win) dropPrint(id); });
+// Ins Fenster gezogene Dateien: den Pfad meldet die Seite selbst, daher keine Freigabe, sondern erst die Rückfrage beim ersten Speichern
+const dropped = new Set();
 listen('pdfwerk:adopt', (_win, p) => {
   if (typeof p !== 'string' || !path.isAbsolute(p) || !canOpen(p)) return;
-  try { if (fs.statSync(p).isFile()) grant(p); } catch { /* weg */ }
+  if (isWin && /^[\\/]{2}/.test(p)) return;   // UNC- und Gerätepfade: keine Netzverbindung auf Zuruf der Seite
+  dropped.add(grantKey(p));
+});
+async function confirmDropped(win, file) {
+  const { response } = await dialog.showMessageBox(win, {
+    type: 'question', buttons: ['Überschreiben', 'Abbrechen'], defaultId: 0, cancelId: 1, noLink: true,
+    message: `„${path.basename(file)}“ überschreiben?`,
+    detail: `Die Datei wurde ins Fenster gezogen und wird zum ersten Mal gespeichert.\nOrdner: ${path.dirname(file)}`,
+  });
+  return response === 0;
+}
+// Abgelegte PDF schon in einem anderen Fenster offen: dieses nach vorn holen
+handle('pdfwerk:focus-open-file', (win, p) => {
+  if (typeof p !== 'string' || !path.isAbsolute(p)) return false;
+  const other = windowWithFile(p);
+  if (!other || other === win) return false;
+  focusWin(other);
+  return true;
 });
 listen('pdfwerk:set-document', (win, s) => {
   const st = stateOf(win);
   if (!s || typeof s !== 'object') return;
   const before = st.doc?.path;
-  const p = typeof s.path === 'string' && path.isAbsolute(s.path) ? s.path : null;
+  // nur Pfade, die die Hülle kennt (geöffnet, gespeichert oder abgelegt)
+  const p = typeof s.path === 'string' && path.isAbsolute(s.path) && (isGranted(s.path) || dropped.has(grantKey(s.path))) ? s.path : null;
   st.doc = { name: String(s.name || 'Dokument.pdf').slice(0, 260), path: p, dirty: !!s.dirty, pristine: !!s.pristine && !s.dirty };
+  st.opening = [];
+  if (p) st.dir = path.dirname(p);
   updateTitle(win);
   if (isMac) {
     win.setDocumentEdited(st.doc.dirty);
@@ -566,22 +657,49 @@ listen('pdfwerk:set-document', (win, s) => {
 listen('pdfwerk:close', (win) => closeNow(win));
 
 /* ---------- Drucken ---------- */
-async function printHtml(html) {
+// Die Oberfläche schickt die Seiten einzeln als JPEG; sie liegen in einem Temp-Ordner, bis der Druckdialog fertig ist
+const printJobs = new Map();   // Kennung -> { win, dir, pages }
+const MAX_PRINT_PAGES = 10000;
+async function printBegin(win) {
+  const id = crypto.randomUUID();
+  printJobs.set(id, { win, dir: await fsp.mkdtemp(path.join(os.tmpdir(), 'pdfwerk-druck-')), pages: 0 });
+  return id;
+}
+async function printPage(win, id, data) {
+  const job = printJobs.get(id), bytes = asBytes(data);
+  if (!job || job.win !== win) throw new Error('Unbekannter Druckauftrag.');
+  if (!bytes || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Error('Ungültige Druckseite.');
+  if (job.pages >= MAX_PRINT_PAGES) throw new Error('Zu viele Seiten zum Drucken.');
+  await fsp.writeFile(path.join(job.dir, `seite-${++job.pages}.jpg`), bytes);
+}
+function dropPrint(id) {
+  const job = printJobs.get(id);
+  printJobs.delete(id);
+  if (job) fsp.rm(job.dir, { recursive: true, force: true }).catch(() => {});
+}
+function abortPrints(win) { for (const [id, job] of printJobs) if (job.win === win) dropPrint(id); }
+async function printEnd(win, id) {
+  const job = printJobs.get(id);
+  if (!job || job.win !== win) throw new Error('Unbekannter Druckauftrag.');
+  printJobs.delete(id);
   count('print');
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'pdfwerk-druck-'));
-  const file = path.join(dir, 'druck.html');
-  let win = null;
+  let pw = null;
   try {
-    await fsp.writeFile(file, html);
-    win = new BrowserWindow({ show: false, width: 800, height: 600, webPreferences: {
+    // jede Seite füllt das Blatt des gewählten Papiers (feste Maße würden gemischte Formate verkleinern oder umbrechen)
+    const body = Array.from({ length: job.pages }, (_, k) => `<section><img src="seite-${k + 1}.jpg" alt=""></section>`).join('');
+    const file = path.join(job.dir, 'druck.html');
+    await fsp.writeFile(file, '<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0}html,body{margin:0}'
+      + 'section{width:100vw;height:100vh;overflow:hidden;page-break-after:always;break-after:page}section:last-child{page-break-after:auto;break-after:auto}'
+      + 'img{display:block;width:100%;height:100%;object-fit:contain}</style></head><body>' + body + '</body></html>');
+    pw = new BrowserWindow({ show: false, width: 800, height: 600, webPreferences: {
       sandbox: true, javascript: false, contextIsolation: true, nodeIntegration: false, webSecurity: true,
       spellcheck: false, devTools: false, partition: 'pdfwerk-druck',
     } });
-    await win.loadFile(file);
-    await new Promise((resolve) => win.webContents.print({ silent: false, printBackground: true }, () => resolve()));
+    await pw.loadFile(file);
+    await new Promise((resolve) => pw.webContents.print({ silent: false, printBackground: true }, () => resolve()));
   } finally {
-    if (win && !win.isDestroyed()) win.destroy();
-    await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+    if (pw && !pw.isDestroyed()) pw.destroy();
+    await fsp.rm(job.dir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -618,7 +736,9 @@ if (isWin) app.setAppUserModelId('app.pdfwerk.desktop');
 // Alle Renderer in der Sandbox; mit --no-sandbox (Linux als root) würde das den Start verhindern
 if (!app.commandLine.hasSwitch('no-sandbox')) app.enableSandbox();
 
-if (!app.requestSingleInstanceLock({ argv: process.argv, cwd: process.cwd() })) {
+if (remoteControl) {
+  app.exit(1);
+} else if (!app.requestSingleInstanceLock({ argv: process.argv, cwd: process.cwd() })) {
   app.quit();
 } else {
   let started = false, early = [], openTimer = null;

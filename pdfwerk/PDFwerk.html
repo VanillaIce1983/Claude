@@ -460,7 +460,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
    Anzeige mit pdf.js, Bearbeitung mit pdf-lib. Alles läuft lokal im Browser, keine Datei verlässt den Rechner. */
 'use strict';
 
-const { PDFDocument, rgb, degrees, StandardFonts, BlendMode, PDFName, PDFString, PDFHexString, PDFArray } = PDFLib;
+const { PDFDocument, rgb, degrees, StandardFonts, BlendMode, PDFName, PDFString, PDFHexString, PDFArray, PDFDict, PDFRef } = PDFLib;
 // Die Desktop-Fassung bringt den Worker als eigene Datei mit, im Browser kommt er vom CDN oder ist eingebettet
 pdfjsLib.GlobalWorkerOptions.workerSrc = window.PDFWERK_WORKER_SRC || 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // Schnittstelle zur Desktop-Hülle (Electron, siehe desktop/host-api.d.ts); im Browser null
@@ -488,6 +488,10 @@ const fmtBytes = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1
 const PT_PER_MM = 72 / 25.4;
 const DPR = () => Math.min(window.devicePixelRatio || 1, 2.5);
 const baseName = (n) => (n || 'Dokument').replace(/\.pdf$/i, '');
+const MAC = HOST ? HOST.platform === 'darwin' : /Mac/.test(navigator.platform);
+// Felder, in denen getippt wird; Auswahllisten, Regler und Schalter zählen nicht dazu
+const isTextField = (el) => !!el && (el.isContentEditable || el.tagName === 'TEXTAREA'
+  || (el.tagName === 'INPUT' && !/^(range|checkbox|radio|button|color|file|submit|reset|image)$/i.test(el.type)));
 const hexToRgb = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 const pdfColor = (hex) => rgb(...hexToRgb(hex));
 
@@ -548,6 +552,7 @@ const S = {
   color: '#d0312d', width: 2, fontSize: 14, font: 'Helvetica', hlColor: '#ffe14d',
   history: [], future: [],
   dirty: false, version: 0,
+  opened: 0,            // zählt frisch geöffnete Dokumente (ein laufendes Speichern erkennt so ein anderes Dokument)
   textCache: [],
   search: { q: '', hits: [], idx: -1 },
   selected: null,
@@ -605,8 +610,9 @@ async function loadPdfJs(bytes, password) {
   return task.promise;
 }
 
+const UNLOCKED_NOTE = 'Geschützte PDF: Bearbeitet wird eine entsperrte Kopie aus Seitenbildern (ohne Text). Das Original bleibt unverändert, Speichern legt eine neue Datei an.';
 async function openBytes(bytes, name, { keepAnn = false, keepPos = false, fresh = true, path } = {}) {
-  let pdf;
+  let pdf, unlocked = false;
   try { pdf = await loadPdfJs(bytes); }
   catch (e) {
     if (e?.name === 'PasswordException') {
@@ -614,8 +620,9 @@ async function openBytes(bytes, name, { keepAnn = false, keepPos = false, fresh 
       if (pw == null) return false;
       try { pdf = await loadPdfJs(bytes, pw); }
       catch { toast('Falsches Passwort.'); return false; }
-      bytes = await unlockByRaster(pdf, name);
+      bytes = await unlockByRaster(pdf, name); unlocked = true;
       pdf = await loadPdfJs(bytes);
+      toast(UNLOCKED_NOTE, 6000);
     } else { toast('Die Datei ist keine lesbare PDF.'); console.error(e); return false; }
   }
   // pdf-lib muss die Datei ebenfalls lesen können, sonst gehen Bearbeitungen schief
@@ -626,11 +633,13 @@ async function openBytes(bytes, name, { keepAnn = false, keepPos = false, fresh 
   }
   catch (e) {
     if (/encrypted/i.test(e.message)) {
-      toast('Verschlüsselte PDF: zum Bearbeiten wird eine entsperrte Kopie angelegt.', 4000);
-      bytes = await unlockByRaster(pdf, name);
+      toast(UNLOCKED_NOTE, 6000);
+      bytes = await unlockByRaster(pdf, name); unlocked = true;
       pdf = await loadPdfJs(bytes);
     } else console.warn('pdf-lib:', e);
   }
+  // Die entsperrte Kopie ist nicht das Original: eigener Name, kein Pfad, Speichern fragt nach dem Ort
+  if (unlocked && fresh) { name = `${baseName(name)} (entsperrt).pdf`; path = null; }
   const oldPdf = S.pdf;
   S.pdf = pdf; S.bytes = bytes; S.name = name || S.name; S.version++;
   S.pages = [];
@@ -646,7 +655,7 @@ async function openBytes(bytes, name, { keepAnn = false, keepPos = false, fresh 
   S.search.hits = []; S.search.idx = -1;
   S.selected = null;
   thumbCache.clear();
-  if (fresh) { S.history = []; S.future = []; S.dirty = false; S.pristine = false; S.orgSel.clear(); S.path = path ?? null; }
+  if (fresh) { S.history = []; S.future = []; S.dirty = false; S.pristine = false; S.orgSel.clear(); S.path = path ?? null; S.opened++; }
   if (!keepPos) S.cur = 0;
   S.cur = clamp(S.cur, 0, S.pages.length - 1);
   oldPdf?.destroy();
@@ -661,29 +670,62 @@ async function openBytes(bytes, name, { keepAnn = false, keepPos = false, fresh 
 }
 
 // Vorhandene Haftnotizen (Text-Anmerkungen) übernehmen, damit sie hier bearbeitbar sind. Beim Speichern werden sie wieder geschrieben.
+// Das Notizobjekt bleibt in der Datei (orig): Autor, Datum, Kennung, Antworten und Popup gehen so nicht verloren.
+// Antworten und Statusvermerke (IRT) hängen an ihrer Notiz; versteckte Notizen und Antworten auf andere Anmerkungen bleiben unberührt.
+const NOTE_META = ['T', 'NM', 'Subj', 'CreationDate', 'M'];
 function takeNotes(lib) {
   const out = [];
+  const dictOf = (ref) => { const d = lib.context.lookup(ref); return d instanceof PDFDict ? d : null; };
+  const sub = (d) => d?.get(PDFName.of('Subtype'))?.toString();
   lib.getPages().forEach((page, p) => {
     const annots = page.node.Annots();
     if (!annots) return;
-    const drop = [];
+    const notes = new Map();   // Ref der übernommenen Notiz -> Eintrag
     for (let k = 0; k < annots.size(); k++) {
-      const ref = annots.get(k), d = lib.context.lookup(ref);
-      if (!d?.get) continue;
-      const sub = d.get(PDFName.of('Subtype'))?.toString();
-      if (sub === '/Popup') { drop.push(k); continue; }
-      if (sub !== '/Text') continue;
+      const ref = annots.get(k), d = dictOf(ref);
+      if (!(ref instanceof PDFRef) || sub(d) !== '/Text' || d.has(PDFName.of('IRT'))) continue;
+      const f = d.lookup(PDFName.of('F'));
+      if (f?.asNumber && f.asNumber() & 2) continue;   // versteckt
       const rect = d.lookup(PDFName.of('Rect'));
       const contents = d.lookup(PDFName.of('Contents'));
       const c = d.lookup(PDFName.of('C'));
       const r = rect ? rect.asArray().map((n) => n.asNumber()) : [0, 0, 18, 18];
       let color = '#f5c400';
       try { if (c && c.size() === 3) color = '#' + c.asArray().map((n) => Math.round(n.asNumber() * 255).toString(16).padStart(2, '0')).join(''); } catch { /* Standardfarbe */ }
-      out.push({ p, a: { type: 'note', id: uid(), x: Math.min(r[0], r[2]), y: Math.max(r[1], r[3]), text: contents?.decodeText?.() || '', color } });
-      drop.push(k);
+      const a = { type: 'note', id: uid(), x: Math.min(r[0], r[2]), y: Math.max(r[1], r[3]), text: contents?.decodeText?.() || '', color };
+      const meta = {};
+      for (const key of NOTE_META) { const v = d.lookup(PDFName.of(key)); if (v?.decodeText) meta[key] = v.decodeText(); }
+      const icon = d.lookup(PDFName.of('Name'));
+      if (icon instanceof PDFName) meta.Name = icon.asString().replace(/^\//, '');
+      if (f?.asNumber) meta.F = f.asNumber();
+      a.orig = { ref: [ref.objectNumber, ref.generationNumber], x: a.x, y: a.y, text: a.text, color, meta, replies: [] };
+      notes.set(ref, a);
+      out.push({ p, a });
     }
-    if (!drop.length) return;
-    for (const k of drop.reverse()) annots.remove(k);
+    if (!notes.size) return;
+    // Antworten (auch Antworten auf Antworten) der übernommenen Notizen finden
+    const rootOf = (ref) => {
+      for (let n = 0; n < 20 && ref; n++) {
+        if (notes.has(ref)) return notes.get(ref);
+        const irt = dictOf(ref)?.get(PDFName.of('IRT'));
+        ref = irt instanceof PDFRef ? irt : null;
+      }
+      return null;
+    };
+    const taken = new Set(notes.keys()), drop = [];
+    for (let k = 0; k < annots.size(); k++) {
+      const ref = annots.get(k), d = dictOf(ref);
+      if (taken.has(ref)) { drop.push(k); continue; }
+      if (!(ref instanceof PDFRef) || !d?.has(PDFName.of('IRT')) || sub(d) === '/Popup') continue;
+      const a = rootOf(ref);
+      if (a) { a.orig.replies.push([ref.objectNumber, ref.generationNumber]); taken.add(ref); drop.push(k); }
+    }
+    // nur die Popups der übernommenen Notizen und Antworten entfernen, sie kommen beim Speichern zurück
+    for (let k = 0; k < annots.size(); k++) {
+      const d = dictOf(annots.get(k));
+      if (sub(d) === '/Popup' && taken.has(d.get(PDFName.of('Parent')))) drop.push(k);
+    }
+    for (const k of drop.sort((x, y) => y - x)) annots.remove(k);
   });
   return out;
 }
@@ -744,22 +786,25 @@ function syncDoc() {
 
 /* ---------- Verlauf ---------- */
 function cloneAnn(a = S.ann) { return JSON.parse(JSON.stringify(a)); }
+// Ein Verlaufsschritt merkt sich auch Name und Speicherort: Rückgängig nach „Zusammenfügen“ zeigt wieder auf die alte Datei
 function snapshot() {
-  S.history.push({ bytes: S.bytes, ann: cloneAnn(), name: S.name });
+  S.history.push({ bytes: S.bytes, ann: cloneAnn(), name: S.name, path: S.path });
   if (S.history.length > 40) S.history.shift();
   S.future = [];
   setDirty(true);
   updateUndoButtons();
 }
 async function restore(st, pushTo) {
-  pushTo.push({ bytes: S.bytes, ann: cloneAnn(), name: S.name });
+  pushTo.push({ bytes: S.bytes, ann: cloneAnn(), name: S.name, path: S.path });
   const sameBytes = st.bytes === S.bytes;
-  S.ann = st.ann; S.name = st.name; S.selected = null;
+  S.ann = st.ann; S.name = st.name; S.path = st.path; S.selected = null;
   if (sameBytes) { redrawAllOverlays(); renderSide(); }
   else await openBytes(st.bytes, st.name, { keepAnn: true, keepPos: true, fresh: false });
   setDirty(true);
   updateUndoButtons();
 }
+// Nach dem Speichern unter neuem Namen gehört der ganze Verlauf zur neuen Datei
+function rebaseHistory() { for (const e of [...S.history, ...S.future]) { e.name = S.name; e.path = S.path; } }
 async function undo() { if (S.history.length) await restore(S.history.pop(), S.future); }
 async function redo() { if (S.future.length) await restore(S.future.pop(), S.history); }
 function updateUndoButtons() {
@@ -1345,6 +1390,9 @@ function onPageDown(i, e) {
   const v = views[i];
   if (!v.vp || S.mode !== 'comment') return;
   if (S.editing) { if (e.target.classList.contains('inlineedit')) return; commitEdit(); if (S.tool === 'text') return; }
+  // Zeichnen verhindert den Fokuswechsel; ohne blur behielten Regler und Auswahllisten Strg+Z, Entf und die Pfeiltasten
+  const ae = document.activeElement;
+  if (ae && ae !== document.body && !isTextField(ae)) ae.blur();
   const [sx, sy] = evPos(i, e);
   const [px, py] = toPdf(i, sx, sy);
   const tool = S.tool;
@@ -1530,7 +1578,12 @@ function startEdit(i, a, isNew = false) {
     ta.style.height = (d.h * S.scale + 4) + 'px';
   };
   ta.addEventListener('input', () => { a.text = ta.value; fit(); });
-  ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); commitEdit(); } e.stopPropagation(); });
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); commitEdit(); return; }
+    // Kürzel mit Strg/Cmd (Speichern, Drucken …) erreichen die Seite; AltGr meldet Strg+Alt und bleibt Texteingabe
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) return;
+    e.stopPropagation();
+  });
   ta.addEventListener('pointerdown', (e) => e.stopPropagation());
   v.div.append(ta);
   fit();
@@ -1751,20 +1804,29 @@ async function loadImageFile(f) {
     return im;
   } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
 }
+// Bildart an den ersten Bytes erkennen: die Endung stimmt nicht immer (z. B. PNG als .jpg gespeichert)
 async function imageBytesForPdf(f, im) {
-  if (f.type === 'image/jpeg') return { kind: 'jpg', bytes: new Uint8Array(await f.arrayBuffer()) };
-  if (f.type === 'image/png') return { kind: 'png', bytes: new Uint8Array(await f.arrayBuffer()) };
+  const b = new Uint8Array(await f.arrayBuffer());
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return { kind: 'jpg', bytes: b };
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return { kind: 'png', bytes: b };
+  return { kind: 'png', bytes: await imagePng(im) };
+}
+async function imagePng(im) {
   const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
   c.getContext('2d').drawImage(im, 0, 0);
-  return { kind: 'png', bytes: await canvasBytes(c, 'image/png') };
+  return canvasBytes(c, 'image/png');
 }
 async function imagesToDoc(files, { size = 'image', margin = 0 } = {}) {
   const doc = await PDFDocument.create();
   for (const f of files) {
     let im;
     try { im = await loadImageFile(f); } catch { toast(`Bild „${f.name}“ ist beschädigt.`); continue; }
-    const { kind, bytes } = await imageBytesForPdf(f, im);
-    const emb = kind === 'jpg' ? await doc.embedJpg(bytes) : await doc.embedPng(bytes);
+    let emb;
+    try {
+      const { kind, bytes } = await imageBytesForPdf(f, im);
+      try { emb = kind === 'jpg' ? await doc.embedJpg(bytes) : await doc.embedPng(bytes); }
+      catch { emb = await doc.embedPng(await imagePng(im)); }   // z. B. ungewöhnliche JPEG-Variante: über die Darstellung
+    } catch { toast(`Bild „${f.name}“ kann nicht übernommen werden.`); continue; }
     const iw = im.naturalWidth * 0.75, ih = im.naturalHeight * 0.75; // 96 dpi → pt
     let pw, ph;
     if (size === 'image') { pw = iw + 2 * margin; ph = ih + 2 * margin; }
@@ -1962,65 +2024,157 @@ function burnAnn(doc, page, a, fonts, img) {
       page.drawImage(img, { x: at[0], y: at[1], width: at[2], height: at[3], rotate: degrees(r) });
       break;
     }
-    case 'note': {
-      const ctx = doc.context;
-      const annot = ctx.obj({
-        Type: 'Annot', Subtype: 'Text', Rect: [a.x, a.y - 18, a.x + 18, a.y], Contents: PDFHexString.fromText(a.text),
-        Name: 'Comment', C: hexToRgb(a.color || '#f5c400'), T: PDFHexString.fromText('PDFwerk'), M: PDFString.fromDate(new Date()), F: 4, Open: false,
-      });
-      page.node.addAnnot(ctx.register(annot));
-      break;
-    }
+  }
+}
+// Schreibt eine Notiz als PDF-Anmerkung. Eine übernommene Notiz behält ihr Objekt samt Antworten und Popup;
+// Position, Text, Farbe und Änderungsdatum werden nur angefasst, wenn sie sich geändert haben.
+function writeNote(doc, page, a, used) {
+  const ctx = doc.context, o = a.orig, N = (k) => PDFName.of(k);
+  const changed = !o || o.x !== a.x || o.y !== a.y || o.text !== a.text || o.color !== a.color;
+  const old = o?.ref ? PDFRef.of(o.ref[0], o.ref[1]) : null;
+  let ref = old, d = old && ctx.lookup(old), created = false;
+  if (!(d instanceof PDFDict) || d.get(N('Subtype'))?.toString() !== '/Text' || used.has(old)) {
+    // neue Notiz, oder das alte Objekt fehlt (z. B. Kopie einer Seite): Angaben der alten Notiz übernehmen
+    const m = o?.meta || {};
+    d = ctx.obj({ Type: 'Annot', Subtype: 'Text', Name: m.Name || 'Comment', F: m.F ?? 4, Open: false });
+    d.set(N('T'), PDFHexString.fromText(m.T ?? 'PDFwerk'));
+    for (const k of ['NM', 'Subj']) if (m[k] != null) d.set(N(k), PDFHexString.fromText(m[k]));
+    if (m.CreationDate) d.set(N('CreationDate'), PDFString.of(m.CreationDate));
+    if (!changed && m.M) d.set(N('M'), PDFString.of(m.M));
+    ref = ctx.register(d); created = true;
+  }
+  if (changed || created) {
+    d.set(N('Rect'), ctx.obj([a.x, a.y - 18, a.x + 18, a.y]));
+    d.set(N('Contents'), PDFHexString.fromText(a.text));
+    d.set(N('C'), ctx.obj(hexToRgb(a.color || '#f5c400')));
+    if (changed) d.set(N('M'), PDFString.fromDate(new Date()));
+  }
+  d.set(N('P'), page.ref);
+  used.add(ref);
+  const add = (r, x) => {
+    page.node.addAnnot(r);
+    // eigenes Popup wieder einhängen, ein fehlendes austragen
+    const pop = x.get(N('Popup'));
+    if (!(pop instanceof PDFRef)) return;
+    const pd = ctx.lookup(pop);
+    if (pd instanceof PDFDict && !used.has(pop)) { pd.set(N('Parent'), r); page.node.addAnnot(pop); used.add(pop); }
+    else x.delete(N('Popup'));
+  };
+  add(ref, d);
+  // Antworten und Statusvermerke wieder anhängen
+  for (const [n, g] of o?.replies || []) {
+    const rr = PDFRef.of(n, g), rd = ctx.lookup(rr);
+    if (!(rd instanceof PDFDict) || used.has(rr)) continue;
+    if (rd.get(N('IRT')) === old) rd.set(N('IRT'), ref);
+    rd.set(N('P'), page.ref);
+    used.add(rr);
+    add(rr, rd);
   }
 }
 
-// Erzeugt die fertige Datei: Anmerkungen eingebrannt, Schwärzungen wirklich entfernt
-async function buildOutput({ ann = true, progress } = {}) {
-  const hasAnn = ann && S.ann.some((l) => l.length);
-  const doc = await PDFDocument.load(S.bytes, { updateMetadata: false });
+// Erzeugt die fertige Datei: Anmerkungen eingebrannt, Schwärzungen wirklich entfernt.
+// src: Stand, der geschrieben wird (Speichern übergibt eine Momentaufnahme, damit spätere Änderungen nicht halb hineingeraten)
+async function buildOutput({ ann = true, progress, src = S } = {}) {
+  const hasAnn = ann && src.ann.some((l) => l.length);
+  const doc = await PDFDocument.load(src.bytes, { updateMetadata: false });
   doc.setProducer('PDFwerk');
   doc.setModificationDate(new Date());
   if (!hasAnn) return await doc.save({ updateFieldAppearances: false });
   const fonts = {};
-  for (const f of new Set(['Helvetica', ...S.ann.flat().filter((a) => a.type === 'text').map((a) => a.font || 'Helvetica')]))
+  for (const f of new Set(['Helvetica', ...src.ann.flat().filter((a) => a.type === 'text').map((a) => a.font || 'Helvetica')]))
     fonts[f] = await doc.embedFont(StandardFonts[FONTS[f][2]]);
   const cache = new Map(), pages = doc.getPages(), redactPages = [];
   for (let i = 0; i < pages.length; i++) {
-    for (const a of S.ann[i] || []) {
+    for (const a of src.ann[i] || []) {
       if (a.type === 'note') continue;
       const img = a.type === 'image' ? await embedDataUrl(doc, a.src, cache) : null;
       burnAnn(doc, pages[i], a, fonts, img);
     }
-    if (S.ann[i]?.some((a) => a.type === 'redact')) redactPages.push(i);
+    if (src.ann[i]?.some((a) => a.type === 'redact')) redactPages.push(i);
   }
+  // Notizen bleiben echte PDF-Anmerkungen; auf geschwärzten Seiten erst nach dem Neuaufbau
+  const used = new Set();
+  const notes = (d, keep) => d.getPages().forEach((pg, i) => { if (keep(i)) (src.ann[i] || []).filter((a) => a.type === 'note').forEach((a) => writeNote(d, pg, a, used)); });
+  notes(doc, (i) => !redactPages.includes(i));
   let bytes = await doc.save();
-  if (redactPages.length) bytes = await rasterizePages(bytes, redactPages, { dpi: 200, progress });
-  if (S.ann.some((l) => l.some((a) => a.type === 'note'))) {
-    // Notizen bleiben echte PDF-Anmerkungen, auch auf geschwärzten Seiten
-    const d2 = await PDFDocument.load(bytes, { updateMetadata: false });
-    d2.getPages().forEach((pg, i) => (S.ann[i] || []).filter((a) => a.type === 'note').forEach((a) => burnAnn(d2, pg, a, fonts, null)));
-    bytes = await d2.save();
+  if (redactPages.length) {
+    bytes = await rasterizePages(bytes, redactPages, { dpi: 200, progress });
+    if (redactPages.some((i) => src.ann[i].some((a) => a.type === 'note'))) {
+      const d2 = await PDFDocument.load(bytes, { updateMetadata: false });
+      notes(d2, (i) => redactPages.includes(i));
+      bytes = await d2.save();
+    }
   }
   return bytes;
 }
-// Ersetzt die angegebenen Seiten durch Bilder ihrer Darstellung (für Schwärzen, Komprimieren, Graustufen)
+// Ersetzt die angegebenen Seiten durch Bilder ihrer Darstellung (für Schwärzen, Komprimieren, Graustufen).
+// Das Seitenobjekt bleibt, damit Lesezeichen und Links weiter darauf zeigen; sein alter Inhalt wird entfernt und am Ende
+// alles gelöscht, was nicht mehr erreichbar ist. Sonst stünde der geschwärzte Text weiter als verwaistes Objekt in der Datei.
+const PAGE_CONTENT_KEYS = ['Contents', 'Resources', 'Annots', 'StructParents', 'Group', 'Thumb', 'PieceInfo', 'Metadata', 'AA', 'B', 'ID', 'PZ',
+  'SeparationInfo', 'Tabs', 'TemplateInstantiated', 'PresSteps', 'UserUnit', 'VP', 'BleedBox', 'TrimBox', 'ArtBox', 'BoxColorInfo', 'Trans', 'Dur', 'AF', 'DPart', 'OutputIntents'];
 async function rasterizePages(bytes, idx, { dpi = 150, quality = 0.85, gray = false, progress } = {}) {
   const pjs = await loadPdfJs(bytes);
   const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+  const ctx = doc.context, gone = new Set();
   let n = 0;
   for (const i of idx) {
     const page = await pjs.getPage(i + 1);
     const vp1 = page.getViewport({ scale: 1 });
     const c = await renderToCanvas(page, dpi / 72, { gray });
     const jpg = await doc.embedJpg(await canvasBytes(c, 'image/jpeg', quality));
-    doc.removePage(i);
-    const np = doc.insertPage(i, [vp1.width, vp1.height]);
-    np.drawImage(jpg, { x: 0, y: 0, width: vp1.width, height: vp1.height });
+    const pg = doc.getPage(i), node = pg.node;
+    try { for (const r of node.lookup(PDFName.of('Annots'))?.asArray?.() || []) gone.add(r); } catch { /* keine Anmerkungen */ }
+    for (const k of PAGE_CONTENT_KEYS) node.delete(PDFName.of(k));
+    const box = ctx.obj([0, 0, vp1.width, vp1.height]);
+    node.set(PDFName.of('MediaBox'), box);
+    node.set(PDFName.of('CropBox'), box);
+    node.set(PDFName.of('Rotate'), ctx.obj(0));
+    node.set(PDFName.of('Resources'), ctx.obj({}));
+    pg.drawImage(jpg, { x: 0, y: 0, width: vp1.width, height: vp1.height });
     progress?.(++n / idx.length);
     await sleep(0);
   }
   await pjs.destroy();
+  dropFormFields(doc, gone);
+  // Strukturbaum (Tags) verweist auf die alten Seiteninhalte und kann deren Text als ActualText/Alt enthalten
+  doc.catalog.delete(PDFName.of('StructTreeRoot'));
+  doc.catalog.delete(PDFName.of('MarkInfo'));
+  dropUnreachable(doc);
   return await doc.save();
+}
+// Formularfelder, deren Widgets auf neu aufgebauten Seiten lagen, austragen: ihr Wert und ihre Darstellung enthalten Text der Seite
+function dropFormFields(doc, gone) {
+  let acro;
+  try { acro = doc.catalog.lookup(PDFName.of('AcroForm')); } catch { return; }
+  if (!(acro instanceof PDFDict) || !gone.size) return;
+  acro.delete(PDFName.of('XFA'));   // XFA enthält die Feldwerte noch einmal
+  const removed = new Set();
+  const prune = (arr) => {
+    if (!(arr instanceof PDFArray)) return;
+    for (let k = arr.size() - 1; k >= 0; k--) {
+      const ref = arr.get(k), d = doc.context.lookup(ref);
+      if (gone.has(ref)) { arr.remove(k); removed.add(ref); continue; }
+      const kids = d instanceof PDFDict ? d.lookup(PDFName.of('Kids')) : null;
+      if (kids instanceof PDFArray && kids.size()) { prune(kids); if (!kids.size()) { arr.remove(k); removed.add(ref); } }
+    }
+  };
+  prune(acro.lookup(PDFName.of('Fields')));
+  const co = acro.lookup(PDFName.of('CO'));
+  if (co instanceof PDFArray) for (let k = co.size() - 1; k >= 0; k--) if (removed.has(co.get(k))) co.remove(k);
+}
+// Löscht alle Objekte, die vom Trailer (Katalog, Info) aus nicht mehr erreichbar sind
+function dropUnreachable(doc) {
+  const ctx = doc.context, seen = new Set(), todo = [];
+  const visit = (o) => {
+    if (o instanceof PDFRef) { if (!seen.has(o)) { seen.add(o); todo.push(ctx.lookup(o)); } }
+    else if (o instanceof PDFDict) for (const [, v] of o.entries()) visit(v);
+    else if (o instanceof PDFArray) for (const v of o.asArray()) visit(v);
+    else if (o?.dict instanceof PDFDict) visit(o.dict);   // Streams
+  };
+  const { Root, Info, Encrypt } = ctx.trailerInfo;
+  [Root, Info, Encrypt].forEach(visit);
+  while (todo.length) visit(todo.pop());
+  for (const [ref] of ctx.enumerateIndirectObjects()) if (!seen.has(ref)) ctx.delete(ref);
 }
 
 /* ---------- Dateien anbieten ---------- */
@@ -2052,28 +2206,47 @@ async function offerFile(filename, data) {
   return true;
 }
 // Speichert das Dokument. Desktop: in die geöffnete Datei, sonst mit Dialog. Ergibt true bei Erfolg.
-async function save({ as = false } = {}) {
+// Aufrufe laufen nacheinander. Geschrieben wird der Stand beim Start; was sich währenddessen ändert, bleibt als ungespeichert markiert.
+let saveQueue = Promise.resolve(), saveCalls = 0;
+function save(opts = {}) {
+  const waited = saveCalls++ > 0;
+  // wartet ein zweites Strg+S auf das laufende Speichern und ist danach nichts mehr zu tun, nicht noch einmal schreiben
+  const run = saveQueue.then(() => (waited && !opts.as && !S.dirty && S.path ? true : saveNow(opts))).finally(() => { saveCalls--; });
+  saveQueue = run.catch(() => false);
+  return run;
+}
+// Passt der Name nicht mehr zur Datei (z. B. umbenannt), nicht stillschweigend die alte Datei überschreiben
+const pathMatchesName = () => !!S.path && S.path.split(/[\\/]/).pop().toLowerCase() === S.name.toLowerCase();
+async function saveNow({ as = false } = {}) {
   commitEdit();
   if (!S.pdf) return false;
   busy('Speichere …');
+  const opened = S.opened, annJson = JSON.stringify(S.ann);
+  const src = { bytes: S.bytes, ann: JSON.parse(annJson) };
+  // Ergebnis übernehmen; true, wenn sich seit dem Start nichts geändert hat
+  const done = (res) => {
+    if (S.opened !== opened) return true;   // inzwischen anderes Dokument im Fenster
+    if (res?.path) { S.name = res.name; S.path = res.path; rebaseHistory(); }
+    const clean = S.bytes === src.bytes && JSON.stringify(S.ann) === annJson;
+    setDirty(!clean);
+    if (!clean) toast('Gespeichert. Änderungen während des Speicherns sind noch nicht gesichert.', 5000);
+    return clean;
+  };
   try {
-    const bytes = await buildOutput();
-    if (HOST && S.path && /\.pdf$/i.test(S.path) && !as) {
+    const bytes = await buildOutput({ src });
+    if (HOST && S.path && /\.pdf$/i.test(S.path) && !as && pathMatchesName()) {
       try {
         const res = await HOST.saveFile(S.path, bytes);
-        S.name = res.name; S.path = res.path;
-        setDirty(false);
-        toast(`„${res.name}“ gespeichert`);
+        if (done(res)) toast(`„${res.name}“ gespeichert`);
         return true;
       } catch (e) {
-        // z. B. schreibgeschützt oder in einem anderen Programm geöffnet: Speicherort neu wählen lassen
+        // z. B. schreibgeschützt, verschoben oder in einem anderen Programm geöffnet: Speicherort neu wählen lassen
         toast((e?.message || 'Speichern fehlgeschlagen') + ' Bitte einen anderen Ort wählen.', 5000);
       }
     }
     const res = await offerFile(baseName(S.name) + '.pdf', bytes);
     if (!res) return false;
-    if (HOST) { S.name = res.name; S.path = res.path; }
-    setDirty(false);
+    done(HOST ? res : null);
     return true;
   } catch (e) { console.error(e); toast('Speichern fehlgeschlagen: ' + e.message); return false; }
   finally { idle(); }
@@ -2120,17 +2293,21 @@ async function printDoc() {
   const bytes = await buildOutput();
   const pjs = await loadPdfJs(bytes);
   if (HOST) {
+    // Seiten einzeln als JPEG an die Hülle: ein einziger großer HTML-Text scheitert bei großen Dokumenten
+    let job = null;
     try {
-      const imgs = [];
+      job = await HOST.printBegin();
       for (let i = 1; i <= pjs.numPages; i++) {
-        const page = await pjs.getPage(i), vp = page.getViewport({ scale: 1 });
-        const c = await renderToCanvas(page, 200 / 72);
-        imgs.push(`<section style="width:${(vp.width / 72).toFixed(3)}in;height:${(vp.height / 72).toFixed(3)}in"><img src="${c.toDataURL('image/jpeg', 0.92)}" alt=""></section>`);
+        busy(`Bereite Druck vor … Seite ${i} von ${pjs.numPages}`);
+        const c = await renderToCanvas(await pjs.getPage(i), 200 / 72);
+        await HOST.printPage(job, await canvasBytes(c, 'image/jpeg', 0.92));
+        c.width = c.height = 0;
       }
-      await pjs.destroy();
       idle('Druckdialog geöffnet');
-      await HOST.print('<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0}html,body{margin:0}section{page-break-after:always;break-after:page;overflow:hidden}section:last-child{page-break-after:auto;break-after:auto}img{display:block;width:100%;height:100%;object-fit:contain}</style></head><body>' + imgs.join('') + '</body></html>');
-    } catch (e) { console.error(e); toast('Drucken fehlgeschlagen: ' + (e?.message || e)); }
+      const id = job; job = null;
+      await HOST.printEnd(id);
+    } catch (e) { console.error(e); toast('Drucken fehlgeschlagen: ' + (e?.message || e)); if (job) HOST.printAbort(job); }
+    await pjs.destroy();
     idle();
     return;
   }
@@ -2227,11 +2404,13 @@ async function mergeTool() {
       const out = await PDFDocument.create();
       for (const f of files) { const d = await fileToDoc(f); if (d) (await out.copyPages(d, d.getPageIndices())).forEach((p) => out.addPage(p)); }
       if (!out.getPageCount()) return false;
-      await replaceDoc(await out.save(), 'Zusammengefügt.pdf');
+      await replaceDoc(await out.save(), 'Zusammengefügt.pdf', { detach: true });
     } });
 }
-async function replaceDoc(bytes, name) {
+// detach: das Ergebnis ist ein neues Dokument; es gehört nicht mehr zur geöffneten Datei, Speichern fragt nach dem Ort
+async function replaceDoc(bytes, name, { detach = false } = {}) {
   snapshot();
+  if (detach) S.path = null;
   const keepHist = S.history;
   await openBytes(bytes, name, { fresh: false });
   S.history = keepHist; setDirty(true); updateUndoButtons();
@@ -2287,7 +2466,7 @@ async function imagesTool() {
       if (form.target.value === 'append') {
         const order = identity().concat(doc.getPageIndices().map((k) => ({ ext: { doc, idx: k } })));
         await rebuild(order, { msg: 'Bilder angehängt' });
-      } else await replaceDoc(await doc.save(), baseName(files[0].name) + '.pdf');
+      } else await replaceDoc(await doc.save(), baseName(files[0].name.replace(/\.\w+$/, '')) + '.pdf', { detach: true });
     } });
 }
 async function removeBlankTool() {
@@ -2598,7 +2777,10 @@ async function metaTool() {
       doc.setTitle(ti.value); doc.setAuthor(au.value); doc.setSubject(su.value); doc.setKeywords(kw.value.split(/[,;]\s*/).filter(Boolean)); doc.setCreator(cr.value);
       snapshot();
       const nm = (fName.value.trim() || S.name).replace(/[\\/:*?"<>|]/g, '_');
-      await openBytes(await doc.save(), /\.pdf$/i.test(nm) ? nm : nm + '.pdf', { keepAnn: true, keepPos: true, fresh: false });
+      const newName = /\.pdf$/i.test(nm) ? nm : nm + '.pdf';
+      // neuer Dateiname: Speichern legt eine neue Datei an statt die alte zu überschreiben
+      if (newName !== S.name) S.path = null;
+      await openBytes(await doc.save(), newName, { keepAnn: true, keepPos: true, fresh: false });
       toast('Eigenschaften gespeichert');
     } });
 }
@@ -2619,7 +2801,6 @@ async function compressTool() {
       else bytes = await rasterizePages(await buildOutput(), identity(), { dpi: +lvl, quality: lvl === '72' ? 0.6 : 0.72, progress: pb.set });
       idle();
       if (bytes.length >= before && lvl === 'lossless') { toast('Die Datei ist bereits optimal gespeichert.'); return; }
-      S.ann = S.pages.map(() => []);
       await replaceDoc(bytes, S.name);
       toast(`${fmtBytes(before)} → ${fmtBytes(bytes.length)} (${Math.round((1 - bytes.length / before) * 100)} % kleiner)`, 5000);
     } });
@@ -2630,7 +2811,6 @@ async function grayTool() {
     onOk: async () => {
       busy('Wandle um …');
       const bytes = await rasterizePages(await buildOutput(), identity(), { dpi: 150, quality: 0.8, gray: true, progress: pb.set });
-      S.ann = S.pages.map(() => []);
       await replaceDoc(bytes, S.name); idle();
     } });
 }
@@ -2639,7 +2819,6 @@ async function flattenTool() {
     onOk: async () => {
       const doc = await PDFDocument.load(await buildOutput());
       try { doc.getForm().flatten(); } catch { /* kein Formular */ }
-      S.ann = S.pages.map(() => []);
       await replaceDoc(await doc.save(), S.name);
       toast('Dokument reduziert');
     } });
@@ -2713,7 +2892,8 @@ async function openFiles(files, paths = []) {
       setDirty(true);
     }
     if (S.mode === 'tools') setMode('read');
-  } finally { idle(); }
+  } catch (e) { console.error(e); toast('Öffnen fehlgeschlagen: ' + (e?.message || e)); }
+  finally { idle(); }
 }
 // Dateien, die die Desktop-Hülle schickt (Doppelklick, Öffnen-Dialog, zuletzt geöffnet)
 async function openHostFiles(list) {
@@ -2861,7 +3041,12 @@ function bind() {
     e.preventDefault();
     const files = [...e.dataTransfer.files];
     if (S.mode === 'pages') { insertFiles(files, S.pages.length); return; }
-    openFiles(files, files.map((f) => HOST?.adoptDroppedFile(f) || null));
+    const paths = files.map((f) => HOST?.adoptDroppedFile(f) || null);
+    // Desktop: ist die PDF schon in einem anderen Fenster offen, holt die Hülle es nach vorn statt sie doppelt zu öffnen
+    (async () => {
+      if (HOST && files.length === 1 && paths[0] && await HOST.focusOpenFile(paths[0]).catch(() => false)) return;
+      await openFiles(files, paths);
+    })();
   });
   // Abgelegte Dateien dürfen nie die Seite ersetzen (Browser und Desktop würden sonst die PDF anzeigen und die Arbeit verwerfen)
   document.addEventListener('dragover', (e) => e.preventDefault());
@@ -2870,8 +3055,14 @@ function bind() {
   // Tastatur
   let spaceDown = false;
   document.addEventListener('keydown', (e) => {
-    const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.querySelector('.backdrop');
-    const mod = e.ctrlKey || e.metaKey;
+    const t = document.activeElement, text = isTextField(t);
+    // Auswahllisten und Regler: Kürzel mit Strg/Cmd und Entf gelten dem Dokument, Pfeile, Leertaste und Buchstaben dem Element
+    const control = !text && /SELECT|INPUT/.test(t?.tagName || '');
+    const typing = text || document.querySelector('.backdrop');
+    // macOS: Strg in Textfeldern ist Textnavigation (Strg+P Zeile hoch, Strg+F Zeichen vor …)
+    if (text && e.ctrlKey && !e.metaKey && MAC) return;
+    // Strg+Cmd-Kombinationen (z. B. ⌃⌘F Vollbild) gehören dem Menü
+    const mod = (e.ctrlKey || e.metaKey) && !(e.ctrlKey && e.metaKey);
     if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); e.shiftKey ? saveAs() : save(); return; }
     if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); openDialog(); return; }
     if (mod && !e.shiftKey && !e.altKey && ['1', '2', '3', '4'].includes(e.key)) { e.preventDefault(); setMode(['read', 'comment', 'pages', 'tools'][+e.key - 1]); return; }
@@ -2893,6 +3084,7 @@ function bind() {
       if (S.mode === 'comment' && S.selected) { e.preventDefault(); deleteSelected(); return; }
       if (S.mode === 'pages' && S.orgSel.size && S.orgSel.size < S.pages.length) { e.preventDefault(); deletePages([...S.orgSel]); return; }
     }
+    if (control) return;
     if (S.mode === 'comment' && S.selected && e.key.startsWith('Arrow')) {
       e.preventDefault();
       const a = selAnn(), st = (e.shiftKey ? 10 : 1) / S.scale, i = S.selected.p;
@@ -2920,7 +3112,7 @@ function bind() {
   // Im Desktop fragt die Hülle beim Schließen nach; ein beforeunload-Block würde dort das Fenster stumm offen halten
   if (!HOST) window.addEventListener('beforeunload', (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
   if (HOST) {
-    HOST.onOpenFiles((files) => openHostFiles(files));
+    HOST.onOpenFiles((files) => openHostFiles(files).catch((e) => console.error(e)));
     HOST.onCommand((cmd) => runCommand(cmd));
     document.documentElement.dataset.platform = HOST.platform;
   }
@@ -2931,7 +3123,7 @@ function openDialog() {
   $('#fileInput').value = ''; $('#fileInput').click();
 }
 // Befehle aus dem Menü der Desktop-Hülle
-const isTyping = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
+const isTyping = () => isTextField(document.activeElement);
 async function runCommand(cmd) {
   const modal = document.querySelector('.backdrop');
   switch (cmd) {
@@ -2940,7 +3132,8 @@ async function runCommand(cmd) {
     case 'saveAs': if (!modal) await saveAs(); break;
     case 'saveAndClose': {
       modal?.remove();
-      if (await save()) HOST?.close();
+      // nur schließen, wenn wirklich alles gesichert ist (auch Änderungen während des Speicherns)
+      if (await save() && !S.dirty) HOST?.close();
       break;
     }
     case 'print': if (!modal) printDoc(); break;
@@ -2992,7 +3185,7 @@ function moreMenu() {
   window.claude?.use?.('downloads').then((d) => { S.downloads = d; }).catch(() => {});
   // Desktop: per Doppelklick oder Kommandozeile übergebene Dateien statt des Beispiels öffnen
   const initial = HOST ? await HOST.ready().catch(() => []) : [];
-  if (initial.length) { await openHostFiles(initial); if (S.pdf) return; }
+  if (initial.length) { await openHostFiles(initial).catch((e) => console.error(e)); if (S.pdf) return; }
   busy('Lade Beispieldokument …');
   await openBytes(await sampleDoc(), 'Willkommen.pdf');
   S.pristine = true; syncDoc();

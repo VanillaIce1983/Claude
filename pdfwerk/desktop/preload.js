@@ -57,7 +57,11 @@ contextBridge.exposeInMainWorld('pdfwerkHost', {
       pristine: !!state?.pristine,
     });
   },
-  print: (html) => call('pdfwerk:print', String(html)),
+  focusOpenFile: (path) => call('pdfwerk:focus-open-file', String(path)),
+  printBegin: () => call('pdfwerk:print-begin'),
+  printPage: (job, jpeg) => call('pdfwerk:print-page', String(job), bytes(jpeg)),
+  printEnd: (job) => call('pdfwerk:print-end', String(job)),
+  printAbort(job) { ipcRenderer.send('pdfwerk:print-abort', String(job)); },
   onCommand(cb) { if (typeof cb === 'function') onCommand = cb; },
   close() { ipcRenderer.send('pdfwerk:close'); },
 });
