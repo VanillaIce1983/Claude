@@ -3,6 +3,7 @@
 //  dist/artifact – Seite ohne Dokumentgerüst plus app.js für die gehostete Fassung (Bibliotheken vom CDN)
 //  dist/desktop  – Seite, app.js, Bibliotheken und Schriften als Einzeldateien für die Electron-Fassung
 import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const root = new URL('../', import.meta.url);
 const read = (p) => readFileSync(new URL(p, root), 'utf8');
@@ -15,6 +16,18 @@ const libs = {
   'pdf-lib/1.17.1/pdf-lib.min.js': 'node_modules/pdf-lib/dist/pdf-lib.min.js',
   'jszip/3.10.1/jszip.min.js': 'node_modules/jszip/dist/jszip.min.js',
 };
+// Prüfsummen der Bibliotheken, die ins Programm kommen, unabhängig von npm: eine veränderte Datei bricht den Bau ab.
+// Nach einem bewussten Update die neuen Werte hier eintragen.
+const LIB_SHA256 = {
+  'node_modules/pdfjs-dist/build/pdf.min.js': '5b5799e6f8c680663207ac5b42ee14eed2a406fa7af48f50c154f0c0b1566946',
+  'node_modules/pdfjs-dist/build/pdf.worker.min.js': 'feabdf309770ed24bba31a5467836cdc8cf639c705af27d52b585b041bb8527b',
+  'node_modules/pdf-lib/dist/pdf-lib.min.js': '0f9a5cad07941f0826586c94e089d89b918c46e5c17cf2d5a3c6f666e3bc694f',
+  'node_modules/jszip/dist/jszip.min.js': 'acc7e41455a80765b5fd9c7ee1b8078a6d160bbbca455aeae854de65c947d59e',
+};
+for (const src of Object.values(libs)) {
+  const sum = createHash('sha256').update(readFileSync(new URL(src, root))).digest('hex');
+  if (sum !== LIB_SHA256[src]) throw new Error(`${src}: Prüfsumme ${sum} stimmt nicht mit scripts/build.mjs überein`);
+}
 const CDN_SCRIPT = /<script src="https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/([^"]+)"><\/script>\n?/g;
 const FONT_LINK = /<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com\/[^"]+">/;
 const inline = (code) => `<script>${code.replace(/<\/script/gi, '<\\/script')}</script>`;

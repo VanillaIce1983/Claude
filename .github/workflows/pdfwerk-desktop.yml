@@ -1,5 +1,7 @@
 # PDFwerk als Desktop-Programm bauen (Windows, macOS, Linux), gepackt testen und als Artefakt bereitstellen.
 # Tags pdfwerk-v* (z. B. pdfwerk-v1.0.0, passend zur Version in package.json) werden zusätzlich als GitHub-Release veröffentlicht.
+# Ausgeliefert werden die Pakete aus npm run dist:* (ohne Node-Inspector, siehe scripts/release-config.cjs). Weil Playwright
+# das Programm über --inspect steuert, läuft der Test auf einem sonst gleichen Testpaket aus release-test/.
 name: pdfwerk-desktop
 
 on:
@@ -32,6 +34,8 @@ jobs:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    # Linux ist keine Zielplattform: ein roter Linux-Lauf hält das Release für Windows und macOS nicht auf
+    continue-on-error: ${{ matrix.os == 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -40,17 +44,17 @@ jobs:
             os: windows-latest
             artifact: pdfwerk-windows
             script: dist:win
-            exe: release/win-unpacked/PDFwerk.exe
+            exe: win-unpacked/PDFwerk.exe
           - label: macOS
             os: macos-latest
             artifact: pdfwerk-macos
             script: dist:mac
-            exe: release/mac-arm64/PDFwerk.app/Contents/MacOS/PDFwerk
+            exe: mac-arm64/PDFwerk.app/Contents/MacOS/PDFwerk
           - label: Linux
             os: ubuntu-latest
             artifact: pdfwerk-linux
             script: dist:linux
-            exe: release/linux-unpacked/pdfwerk
+            exe: linux-unpacked/pdfwerk
     steps:
       - uses: actions/checkout@v7
 
@@ -68,6 +72,9 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME passt nicht zur Version $version in package.json"
             exit 1
           fi
+
+      - name: Lock-Datei prüfen (jedes Paket mit Prüfsumme)
+        run: node scripts/check-lock.mjs
 
       - run: npm ci
 
@@ -88,7 +95,9 @@ jobs:
           for app in release/mac/PDFwerk.app release/mac-arm64/PDFwerk.app; do
             echo "== $app"
             codesign --verify --deep --strict --verbose=2 "$app"
-            codesign -dv "$app" 2>&1
+            info=$(codesign -dv "$app" 2>&1); echo "$info"
+            # Hardened Runtime: DYLD_INSERT_LIBRARIES u. ä. greifen nicht
+            echo "$info" | grep -q 'flags=.*runtime' || { echo "::error::$app ohne Hardened Runtime"; exit 1; }
           done
           plutil -p release/mac-arm64/PDFwerk.app/Contents/Info.plist | grep -A20 CFBundleDocumentTypes
 
@@ -99,18 +108,31 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           command -v xvfb-run >/dev/null || { sudo apt-get update && sudo apt-get install -y xvfb; }
 
+      - name: Ausgeliefertes Paket prüfen (Fuses, keine Fernsteuerung)
+        timeout-minutes: 5
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a npm run check:release -- "release/${{ matrix.exe }}"; else npm run check:release -- "release/${{ matrix.exe }}"; fi
+
+      - name: Testpaket bauen
+        run: npx electron-builder --dir --publish never -c.directories.output=release-test
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ runner.os == 'macOS' && 'false' || '' }}
+          CSC_FOR_PULL_REQUEST: ${{ runner.os == 'macOS' && 'true' || '' }}
+
       - name: Gepacktes Programm testen
+        id: test
+        timeout-minutes: 15
         run: |
           if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a npm run test:desktop; else npm run test:desktop; fi
         env:
-          PDFWERK_EXE: ${{ github.workspace }}/pdfwerk/${{ matrix.exe }}
+          PDFWERK_EXE: ${{ github.workspace }}/pdfwerk/release-test/${{ matrix.exe }}
 
-      # auch bei rotem Test hochladen, damit sich der Fehler am Paket nachvollziehen lässt; das Release braucht trotzdem grüne Läufe
+      # auch bei rotem Test hochladen, damit sich der Fehler am Paket nachvollziehen lässt; dann als fehlerhaft-…, das Release nimmt nur pdfwerk-*
       - name: Artefakte hochladen
         if: ${{ !cancelled() && steps.dist.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact }}
+          name: ${{ steps.test.outcome == 'success' && matrix.artifact || format('fehlerhaft-{0}', matrix.artifact) }}
           path: |
             pdfwerk/release/*.exe
             pdfwerk/release/*.zip
@@ -123,7 +145,7 @@ jobs:
   release:
     name: Release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/pdfwerk-v')
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/pdfwerk-v') && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

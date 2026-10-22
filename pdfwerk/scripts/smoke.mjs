@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 let chromium;
 try { ({ chromium } = require('playwright')); } catch { ({ chromium } = await import('/opt/node22/lib/node_modules/playwright/index.mjs')); }
 const { PDFDocument } = require('pdf-lib');
+import { SECRET, FIELD_SECRET, KEEP, makeSecretPdf, findText } from './testdateien.mjs';
 
 const out = mkdtempSync(join(tmpdir(), 'pdfwerk-'));
 const page = new URL('../PDFwerk.html', import.meta.url).pathname;
@@ -95,9 +96,33 @@ await submit();
 await p.waitForFunction(() => S.pages.length === 1);
 ok(true, 'Bild in PDF umgewandelt');
 
-// Komprimieren
+// Komprimieren und Rückgängig: die Anmerkungen kommen zurück
+await st(() => addAnn(0, { type: 'rect', x1: 10, y1: 10, x2: 100, y2: 100, color: '#d0312d', width: 2 }));
 await tool('Komprimieren'); await submit();
-await p.waitForTimeout(800);
+await p.waitForFunction(() => S.ann[0].length === 0 && !document.querySelector('.backdrop'), null, { timeout: 20000 });
+await st(() => undo());
+ok((await st(() => S.ann[0].length)) === 1, 'Rückgängig nach Komprimieren bringt die Anmerkungen zurück');
+
+// Schwärzen: Text und Formularwert sind danach nirgends mehr in der Datei, auch mit Lesezeichen und Link auf die Seite
+const secretFile = join(out, 'geheim.pdf');
+writeFileSync(secretFile, await makeSecretPdf());
+await p.setInputFiles('#fileInput', secretFile);
+await p.click('.backdrop button[type=submit]');   // ungespeicherte Änderungen verwerfen
+await p.waitForFunction(() => S.name === 'geheim.pdf' && S.pages.length === 2);
+await st(() => addAnn(0, { type: 'redact', x1: 0, y1: 0, x2: S.pages[0].w, y2: S.pages[0].h, rot: 0 }));
+const red = readFileSync(await download(() => p.click('#btnSave')));
+const leak = [await findText(red, SECRET), await findText(red, FIELD_SECRET)].filter(Boolean);
+ok(!leak.length && !!(await findText(red, KEEP)), 'Schwärzen entfernt Text und Feldwert vollständig, Seite 2 bleibt' + (leak.length ? ': ' + leak.join(', ') : ''));
+// auch im Seitenbild: das Formularfeld (pdf.js zeichnet es über den Seiteninhalt) liegt unter Schwarz
+const bright = await p.evaluate(async (b64) => {
+  const pdf = await pdfjsLib.getDocument({ data: Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)) }).promise;
+  const c = await renderToCanvas(await pdf.getPage(1), 1);
+  const d = c.getContext('2d').getImageData(60, 220, 250, 22).data;   // Feld bei x 60–310, y 600–622 (PDF)
+  let max = 0; for (let k = 0; k < d.length; k += 4) max = Math.max(max, d[k], d[k + 1], d[k + 2]);
+  await pdf.destroy();
+  return max;
+}, Buffer.from(red).toString('base64'));
+ok(bright < 80, 'geschwärztes Formularfeld ist auch im Seitenbild schwarz (hellster Wert ' + bright + ')');
 
 ok(!errs.length, 'keine Skriptfehler' + (errs.length ? ': ' + errs.join(' | ') : ''));
 await b.close();

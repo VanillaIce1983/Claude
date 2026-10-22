@@ -1,15 +1,16 @@
 // Rauchtest der Desktop-Fassung: startet die Electron-Hülle und spielt Öffnen, Speichern, Schließen und die Sicherheitsregeln durch.
 // Voraussetzung: npm run build. Ohne Bildschirm: xvfb-run -a npm run test:desktop
 // PDFWERK_EXE=<Programmdatei> prüft statt des Quellordners das fertige Paket (z. B. release/linux-unpacked/pdfwerk).
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, chmodSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { join, resolve, dirname } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const { _electron } = require('playwright-core');
-const { PDFDocument, StandardFonts } = require('pdf-lib');
+const { PDFDocument, StandardFonts, PDFName } = require('pdf-lib');
+import { SECRET, FIELD_SECRET, KEEP, NOTE, makeSecretPdf, findText, makeEncryptedPdf, makeCommentedPdf, readComments } from './testdateien.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const exe = process.env.PDFWERK_EXE ? resolve(process.env.PDFWERK_EXE) : null;
@@ -21,7 +22,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let fails = 0;
 const ok = (cond, msg) => { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if (!cond) fails++; };
-const step = async (name, fn) => { try { await fn(); } catch (e) { ok(false, `${name}: ${e.message.split('\n')[0]}`); } };
+// Ein hängender Schritt zählt als Fehler, statt den ganzen Lauf bis zur CI-Zeitgrenze aufzuhalten
+const step = async (name, fn, ms = 120000) => {
+  let timer;
+  try { await Promise.race([fn(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Zeitüberschreitung')), ms); })]); }
+  catch (e) { ok(false, `${name}: ${e.message.split('\n')[0]}`); }
+  finally { clearTimeout(timer); }
+};
+setTimeout(() => { console.log('FAIL Zeitüberschreitung des ganzen Tests'); process.exit(1); }, 12 * 60000).unref();
 
 /* ---------- Testdateien ---------- */
 async function makePdf(name, pages = 2) {
@@ -69,10 +77,22 @@ const winCount = (app) => app.evaluate(({ BrowserWindow }) => BrowserWindow.getA
 const titleOf = (app, p) => app.browserWindow(p).then((h) => h.evaluate((w) => w.getTitle()));
 const closeWin = (app, p) => app.browserWindow(p).then((h) => h.evaluate((w) => w.close()));
 const rotate = (p) => p.evaluate(() => rotatePages([0], 90)).then(() => p.waitForFunction(() => S.dirty));
+// Wartet, bis fn() etwas Wahres liefert; auch ein einzelner Aufruf, der nie zurückkommt, endet mit der Frist
 async function until(fn, ms = 15000) {
   const end = Date.now() + ms;
-  for (;;) { const v = await fn(); if (v || Date.now() > end) return v; await sleep(100); }
+  for (;;) {
+    const v = await Promise.race([Promise.resolve().then(fn).catch(() => null), sleep(Math.max(0, end - Date.now())).then(() => null)]);
+    if (v || Date.now() > end) return v;
+    await sleep(100);
+  }
 }
+// Tastendruck wie vom Betriebssystem, über den Hauptprozess eingespeist (Cmd unter macOS, sonst Strg)
+const MOD = process.platform === 'darwin' ? 'meta' : 'control';
+const keys = (app, p, keyCode, modifiers = [MOD]) => app.browserWindow(p).then((h) => h.evaluate((w, [k, m]) => {
+  w.webContents.sendInputEvent({ type: 'keyDown', keyCode: k, modifiers: m });
+  w.webContents.sendInputEvent({ type: 'keyUp', keyCode: k, modifiers: m });
+}, [keyCode, modifiers]));
+const toastText = (p) => p.evaluate(() => document.querySelector('.toast')?.textContent || '');
 // Neues Fenster, das nach einer Aktion aufgeht
 async function newWindow(app, action) {
   const ev = app.waitForEvent('window', { timeout: 20000 });
@@ -135,15 +155,15 @@ const img1 = makePng('bild1.png'), img2 = makePng('bild2.PNG');
   await step('Menü', async () => {
     const m = await app.evaluate(({ app, Menu }) => {
       const menu = Menu.getApplicationMenu();
-      const find = (top, label) => menu.items.find((i) => i.label === top).submenu.items.find((i) => i.label === label);
+      const find = (top, label) => menu.items.find((i) => i.label.replace(/&/g, '') === top).submenu.items.find((i) => i.label === label);
       const save = find('Datei', 'Speichern');
       return { top: menu.items.map((i) => i.label), acc: save.accelerator, reg: save.registerAccelerator, dev: !!find('Ansicht', 'Entwicklertools'), packaged: app.isPackaged };
     });
-    const top = process.platform === 'darwin' ? ['PDFwerk', 'Datei', 'Bearbeiten', 'Ansicht', 'Fenster', 'Hilfe'] : ['Datei', 'Bearbeiten', 'Ansicht', 'Hilfe'];
-    ok(JSON.stringify(m.top) === JSON.stringify(top), 'deutsches Menü: ' + m.top.join(', '));
+    const top = process.platform === 'darwin' ? ['PDFwerk', 'Datei', 'Bearbeiten', 'Ansicht', 'Fenster', 'Hilfe'] : ['&Datei', '&Bearbeiten', '&Ansicht', '&Hilfe'];
+    ok(JSON.stringify(m.top) === JSON.stringify(top), 'deutsches Menü (Windows/Linux mit Alt-Zugriffstasten): ' + m.top.join(', '));
     ok(m.acc === 'CmdOrCtrl+S' && m.reg === (process.platform === 'darwin') && m.dev === !m.packaged, 'Kürzel der Seite im Menü nur angezeigt, Entwicklertools nur ohne Paket');
     const click = (top, label) => app.evaluate(({ Menu, BrowserWindow }, [top, label]) => {
-      Menu.getApplicationMenu().items.find((i) => i.label === top).submenu.items.find((i) => i.label === label).click({}, BrowserWindow.getAllWindows()[0]);
+      Menu.getApplicationMenu().items.find((i) => i.label.replace(/&/g, '') === top).submenu.items.find((i) => i.label === label).click({}, BrowserWindow.getAllWindows()[0]);
     }, [top, label]);
     await click('Ansicht', 'Seiten');
     await p.waitForFunction(() => S.mode === 'pages', null, { timeout: 5000 });
@@ -182,16 +202,20 @@ const img1 = makePng('bild1.png'), img2 = makePng('bild2.PNG');
     await app.evaluate(({ webContents }) => {
       globalThis.__prints = [];
       const proto = Object.getPrototypeOf(webContents.getAllWebContents()[0]);
+      const fs = process.mainModule.require('node:fs'), url = process.mainModule.require('node:url');
       proto.print = function (opts, cb) {
-        globalThis.__prints.push({ opts, url: this.getURL(), js: this.getLastWebPreferences().javascript, sandbox: this.getLastWebPreferences().sandbox });
+        const html = fs.readFileSync(url.fileURLToPath(this.getURL()), 'utf8');
+        globalThis.__prints.push({ opts, html, url: this.getURL(), js: this.getLastWebPreferences().javascript, sandbox: this.getLastWebPreferences().sandbox });
         setTimeout(() => cb(true, ''), 50);
       };
     });
     await p.keyboard.press('Control+p');
     const pr = await until(() => app.evaluate(() => globalThis.__prints[0]), 30000);
     ok(pr && pr.url.startsWith('file:') && pr.url.endsWith('/druck.html') && pr.opts.silent === false && pr.opts.printBackground === true && pr.js === false && pr.sandbox === true, 'Drucken über verstecktes Fenster ohne JavaScript');
-    await sleep(500);
-    ok(!existsSync(fileURLToPath(pr.url)) && (await winCount(app)) === 1, 'Druckfenster und temporäre Datei wieder entfernt');
+    // jede Seite als eigenes Bild, Größe vom Papier (eine Querseite verkleinert die anderen nicht)
+    ok((pr.html.match(/<img src="seite-\d+\.jpg"/g) || []).length === 3 && /section\{width:100vw;height:100vh/.test(pr.html) && !/style="width:/.test(pr.html), 'Druckseiten als Einzelbilder, auf das Papier eingepasst');
+    const gone = await until(async () => !existsSync(dirname(fileURLToPath(pr.url))) && (await winCount(app)) === 1, 10000);
+    ok(gone, 'Druckfenster und temporäre Dateien wieder entfernt' + (gone ? '' : ` (Ordner da: ${existsSync(dirname(fileURLToPath(pr.url)))}, Fenster: ${await winCount(app)})`));
   });
   await step('Öffnen-Dialog', async () => {
     const broken = join(out, 'kaputt.pdf');
@@ -226,6 +250,14 @@ const img1 = makePng('bild1.png'), img2 = makePng('bild2.PNG');
     const docs = await Promise.all(pages.map(doc));
     ok((await stats(app)).windows - before === 2 && docs.some((d) => d.path === docC) && docs.some((d) => d.name === 'Zusammengefügt.pdf' && d.pages === 2 && !d.path),
       'jede PDF in eigenem Fenster, Bilder zusammen in einem');
+  });
+  await step('Bild mit falscher Endung', async () => {
+    const fake = makePng('foto.jpg');   // PNG-Daten mit .jpg
+    const e0 = errors.length;
+    await stubOpen(app, [fake]);
+    const w = await newWindow(app, () => p.evaluate(() => pdfwerkHost.openDialog()));
+    const fresh = errors.slice(e0);
+    ok((await doc(w)).pages === 1 && !fresh.length, 'PNG mit Endung .jpg wird geöffnet' + (fresh.length ? ': ' + fresh.join(' | ') : ''));
   });
   await finish(run);
 }
@@ -287,14 +319,27 @@ const img1 = makePng('bild1.png'), img2 = makePng('bild2.PNG');
     const dropped = await makePdf('abgelegt.pdf');
     await p.evaluate(() => { const i = document.createElement('input'); i.type = 'file'; i.id = 'testDrop'; i.hidden = true; document.body.append(i); });
     await p.setInputFiles('#testDrop', dropped);
+    await stubBox(app, [0]);
     const r = await p.evaluate(async () => {
-      const f = document.querySelector('#testDrop').files[0];
+      const f = document.querySelector('#testDrop').files[0], data = new Uint8Array(await f.arrayBuffer());
       const path = pdfwerkHost.adoptDroppedFile(f);
       const none = pdfwerkHost.adoptDroppedFile(new File(['x'], 'nix.pdf'));
-      const saved = await pdfwerkHost.saveFile(path, new Uint8Array(await f.arrayBuffer()));
-      return { path, none, saved };
+      const saved = await pdfwerkHost.saveFile(path, data);
+      const again = await pdfwerkHost.saveFile(path, data);
+      return { path, none, saved, again };
     });
-    ok(r.path === dropped && r.none === null && r.saved.name === 'abgelegt.pdf', 'abgelegte Datei wird per adoptDroppedFile freigegeben');
+    const b = await boxes(app);
+    ok(r.path === dropped && r.none === null && r.saved.name === 'abgelegt.pdf' && r.again.name === 'abgelegt.pdf' && b.length === 1 && b[0].startsWith('„abgelegt.pdf“ überschreiben?'),
+      'abgelegte Datei: das erste Speichern fragt nach, danach ist sie freigegeben');
+    // ein von der Seite gemeldeter Pfad (wie aus einem übernommenen Renderer) gibt nichts frei, die Rückfrage zeigt den Ordner
+    const victim = await makePdf('opfer.pdf'), was = readFileSync(victim);
+    await app.evaluate(({ ipcMain, BrowserWindow }, f) => {
+      const wc = BrowserWindow.getAllWindows()[0].webContents;
+      ipcMain.emit('pdfwerk:adopt', { sender: wc, senderFrame: wc.mainFrame }, f);
+    }, victim);
+    await stubBox(app, [1]);
+    const m = await p.evaluate((f) => pdfwerkHost.saveFile(f, new Uint8Array([37, 80, 68, 70])).then(() => 'gespeichert', (e) => e.message), victim);
+    ok(m === 'Speichern abgebrochen.' && readFileSync(victim).equals(was) && (await boxes(app))[0]?.includes(dirname(victim)), 'gemeldeter Pfad wird nicht ohne Rückfrage überschrieben');
     const bad = await p.evaluate(() => pdfwerkHost.saveFile('/tmp/x.pdf', [1, 2]).then(() => 'angenommen', (e) => e.message));
     ok(bad !== 'angenommen', 'Daten müssen Uint8Array sein');
     // root darf auch schreibgeschützte Dateien ändern, daher nur ohne root (in der CI auf allen Systemen)
@@ -303,6 +348,7 @@ const img1 = makePng('bild1.png'), img2 = makePng('bild2.PNG');
       const before = readFileSync(locked);
       chmodSync(locked, 0o444);
       await p.setInputFiles('#testDrop', locked);
+      await stubBox(app, [0]);
       const m = await p.evaluate(async () => {
         const f = document.querySelector('#testDrop').files[0];
         return pdfwerkHost.saveFile(pdfwerkHost.adoptDroppedFile(f), new Uint8Array([37, 80, 68, 70])).then(() => 'gespeichert', (e) => e.message);
@@ -403,14 +449,265 @@ const img1 = makePng('bild1.png'), img2 = makePng('bild2.PNG');
     let w = null;
     for (const x of app.windows()) if ((await doc(x)).path === p1) w = x;
     await stubBox(app, [0]);
-    const id = await app.browserWindow(w).then((h) => h.evaluate((win) => { win.webContents.forcefullyCrashRenderer(); return win.id; }));
+    const id = await app.browserWindow(w).then((h) => h.evaluate((win) => {
+      // erst nach dem Neuladen abfragen: eine Abfrage an die abgestürzte Seite käme nie zurück
+      globalThis.__reloaded = new Promise((r) => win.webContents.once('did-finish-load', () => r(true)));
+      win.webContents.forcefullyCrashRenderer();
+      return win.id;
+    }));
     await until(async () => (await boxes(app)).length, 10000);
+    const loaded = await app.evaluate(() => Promise.race([globalThis.__reloaded, new Promise((r) => setTimeout(() => r(false), 20000))]));
     // Die Playwright-Seite überlebt den Absturz nicht, daher über den Hauptprozess nachsehen
-    const path = await until(() => app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).webContents
-      .executeJavaScript('typeof S !== "undefined" && S.pdf ? S.path : null').catch(() => null), id), 20000);
-    ok((await boxes(app))[0].startsWith('Das Fenster wurde unerwartet beendet.') && path === p1, 'nach einem Absturz lädt „Neu laden“ die Datei wieder');
+    const path = loaded && await until(() => app.evaluate(({ BrowserWindow }, id) => Promise.race([
+      BrowserWindow.fromId(id).webContents.executeJavaScript('typeof S !== "undefined" && S.pdf ? S.path : null'),
+      new Promise((r) => setTimeout(() => r(null), 3000)),
+    ]), id), 20000);
+    ok((await boxes(app))[0]?.startsWith('Das Fenster wurde unerwartet beendet.') && path === p1, 'nach einem Absturz lädt „Neu laden“ die Datei wieder');
   });
   await finish(run);
+}
+
+/* ---------- 4. Schwärzen, geschützte PDFs, neue Dokumente, Notizen, Speichern unter Last, Beenden ---------- */
+// Metadaten der Datei setzen und lesen: macOS Finder-Tag, Linux erweitertes Attribut, Windows Mark of the Web
+const META = {
+  darwin: { set: (f) => spawnSync('/usr/bin/xattr', ['-w', 'com.apple.metadata:_kMDItemUserTags', 'Rot', f]).status === 0, get: (f) => spawnSync('/usr/bin/xattr', ['-p', 'com.apple.metadata:_kMDItemUserTags', f], { encoding: 'utf8' }).stdout.trim() },
+  linux: { set: (f) => spawnSync('python3', ['-c', 'import os,sys; os.setxattr(sys.argv[1], "user.pdfwerk.etikett", b"Rot")', f]).status === 0, get: (f) => spawnSync('python3', ['-c', 'import os,sys; print(os.getxattr(sys.argv[1], "user.pdfwerk.etikett").decode())', f], { encoding: 'utf8' }).stdout.trim() },
+  win32: { set: (f) => { try { writeFileSync(f + ':Zone.Identifier', 'Rot'); return true; } catch { return false; } }, get: (f) => { try { return readFileSync(f + ':Zone.Identifier', 'utf8'); } catch { return ''; } } },
+}[process.platform];
+{
+  const dir = join(out, 'vier');
+  mkdirSync(dir);
+  const secret = join(dir, 'geheim.pdf'), owner = join(dir, 'eigentuemer.pdf'), user = join(dir, 'passwort.pdf'), comments = join(dir, 'kommentiert.pdf');
+  writeFileSync(secret, await makeSecretPdf());
+  writeFileSync(owner, makeEncryptedPdf('Kontoauszug', '', 'eigen'));
+  writeFileSync(user, makeEncryptedPdf('Kontoauszug', 'geheim', 'eigen'));
+  writeFileSync(comments, await makeCommentedPdf());
+  const partA = await makePdf('teil-a.pdf', 1), partB = await makePdf('teil-b.pdf', 1);
+  const run = await launch([secret]);
+  const { app, errors } = run;
+  const p = await app.firstWindow();
+  const saves = async () => (await stats(app)).saveFile;
+  // wartet, bis ein mit Strg+S begonnenes Speichern fertig geschrieben ist
+  const saveDone = async (w, n0) => { await until(async () => (await saves()) > n0, 20000); await w.evaluate(() => saveQueue); };
+  const openNew = async (file) => { await stubOpen(app, [file]); return newWindow(app, () => p.evaluate(() => pdfwerkHost.openDialog())); };
+  let wOwner, wUser, wNotes;
+  await step('Schwärzen', async () => {
+    await ready(p);
+    await p.evaluate(() => { setMode('comment'); addAnn(0, { type: 'redact', x1: 0, y1: 0, x2: S.pages[0].w, y2: S.pages[0].h, rot: 0 }); });
+    await keys(app, p, 'S');
+    await p.waitForFunction(() => !S.dirty, null, { timeout: 30000 });
+    const bytes = readFileSync(secret);
+    const leak = [await findText(bytes, SECRET), await findText(bytes, FIELD_SECRET)].filter(Boolean);
+    ok(!leak.length, 'geschwärzter Text und Wert des Formularfelds stehen nirgends mehr in der Datei' + (leak.length ? ': ' + leak.join(', ') : ''));
+    const d = await PDFDocument.load(bytes);
+    const dest = d.catalog.lookup(PDFName.of('Outlines'))?.lookup(PDFName.of('First'))?.lookup(PDFName.of('Dest'));
+    ok(d.getPageCount() === 2 && dest?.get(0) === d.getPage(0).ref && !!(await findText(bytes, KEEP)), 'Seitenzahl, Lesezeichen auf Seite 1 und Text auf Seite 2 bleiben');
+  });
+  await step('Geschützte PDF', async () => {
+    for (const [file, pw] of [[owner, null], [user, 'geheim']]) {
+      const before = readFileSync(file), name = file.split(/[\\/]/).pop().replace('.pdf', ' (entsperrt).pdf');
+      await stubOpen(app, [file]);
+      const ev = app.waitForEvent('window', { timeout: 20000 });
+      await p.evaluate(() => pdfwerkHost.openDialog());
+      const w = await ev;
+      if (pw) {
+        await w.waitForSelector('.backdrop input[name=pw]', { timeout: 20000 });
+        await w.fill('.backdrop input[name=pw]', pw);
+        await w.click('.backdrop button[type=submit]');
+      }
+      await ready(w);
+      if (pw) wUser = w; else wOwner = w;
+      const d = await doc(w);
+      ok(d.name === name && d.path === null, `${pw ? 'Öffnen' : 'Eigentümer'}-Passwort: entsperrte Kopie ohne Speicherort („${d.name}“)`);
+      await stubSave(app, null);
+      const st0 = await stats(app);
+      await keys(app, w, 'S');
+      await until(async () => (await stats(app)).saveDialog > st0.saveDialog, 20000);
+      const st1 = await stats(app), o = await app.evaluate(() => globalThis.__saveOpts);
+      ok(st1.saveFile === st0.saveFile && readFileSync(file).equals(before) && o?.defaultPath === join(dir, name), '… Strg+S fragt nach dem Ort (Ordner des Originals), das Original bleibt unverändert');
+    }
+  });
+  await step('Neues Dokument', async () => {
+    const before = readFileSync(secret);
+    await p.evaluate(() => setMode('tools'));
+    await p.click('.tcard:has-text("Zusammenfügen")');
+    await p.setInputFiles('.backdrop input[type=file]', [partA, partB]);
+    await p.uncheck('.backdrop input[name=cur]');
+    await p.click('.backdrop button[type=submit]');
+    await p.waitForFunction(() => S.name === 'Zusammengefügt.pdf', null, { timeout: 20000 });
+    ok((await doc(p)).path === null && (await titleOf(app, p)).startsWith('Zusammengefügt.pdf'), 'Zusammenfügen ohne aktuelles Dokument löst die Verbindung zur geöffneten Datei');
+    await stubSave(app, null);
+    const st0 = await stats(app);
+    await keys(app, p, 'S');
+    await until(async () => (await stats(app)).saveDialog > st0.saveDialog, 20000);
+    ok((await stats(app)).saveFile === st0.saveFile && readFileSync(secret).equals(before), '… Strg+S fragt nach dem Ort, die vorher geöffnete Datei bleibt unverändert');
+    await p.evaluate(() => undo());
+    const d = await doc(p);
+    ok(d.path === secret && d.name === 'geheim.pdf', 'Rückgängig holt Dokument und Speicherort zurück');
+    await keys(app, p, 'S');
+    await p.waitForFunction(() => !S.dirty, null, { timeout: 20000 });
+  });
+  await step('Notizen', async () => {
+    wNotes = await openNew(comments);
+    ok((await wNotes.evaluate(() => S.ann[0].map((a) => a.type).join())) === 'note', 'nur die Notiz wird zum Bearbeiten übernommen, die Antwort hängt an ihr');
+    const n0 = await saves();
+    await keys(app, wNotes, 'S');
+    await saveDone(wNotes, n0);
+    let c = await readComments(readFileSync(comments));
+    const find = (c) => ({ note: c.find((x) => x.type === '/Text' && x.author === NOTE.author), reply: c.find((x) => x.author === NOTE.reply), hl: c.find((x) => x.type === '/Highlight') });
+    let f = find(c);
+    ok(c.length === 5 && f.note?.date === NOTE.date && f.note.popupOnPage && f.reply?.irtOnPage && f.hl?.popupOnPage,
+      'Speichern ohne Änderung: Autor, Datum, Antwort und Popups bleiben' + (c.length === 5 ? '' : ` (${c.length} Anmerkungen)`));
+    await wNotes.evaluate(() => { snapshot(); S.ann[0][0].x += 30; });
+    const n1 = await saves();
+    await keys(app, wNotes, 'S');
+    await saveDone(wNotes, n1);
+    c = await readComments(readFileSync(comments));
+    f = find(c);
+    ok(c.length === 5 && f.note && f.note.date !== NOTE.date && f.note.text === NOTE.text && f.reply?.irtOnPage, 'verschobene Notiz: neues Änderungsdatum, Autor und Antwort bleiben');
+  });
+  await step('Änderung während des Speicherns', async () => {
+    // langsames Laufwerk: das Ersetzen der Datei dauert 1,5 s
+    await app.evaluate(() => {
+      const fsp = process.mainModule.require('node:fs').promises;
+      globalThis.__rename = fsp.rename;
+      fsp.rename = async (...a) => { await new Promise((r) => setTimeout(r, 1500)); return globalThis.__rename.apply(fsp, a); };
+    });
+    try {
+      const n0 = await saves();
+      await keys(app, wNotes, 'S');
+      await until(async () => (await saves()) > n0, 10000);
+      await rotate(wNotes);
+      await wNotes.waitForFunction(() => document.querySelector('.toast')?.textContent.includes('noch nicht gesichert'), null, { timeout: 15000 });
+      const marked = process.platform === 'darwin'
+        ? await app.browserWindow(wNotes).then((h) => h.evaluate((w) => w.isDocumentEdited()))
+        : (await titleOf(app, wNotes)).includes('(geändert)');
+      ok((await wNotes.evaluate(() => S.dirty)) && marked && (await rotation(comments)) === 0, 'Änderung während des Speicherns bleibt als ungespeichert markiert');
+    } finally {
+      await app.evaluate(() => { process.mainModule.require('node:fs').promises.rename = globalThis.__rename; });
+    }
+    await stubBox(app, [2]);
+    await closeWin(app, wNotes);
+    await until(async () => (await boxes(app)).length, 10000);
+    ok((await boxes(app)).length === 1 && !wNotes.isClosed(), '… und Schließen fragt nach');
+  });
+  await step('Strg+S im Textfeld', async () => {
+    await wNotes.evaluate(() => { setMode('comment'); pickTool('text'); });
+    // der Moduswechsel baut die Ansicht im nächsten Bild evtl. neu auf; erst danach das Textfeld anlegen
+    await wNotes.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 100))));
+    await wNotes.evaluate(() => createTextAt(0, 100, 600));
+    await wNotes.keyboard.type('Neuer Text');
+    const n0 = await saves();
+    await keys(app, wNotes, 'S');
+    await saveDone(wNotes, n0);
+    const found = await findText(readFileSync(comments), 'Neuer Text'), rot = await rotation(comments);
+    ok(!!found && rot === 90, 'Strg+S während der Texteingabe speichert, mitsamt Text' + (found && rot === 90 ? '' : ` (Text ${found}, Drehung ${rot}, ${JSON.stringify(await wNotes.evaluate(() => ({ dirty: S.dirty, editing: S.editing, ann: S.ann[0].map((a) => a.type + ':' + (a.text || '')) })))}, ${await toastText(wNotes)})`));
+  });
+  await step('Fokus in Bedienelementen', async () => {
+    await wNotes.evaluate(() => { setMode('comment'); pickTool('rect'); });
+    await wNotes.click('#wRange');
+    const bx = await wNotes.locator('.page').first().boundingBox();
+    await wNotes.mouse.move(bx.x + 100, bx.y + 300); await wNotes.mouse.down();
+    await wNotes.mouse.move(bx.x + 250, bx.y + 400, { steps: 4 }); await wNotes.mouse.up();
+    const n = await wNotes.evaluate(() => S.ann[0].length);
+    await keys(app, wNotes, 'Z');
+    await sleep(300);
+    ok(await wNotes.evaluate((n) => S.ann[0].length === n - 1 && document.activeElement?.id !== 'wRange', n), 'nach dem Zeichnen mit verstelltem Regler nimmt Strg+Z zurück');
+    await wNotes.evaluate(() => setMode('read'));
+    await rotate(wNotes);
+    await wNotes.focus('#zoomSel');
+    const h0 = await wNotes.evaluate(() => S.history.length);
+    await keys(app, wNotes, 'Z');
+    ok(!!(await until(() => wNotes.evaluate((h0) => S.history.length === h0 - 1, h0), 10000)), 'Strg+Z wirkt auch, wenn die Zoom-Auswahl den Fokus hat');
+  });
+  await step('Abmelden mit Änderungen', async () => {
+    await stubBox(app, [2]);
+    const prevented = await app.browserWindow(wNotes).then((h) => h.evaluate((win) => {
+      let stop = false;
+      win.emit('query-session-end', { preventDefault: () => { stop = true; }, reasons: ['logoff'] });
+      return stop;
+    }));
+    await until(async () => (await boxes(app)).length, 10000);
+    ok(prevented && (await boxes(app)).length === 1 && !run.exited(), 'Windows-Abmelden mit ungespeicherten Änderungen wird aufgehalten und fragt nach');
+  });
+  await step('Beenden, Änderung während der Rückfrage', async () => {
+    // wOwner (unverändert) steht vor wNotes (geändert); während der Rückfrage für wNotes wird wOwner geändert
+    const gone = wNotes.waitForEvent('close', { timeout: 20000 });
+    await stubBox(app, [1, 2], 1500);
+    await app.evaluate(({ app }) => { app.quit(); });
+    await sleep(400);
+    await rotate(wOwner);
+    await gone;
+    await until(async () => (await boxes(app)).length === 2, 10000);
+    await sleep(300);
+    const b = await boxes(app);
+    ok(b.length === 2 && b[1].includes('eigentuemer (entsperrt).pdf') && !wOwner.isClosed() && !run.exited(), 'Beenden fragt auch für ein Fenster nach, das während der Rückfrage geändert wurde');
+  });
+  await step('Doppelklick während des Ladens', async () => {
+    const big = await makePdf('gross.pdf', 1500);
+    const n = await winCount(app);
+    const ev = app.waitForEvent('window', { timeout: 20000 });
+    const emit = () => app.evaluate(({ app }, f) => { app.emit('open-file', { preventDefault() {} }, f); }, big);
+    await emit();
+    const w = await ev;
+    await w.waitForFunction(() => document.querySelector('#statusMsg')?.textContent.startsWith('Öffne'), null, { timeout: 20000 }).catch(() => {});
+    await emit();
+    await ready(w);
+    await sleep(800);
+    ok((await winCount(app)) === n + 1 && (await doc(w)).path === big, 'zweiter Doppelklick während des Ladens öffnet kein zweites Fenster');
+  });
+  await step('Umbenannte Datei', async () => {
+    const f = await makePdf('umbenennen.pdf');
+    const w = await openNew(f);
+    renameSync(f, f.replace('umbenennen.pdf', 'umbenannt.pdf'));
+    await rotate(w);
+    await stubSave(app, null);
+    const st0 = await stats(app);
+    await keys(app, w, 'S');
+    await until(async () => (await stats(app)).saveDialog > st0.saveDialog, 20000);
+    ok(!existsSync(f), 'Speichern legt eine umbenannte Datei nicht unter dem alten Namen neu an');
+  });
+  const tagged = await makePdf('etikett.pdf');
+  await step('Metadaten der Datei', async () => {
+    const w = await openNew(tagged);
+    if (!META?.set(tagged)) { ok(true, 'Metadaten: auf diesem Dateisystem nicht prüfbar, übersprungen'); return; }
+    await rotate(w);
+    await keys(app, w, 'S');
+    await w.waitForFunction(() => !S.dirty, null, { timeout: 20000 });
+    ok((await rotation(tagged)) === 90 && META.get(tagged).includes('Rot'), 'Speichern behält Finder-Tags, erweiterte Attribute bzw. den Mark of the Web');
+  });
+  await step('Ablegen einer schon offenen Datei', async () => {
+    const target = tagged;
+    if (!wUser) throw new Error('Vorbedingung fehlt');
+    await wUser.evaluate(() => { const i = document.createElement('input'); i.type = 'file'; i.id = 'testDrop'; i.hidden = true; document.body.append(i); });
+    await wUser.setInputFiles('#testDrop', target);
+    const n = await winCount(app);
+    await wUser.evaluate(() => {
+      const dt = new DataTransfer();
+      dt.items.add(document.querySelector('#testDrop').files[0]);
+      document.querySelector('#desk').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    });
+    await sleep(1000);
+    ok((await doc(wUser)).name === 'passwort (entsperrt).pdf' && (await winCount(app)) === n, 'abgelegte PDF, die schon in einem anderen Fenster offen ist, wird nicht doppelt geöffnet');
+    // Speichern unter auf eine Datei, die ein anderes Fenster offen hat
+    const before = readFileSync(target);
+    await stubSave(app, target);
+    await wUser.evaluate(() => saveAs());
+    ok(readFileSync(target).equals(before) && (await toastText(wUser)).includes('anderen PDFwerk-Fenster'), 'Speichern unter lehnt eine in einem anderen Fenster geöffnete Datei ab');
+  });
+  await step('Fehler', async () => { ok(!errors.length, 'keine Konsolenfehler' + (errors.length ? ': ' + errors.join(' | ') : '')); });
+  await finish(run);
+}
+
+/* ---------- 5. Nur gepacktes Programm: keine Fernsteuerung von außen ---------- */
+if (exe) {
+  await step('Fernsteuerung', async () => {
+    const env = { ...process.env };
+    delete env.PDFWERK_TEST;
+    const child = spawn(exe, [...sandboxArgs, '--remote-debugging-port=0'], { cwd: out, env, stdio: 'ignore' });
+    const code = await new Promise((r) => { child.once('exit', r); setTimeout(() => { child.kill(); r('läuft noch'); }, 20000); });
+    ok(code === 1, 'Paket beendet sich bei --remote-debugging-port ohne Inspector sofort (Code ' + code + ')');
+  });
 }
 
 console.log(fails ? `${fails} Prüfung(en) fehlgeschlagen, Testdateien in ${out}` : 'Alle Prüfungen bestanden');

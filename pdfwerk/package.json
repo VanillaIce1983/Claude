@@ -13,10 +13,11 @@
     "test": "node scripts/smoke.mjs",
     "desktop": "node scripts/build.mjs && electron .",
     "test:desktop": "node scripts/smoke-desktop.mjs",
-    "dist": "node scripts/build.mjs && electron-builder --publish never",
-    "dist:win": "node scripts/build.mjs && electron-builder --win --x64 --arm64 --publish never",
-    "dist:mac": "node scripts/build.mjs && electron-builder --mac --x64 --arm64 --publish never",
-    "dist:linux": "node scripts/build.mjs && electron-builder --linux --x64 --publish never"
+    "dist": "node scripts/build.mjs && electron-builder --config scripts/release-config.cjs --publish never",
+    "dist:win": "node scripts/build.mjs && electron-builder --config scripts/release-config.cjs --win --x64 --arm64 --publish never",
+    "dist:mac": "node scripts/build.mjs && electron-builder --config scripts/release-config.cjs --mac --x64 --arm64 --publish never",
+    "dist:linux": "node scripts/build.mjs && electron-builder --config scripts/release-config.cjs --linux --x64 --publish never",
+    "check:release": "node scripts/check-release.mjs"
   },
   "devDependencies": {
     "@fontsource/caveat": "5.3.0",
@@ -44,10 +45,10 @@
       "onlyLoadAppFromAsar": true,
       "grantFileProtocolExtraPrivileges": false
     },
-    "fileAssociations": [
-      { "ext": "pdf", "name": "PDF-Dokument", "description": "PDF-Dokument", "mimeType": "application/pdf", "role": "Editor" }
-    ],
     "win": {
+      "fileAssociations": [
+        { "ext": "pdf", "name": "PDFwerk.Dokument", "description": "PDF-Dokument", "mimeType": "application/pdf", "role": "Editor" }
+      ],
       "target": [
         { "target": "nsis", "arch": ["x64", "arm64"] },
         { "target": "zip", "arch": ["x64", "arm64"] }
@@ -67,9 +68,14 @@
       "installerLanguages": ["de_DE"],
       "multiLanguageInstaller": false,
       "buildUniversalInstaller": false,
+      "include": "scripts/installer.nsh",
       "artifactName": "PDFwerk-Setup-${version}-${arch}.${ext}"
     },
     "mac": {
+      "fileAssociations": [
+        { "ext": "pdf", "name": "PDF-Dokument", "description": "PDF-Dokument", "role": "Editor" },
+        { "ext": ["png", "jpg", "jpeg", "webp", "gif"], "name": "Bild", "description": "Bild", "role": "Viewer", "rank": "Alternate" }
+      ],
       "target": [
         { "target": "dmg", "arch": ["x64", "arm64"] },
         { "target": "zip", "arch": ["x64", "arm64"] }
@@ -78,7 +84,7 @@
       "icon": "build/icon.png",
       "darkModeSupport": true,
       "identity": "-",
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "notarize": false,
       "artifactName": "PDFwerk-${version}-mac-${arch}.${ext}"
@@ -87,6 +93,9 @@
       "artifactName": "PDFwerk-${version}-${arch}.${ext}"
     },
     "linux": {
+      "fileAssociations": [
+        { "ext": "pdf", "name": "PDF-Dokument", "description": "PDF-Dokument", "mimeType": "application/pdf" }
+      ],
       "target": ["AppImage"],
       "category": "Office",
       "icon": "build/icon.png",

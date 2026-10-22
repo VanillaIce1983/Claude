@@ -993,7 +993,8 @@ function renderSide() {
         if (!e.isIntersecting || e.target.dataset.done) continue;
         e.target.dataset.done = 1;
         const i = +e.target.dataset.i, ver = S.version;
-        getThumb(i, 130).then((c) => { if (ver === S.version) e.target.querySelector('.ph').replaceWith(copyCanvas(c)); });
+        // .catch: wird inzwischen ein anderes Dokument geöffnet, bricht pdf.js das Zeichnen ab
+        getThumb(i, 130).then((c) => { if (ver === S.version) e.target.querySelector('.ph').replaceWith(copyCanvas(c)); }).catch(() => {});
       }
     }, { root: body, rootMargin: '300px' });
     S.pages.forEach((p, i) => {
@@ -1885,7 +1886,7 @@ function renderOrganizer() {
     });
     grid.append(tile);
     const ver = S.version;
-    getThumb(i, 150).then((c) => { if (ver === S.version) ph.replaceWith(copyCanvas(c)); });
+    getThumb(i, 150).then((c) => { if (ver === S.version) ph.replaceWith(copyCanvas(c)); }).catch(() => {});
   });
   const endZone = h('div', { class: 'otile', style: 'justify-content:center;min-height:160px;border:2px dashed var(--line);cursor:pointer;background:transparent', onclick: () => pickInsertFiles(S.pages.length) },
     h('div', { html: svg('plus', 'style="width:28px;height:28px;color:var(--muted)"') }), h('span', { style: 'font-size:12.5px;color:var(--muted);text-align:center' }, 'PDF oder Bilder anhängen'));
@@ -2092,13 +2093,15 @@ async function buildOutput({ ann = true, progress, src = S } = {}) {
     }
     if (src.ann[i]?.some((a) => a.type === 'redact')) redactPages.push(i);
   }
+  // Schwärzungen auch über Anmerkungen und Formularfeldern, die pdf.js über den Seiteninhalt zeichnet
+  const cover = Object.fromEntries(redactPages.map((i) => [i, src.ann[i].filter((a) => a.type === 'redact').map(annBox)]));
   // Notizen bleiben echte PDF-Anmerkungen; auf geschwärzten Seiten erst nach dem Neuaufbau
   const used = new Set();
   const notes = (d, keep) => d.getPages().forEach((pg, i) => { if (keep(i)) (src.ann[i] || []).filter((a) => a.type === 'note').forEach((a) => writeNote(d, pg, a, used)); });
   notes(doc, (i) => !redactPages.includes(i));
   let bytes = await doc.save();
   if (redactPages.length) {
-    bytes = await rasterizePages(bytes, redactPages, { dpi: 200, progress });
+    bytes = await rasterizePages(bytes, redactPages, { dpi: 200, progress, cover });
     if (redactPages.some((i) => src.ann[i].some((a) => a.type === 'note'))) {
       const d2 = await PDFDocument.load(bytes, { updateMetadata: false });
       notes(d2, (i) => redactPages.includes(i));
@@ -2112,7 +2115,8 @@ async function buildOutput({ ann = true, progress, src = S } = {}) {
 // alles gelöscht, was nicht mehr erreichbar ist. Sonst stünde der geschwärzte Text weiter als verwaistes Objekt in der Datei.
 const PAGE_CONTENT_KEYS = ['Contents', 'Resources', 'Annots', 'StructParents', 'Group', 'Thumb', 'PieceInfo', 'Metadata', 'AA', 'B', 'ID', 'PZ',
   'SeparationInfo', 'Tabs', 'TemplateInstantiated', 'PresSteps', 'UserUnit', 'VP', 'BleedBox', 'TrimBox', 'ArtBox', 'BoxColorInfo', 'Trans', 'Dur', 'AF', 'DPart', 'OutputIntents'];
-async function rasterizePages(bytes, idx, { dpi = 150, quality = 0.85, gray = false, progress } = {}) {
+// cover: je Seite Rechtecke (PDF-Koordinaten), die nach dem Zeichnen schwarz gefüllt werden
+async function rasterizePages(bytes, idx, { dpi = 150, quality = 0.85, gray = false, progress, cover = {} } = {}) {
   const pjs = await loadPdfJs(bytes);
   const doc = await PDFDocument.load(bytes, { updateMetadata: false });
   const ctx = doc.context, gone = new Set();
@@ -2121,6 +2125,12 @@ async function rasterizePages(bytes, idx, { dpi = 150, quality = 0.85, gray = fa
     const page = await pjs.getPage(i + 1);
     const vp1 = page.getViewport({ scale: 1 });
     const c = await renderToCanvas(page, dpi / 72, { gray });
+    const cx = c.getContext('2d'), vp = page.getViewport({ scale: dpi / 72 });
+    cx.fillStyle = '#000';
+    for (const r of cover[i] || []) {
+      const [x1, y1, x2, y2] = vp.convertToViewportRectangle(r);
+      cx.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+    }
     const jpg = await doc.embedJpg(await canvasBytes(c, 'image/jpeg', quality));
     const pg = doc.getPage(i), node = pg.node;
     try { for (const r of node.lookup(PDFName.of('Annots'))?.asArray?.() || []) gone.add(r); } catch { /* keine Anmerkungen */ }
