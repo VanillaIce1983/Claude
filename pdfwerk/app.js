@@ -3,7 +3,10 @@
 'use strict';
 
 const { PDFDocument, rgb, degrees, StandardFonts, BlendMode, PDFName, PDFString, PDFHexString, PDFArray } = PDFLib;
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// Die Desktop-Fassung bringt den Worker als eigene Datei mit, im Browser kommt er vom CDN oder ist eingebettet
+pdfjsLib.GlobalWorkerOptions.workerSrc = window.PDFWERK_WORKER_SRC || 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// Schnittstelle zur Desktop-Hülle (Electron, siehe desktop/host-api.d.ts); im Browser null
+const HOST = window.pdfwerkHost || null;
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -77,6 +80,8 @@ const svg = (name, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="
 const S = {
   bytes: null,          // Uint8Array – aktueller Dokumentstand (ohne eingebrannte Anmerkungen)
   name: 'Dokument.pdf',
+  path: null,           // Speicherort auf der Festplatte (nur Desktop)
+  pristine: false,      // Beispieldokument, noch unberührt: Desktop darf es durch eine geöffnete Datei ersetzen
   pdf: null,            // pdf.js-Dokument
   pages: [],            // {w,h,rot} in pt bei Maßstab 1 inkl. Seitendrehung
   ann: [],              // Anmerkungen je Seite (PDF-Benutzerkoordinaten)
@@ -142,7 +147,7 @@ async function loadPdfJs(bytes, password) {
   return task.promise;
 }
 
-async function openBytes(bytes, name, { keepAnn = false, keepPos = false, fresh = true } = {}) {
+async function openBytes(bytes, name, { keepAnn = false, keepPos = false, fresh = true, path } = {}) {
   let pdf;
   try { pdf = await loadPdfJs(bytes); }
   catch (e) {
@@ -183,12 +188,11 @@ async function openBytes(bytes, name, { keepAnn = false, keepPos = false, fresh 
   S.search.hits = []; S.search.idx = -1;
   S.selected = null;
   thumbCache.clear();
-  if (fresh) { S.history = []; S.future = []; S.dirty = false; S.orgSel.clear(); }
+  if (fresh) { S.history = []; S.future = []; S.dirty = false; S.pristine = false; S.orgSel.clear(); S.path = path ?? null; }
   if (!keepPos) S.cur = 0;
   S.cur = clamp(S.cur, 0, S.pages.length - 1);
   oldPdf?.destroy();
-  $('#docName').textContent = S.name;
-  $('#docName').title = S.name;
+  syncDoc();
   $('#statusSize').textContent = fmtBytes(bytes.length);
   buildViewer(keepPos);
   renderSide();
@@ -265,13 +269,28 @@ async function renderToCanvas(page, scale, { gray = false, annots = true } = {})
 const canvasBlob = (c, type = 'image/png', q) => new Promise((r) => c.toBlob(r, type, q));
 async function canvasBytes(c, type, q) { return new Uint8Array(await (await canvasBlob(c, type, q)).arrayBuffer()); }
 
+/* ---------- Dokumentzustand ---------- */
+function setDirty(v) {
+  S.dirty = v;
+  if (v) S.pristine = false;
+  syncDoc();
+}
+function syncDoc() {
+  $('#docName').textContent = S.name;
+  $('#docName').title = S.path || S.name;
+  if (HOST) {
+    document.title = `${S.name}${S.dirty ? ' (geändert)' : ''} – PDFwerk`;
+    HOST.setDocument({ name: S.name, path: S.path, dirty: S.dirty, pristine: S.pristine && !S.dirty });
+  }
+}
+
 /* ---------- Verlauf ---------- */
 function cloneAnn(a = S.ann) { return JSON.parse(JSON.stringify(a)); }
 function snapshot() {
   S.history.push({ bytes: S.bytes, ann: cloneAnn(), name: S.name });
   if (S.history.length > 40) S.history.shift();
   S.future = [];
-  S.dirty = true;
+  setDirty(true);
   updateUndoButtons();
 }
 async function restore(st, pushTo) {
@@ -280,7 +299,7 @@ async function restore(st, pushTo) {
   S.ann = st.ann; S.name = st.name; S.selected = null;
   if (sameBytes) { redrawAllOverlays(); renderSide(); }
   else await openBytes(st.bytes, st.name, { keepAnn: true, keepPos: true, fresh: false });
-  S.dirty = true;
+  setDirty(true);
   updateUndoButtons();
 }
 async function undo() { if (S.history.length) await restore(S.history.pop(), S.future); }
@@ -1548,6 +1567,15 @@ async function rasterizePages(bytes, idx, { dpi = 150, quality = 0.85, gray = fa
 
 /* ---------- Dateien anbieten ---------- */
 async function offerFile(filename, data) {
+  if (HOST) {
+    const bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : data;
+    try {
+      const res = await HOST.saveDialog({ defaultName: filename, data: bytes });
+      if (!res) { toast('Speichern abgebrochen'); return null; }
+      toast(`„${res.name}“ gespeichert`);
+      return res;
+    } catch (e) { toast('Speichern fehlgeschlagen: ' + (e?.message || e)); return null; }
+  }
   const blob = data instanceof Blob ? data : new Blob([data], { type: filename.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream' });
   if (S.downloads) {
     try { await S.downloads.save({ filename, data: blob }); toast(`„${filename}“ gespeichert`); return true; }
@@ -1565,16 +1593,34 @@ async function offerFile(filename, data) {
   toast(`„${filename}“ wird heruntergeladen`);
   return true;
 }
-async function save() {
+// Speichert das Dokument. Desktop: in die geöffnete Datei, sonst mit Dialog. Ergibt true bei Erfolg.
+async function save({ as = false } = {}) {
   commitEdit();
+  if (!S.pdf) return false;
   busy('Speichere …');
   try {
     const bytes = await buildOutput();
-    const ok = await offerFile(S.name.replace(/\.pdf$/i, '') + '.pdf', bytes);
-    if (ok) S.dirty = false;
-  } catch (e) { console.error(e); toast('Speichern fehlgeschlagen: ' + e.message); }
-  idle();
+    if (HOST && S.path && /\.pdf$/i.test(S.path) && !as) {
+      try {
+        const res = await HOST.saveFile(S.path, bytes);
+        S.name = res.name; S.path = res.path;
+        setDirty(false);
+        toast(`„${res.name}“ gespeichert`);
+        return true;
+      } catch (e) {
+        // z. B. schreibgeschützt oder in einem anderen Programm geöffnet: Speicherort neu wählen lassen
+        toast((e?.message || 'Speichern fehlgeschlagen') + ' Bitte einen anderen Ort wählen.', 5000);
+      }
+    }
+    const res = await offerFile(baseName(S.name) + '.pdf', bytes);
+    if (!res) return false;
+    if (HOST) { S.name = res.name; S.path = res.path; }
+    setDirty(false);
+    return true;
+  } catch (e) { console.error(e); toast('Speichern fehlgeschlagen: ' + e.message); return false; }
+  finally { idle(); }
 }
+const saveAs = () => save({ as: true });
 async function exportPages(idx, name) {
   const bytes = await buildOutput();
   const src = await PDFDocument.load(bytes);
@@ -1611,9 +1657,25 @@ async function zipAndOffer(files, zipName) {
 /* ---------- Drucken (nur außerhalb eingebetteter Ansichten) ---------- */
 async function printDoc() {
   if (window.self !== window.top) { toast('Drucken geht hier nicht. Datei speichern und im PDF-Programm drucken.'); return; }
+  commitEdit();
   busy('Bereite Druck vor …');
   const bytes = await buildOutput();
   const pjs = await loadPdfJs(bytes);
+  if (HOST) {
+    try {
+      const imgs = [];
+      for (let i = 1; i <= pjs.numPages; i++) {
+        const page = await pjs.getPage(i), vp = page.getViewport({ scale: 1 });
+        const c = await renderToCanvas(page, 200 / 72);
+        imgs.push(`<section style="width:${(vp.width / 72).toFixed(3)}in;height:${(vp.height / 72).toFixed(3)}in"><img src="${c.toDataURL('image/jpeg', 0.92)}" alt=""></section>`);
+      }
+      await pjs.destroy();
+      idle('Druckdialog geöffnet');
+      await HOST.print('<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0}html,body{margin:0}section{page-break-after:always;break-after:page;overflow:hidden}section:last-child{page-break-after:auto;break-after:auto}img{display:block;width:100%;height:100%;object-fit:contain}</style></head><body>' + imgs.join('') + '</body></html>');
+    } catch (e) { console.error(e); toast('Drucken fehlgeschlagen: ' + (e?.message || e)); }
+    idle();
+    return;
+  }
   const frame = h('iframe', { style: 'position:fixed;width:0;height:0;border:0;right:0;bottom:0' });
   document.body.append(frame);
   const d = frame.contentDocument;
@@ -1714,7 +1776,7 @@ async function replaceDoc(bytes, name) {
   snapshot();
   const keepHist = S.history;
   await openBytes(bytes, name, { fresh: false });
-  S.history = keepHist; S.dirty = true; updateUndoButtons();
+  S.history = keepHist; setDirty(true); updateUndoButtons();
 }
 
 async function splitTool() {
@@ -2175,24 +2237,32 @@ function setMode(m) {
 }
 
 /* ---------- Dateien öffnen ---------- */
-async function openFiles(files) {
+// files: File-Objekte; paths: zugehörige Speicherorte (Desktop), sonst leer
+async function openFiles(files, paths = []) {
   files = [...files];
   if (!files.length) return;
   if (S.dirty && S.pdf && !(await confirmDiscard())) return;
   busy('Öffne …');
   try {
     if (files.length === 1 && isPdf(files[0], new Uint8Array(await files[0].slice(0, 5).arrayBuffer()))) {
-      await openBytes(new Uint8Array(await files[0].arrayBuffer()), files[0].name);
+      await openBytes(new Uint8Array(await files[0].arrayBuffer()), files[0].name, { path: paths[0] || null });
     } else {
       // mehrere Dateien oder Bilder: zu einem Dokument zusammenfassen
       const out = await PDFDocument.create();
       for (const f of files) { const d = await fileToDoc(f, { size: 'a4auto', margin: 0 }); if (d) (await out.copyPages(d, d.getPageIndices())).forEach((p) => out.addPage(p)); }
       if (!out.getPageCount()) return;
       await openBytes(await out.save(), files.length === 1 ? baseName(files[0].name.replace(/\.\w+$/, '')) + '.pdf' : 'Zusammengefügt.pdf');
-      S.dirty = true;
+      setDirty(true);
     }
     if (S.mode === 'tools') setMode('read');
   } finally { idle(); }
+}
+// Dateien, die die Desktop-Hülle schickt (Doppelklick, Öffnen-Dialog, zuletzt geöffnet)
+async function openHostFiles(list) {
+  if (!list?.length) return;
+  const MIME = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
+  const files = list.map((f) => new File([f.data], f.name, { type: MIME[(f.name.split('.').pop() || '').toLowerCase()] || '' }));
+  await openFiles(files, list.map((f) => f.path));
 }
 function confirmDiscard() {
   return dialog({ title: 'Ungespeicherte Änderungen', ok: 'Verwerfen und öffnen', body: h('p', { style: 'margin:0' }, `Die Änderungen an „${S.name}“ sind noch nicht gespeichert.`) });
@@ -2272,11 +2342,11 @@ async function sampleDoc() {
 
 /* ---------- Ereignisse ---------- */
 function bind() {
-  $('#btnOpen').onclick = () => { $('#fileInput').value = ''; $('#fileInput').click(); };
+  $('#btnOpen').onclick = openDialog;
   $('#fileInput').onchange = (e) => openFiles(e.target.files);
   $('#fileInput2').onchange = (e) => { if (e.target.files.length) insertFiles([...e.target.files], insertAt ?? S.pages.length); };
   $('#imgInput').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) placeImageFile(f); };
-  $('#btnSave').onclick = save;
+  $('#btnSave').onclick = () => save();
   $('#btnPrint').onclick = printDoc;
   if (window.self !== window.top) $('#btnPrint').hidden = true;
   $('#btnUndo').onclick = undo;
@@ -2328,18 +2398,24 @@ function bind() {
   desk.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
   desk.addEventListener('drop', (e) => {
     dragDepth = 0; $('#drop').classList.remove('show');
-    if (!e.dataTransfer.files.length || S.mode === 'pages') return;
+    if (!e.dataTransfer.files.length) return;
     e.preventDefault();
-    openFiles(e.dataTransfer.files);
+    const files = [...e.dataTransfer.files];
+    if (S.mode === 'pages') { insertFiles(files, S.pages.length); return; }
+    openFiles(files, files.map((f) => HOST?.adoptDroppedFile(f) || null));
   });
+  // Abgelegte Dateien dürfen nie die Seite ersetzen (Browser und Desktop würden sonst die PDF anzeigen und die Arbeit verwerfen)
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => e.preventDefault());
 
   // Tastatur
   let spaceDown = false;
   document.addEventListener('keydown', (e) => {
     const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.querySelector('.backdrop');
     const mod = e.ctrlKey || e.metaKey;
-    if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); return; }
-    if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); $('#btnOpen').click(); return; }
+    if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); e.shiftKey ? saveAs() : save(); return; }
+    if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); openDialog(); return; }
+    if (mod && !e.shiftKey && !e.altKey && ['1', '2', '3', '4'].includes(e.key)) { e.preventDefault(); setMode(['read', 'comment', 'pages', 'tools'][+e.key - 1]); return; }
     if (mod && e.key.toLowerCase() === 'p') { e.preventDefault(); printDoc(); return; }
     if (mod && e.key.toLowerCase() === 'f') { e.preventDefault(); toggleSearch(true); return; }
     if (typing) return;
@@ -2382,8 +2458,47 @@ function bind() {
   document.addEventListener('keyup', (e) => { if (e.key === ' ' && spaceDown) { spaceDown = false; $('#viewer').classList.toggle('hand', S.tool === 'hand'); } });
   document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) endPresentation(); });
   window.addEventListener('resize', () => { clearTimeout(bind.rt); bind.rt = setTimeout(() => { if (typeof S.zoom === 'string' && S.pdf) rezoom(S.zoom); }, 150); });
-  window.addEventListener('beforeunload', (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
+  // Im Desktop fragt die Hülle beim Schließen nach; ein beforeunload-Block würde dort das Fenster stumm offen halten
+  if (!HOST) window.addEventListener('beforeunload', (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
+  if (HOST) {
+    HOST.onOpenFiles((files) => openHostFiles(files));
+    HOST.onCommand((cmd) => runCommand(cmd));
+    document.documentElement.dataset.platform = HOST.platform;
+  }
   if (window.innerWidth < 760) $('#side').classList.add('closed');
+}
+function openDialog() {
+  if (HOST) { HOST.openDialog(); return; }
+  $('#fileInput').value = ''; $('#fileInput').click();
+}
+// Befehle aus dem Menü der Desktop-Hülle
+const isTyping = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
+async function runCommand(cmd) {
+  const modal = document.querySelector('.backdrop');
+  switch (cmd) {
+    case 'open': if (!modal) openDialog(); break;
+    case 'save': if (!modal) await save(); break;
+    case 'saveAs': if (!modal) await saveAs(); break;
+    case 'saveAndClose': {
+      modal?.remove();
+      if (await save()) HOST?.close();
+      break;
+    }
+    case 'print': if (!modal) printDoc(); break;
+    case 'undo': if (isTyping()) document.execCommand('undo'); else if (!modal) await undo(); break;
+    case 'redo': if (isTyping()) document.execCommand('redo'); else if (!modal) await redo(); break;
+    case 'find': toggleSearch(true); break;
+    case 'zoomIn': zoomStep(1); break;
+    case 'zoomOut': zoomStep(-1); break;
+    case 'zoomWidth': rezoom('fitw'); break;
+    case 'zoomPage': rezoom('fitp'); break;
+    case 'zoomActual': rezoom(1); break;
+    case 'toggleSidebar': $('#btnSide').click(); break;
+    case 'properties': if (!modal) metaTool(); break;
+    case 'shortcuts': if (!modal) moreMenu(); break;
+    default:
+      if (cmd?.startsWith('mode:')) setMode(cmd.slice(5));
+  }
 }
 function toggleSearch(force) {
   const bar = $('#searchBar');
@@ -2416,7 +2531,11 @@ function moreMenu() {
   bind();
   renderCtx();
   window.claude?.use?.('downloads').then((d) => { S.downloads = d; }).catch(() => {});
+  // Desktop: per Doppelklick oder Kommandozeile übergebene Dateien statt des Beispiels öffnen
+  const initial = HOST ? await HOST.ready().catch(() => []) : [];
+  if (initial.length) { await openHostFiles(initial); if (S.pdf) return; }
   busy('Lade Beispieldokument …');
   await openBytes(await sampleDoc(), 'Willkommen.pdf');
+  S.pristine = true; syncDoc();
   idle('Beispieldokument geladen. Eigene Datei mit „Öffnen“ oder per Ziehen laden.');
 })();

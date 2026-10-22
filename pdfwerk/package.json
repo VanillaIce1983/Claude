@@ -1,16 +1,41 @@
 {
   "name": "pdfwerk",
+  "productName": "PDFwerk",
   "version": "1.0.0",
   "private": true,
-  "description": "PDF-Viewer und -Editor im Browser",
-  "type": "module",
+  "description": "PDF-Viewer und -Editor",
+  "author": "PDFwerk",
+  "license": "UNLICENSED",
+  "main": "desktop/main.js",
+  "type": "commonjs",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node scripts/smoke.mjs"
+    "test": "node scripts/smoke.mjs",
+    "desktop": "node scripts/build.mjs && electron .",
+    "test:desktop": "node scripts/smoke-desktop.mjs",
+    "dist": "node scripts/build.mjs && electron-builder --publish never",
+    "dist:win": "node scripts/build.mjs && electron-builder --win --x64 --arm64 --publish never",
+    "dist:mac": "node scripts/build.mjs && electron-builder --mac --x64 --arm64 --publish never",
+    "dist:linux": "node scripts/build.mjs && electron-builder --linux --x64 --publish never"
   },
-  "dependencies": {
+  "devDependencies": {
+    "@fontsource/caveat": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/ibm-plex-sans": "5.3.0",
+    "electron": "44.6.0",
+    "electron-builder": "26.15.3",
     "jszip": "3.10.1",
     "pdf-lib": "1.17.1",
-    "pdfjs-dist": "3.11.174"
+    "pdfjs-dist": "3.11.174",
+    "playwright-core": "1.63.0"
+  },
+  "build": {
+    "appId": "app.pdfwerk.desktop",
+    "productName": "PDFwerk",
+    "directories": { "output": "release", "buildResources": "build" },
+    "files": ["desktop/**/*", "!desktop/*.d.ts", "dist/desktop/**/*", "package.json"],
+    "fileAssociations": [
+      { "ext": "pdf", "name": "PDF-Dokument", "description": "PDF-Dokument", "mimeType": "application/pdf", "role": "Editor" }
+    ]
   }
 }
