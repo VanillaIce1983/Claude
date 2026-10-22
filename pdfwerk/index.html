@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>PDFwerk</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Caveat:wght@500&display=swap">
+<style>
+/* Layout: Arbeitsfläche wie ein Leuchttisch – Werkzeugleisten oben, Seitenleiste links, Seiten mittig auf dunklerem Grund */
+:root{
+  --bg:#eef0f4; --desk:#dfe2e9; --panel:#ffffff; --line:#cfd4de; --line-soft:#e4e7ee;
+  --fg:#1b2130; --muted:#5d6577; --accent:#2c49b8; --accent-soft:#e3e8fa; --accent-fg:#ffffff;
+  --danger:#b8322c; --ok:#2b7a4b; --shadow:0 1px 2px rgba(20,28,50,.12),0 4px 14px rgba(20,28,50,.08);
+  --f-ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --f-hand:"Caveat","Segoe Script","Bradley Hand",cursive;
+  --r:6px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#151922; --desk:#0e1117; --panel:#1c212c; --line:#2f3646; --line-soft:#262c39;
+  --fg:#e5e8ef; --muted:#98a0b3; --accent:#7f97ff; --accent-soft:#25305a; --accent-fg:#0e1117;
+  --danger:#ff7a70; --ok:#5fcf8d; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#151922; --desk:#0e1117; --panel:#1c212c; --line:#2f3646; --line-soft:#262c39;
+  --fg:#e5e8ef; --muted:#98a0b3; --accent:#7f97ff; --accent-soft:#25305a; --accent-fg:#0e1117;
+  --danger:#ff7a70; --ok:#5fcf8d; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35); color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--f-ui);overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.app{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}
+
+/* Kopfleiste */
+.top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--panel);border-bottom:1px solid var(--line);
+  padding-block:6px;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px))}
+.brand{font-weight:600;letter-spacing:.01em;display:flex;align-items:center;gap:8px;margin-right:4px}
+.brand svg{width:22px;height:22px}
+.docname{font-family:var(--f-mono);font-size:12.5px;color:var(--muted);max-width:26ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grp{display:flex;align-items:center;gap:2px}
+.sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+.spacer{flex:1}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid transparent;border-radius:var(--r);background:transparent;white-space:nowrap}
+.btn:hover{background:var(--line-soft)}
+.btn[disabled]{opacity:.4;pointer-events:none}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.outline{border-color:var(--line);background:var(--panel)}
+.btn.icon{width:32px;padding:0;justify-content:center}
+.btn.on{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
+.btn svg{width:18px;height:18px;flex:none}
+.tabs{display:flex;gap:2px;background:var(--line-soft);padding:3px;border-radius:8px}
+.tabs button{border:0;background:transparent;padding:4px 12px;border-radius:6px;height:28px}
+.tabs button.on{background:var(--panel);box-shadow:var(--shadow);font-weight:500}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.pageinput{width:46px;height:28px;text-align:center;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
+.zoomsel{height:30px;border:1px solid var(--line);border-radius:5px;background:var(--panel);padding:0 4px}
+
+/* Kontextleiste */
+.ctx{display:flex;align-items:center;gap:4px;flex-wrap:wrap;background:var(--panel);border-bottom:1px solid var(--line);min-height:44px;
+  padding-block:5px;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px))}
+.ctx .lbl{font-size:12px;color:var(--muted);margin:0 4px 0 6px}
+.swatches{display:flex;gap:3px}
+.sw{width:20px;height:20px;border-radius:50%;border:2px solid var(--panel);box-shadow:0 0 0 1px var(--line);cursor:pointer;padding:0}
+.sw.on{box-shadow:0 0 0 2px var(--accent)}
+.ctx input[type=range]{width:80px}
+.hint{font-size:12.5px;color:var(--muted);margin-left:8px}
+
+/* Hauptbereich */
+.main{display:grid;grid-template-columns:auto 1fr;min-height:0}
+.side{width:232px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.side.closed{display:none}
+.side .tabs{margin:8px;justify-content:stretch}
+.side .tabs button{flex:1;padding:4px 4px;font-size:12px}
+.sidebody{flex:1;overflow:auto;padding:4px 10px 16px}
+.thumb{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 6px;border-radius:8px;cursor:pointer}
+.thumb:hover{background:var(--line-soft)}
+.thumb.cur{background:var(--accent-soft)}
+.thumb canvas{box-shadow:var(--shadow);background:#fff;max-width:100%}
+.thumb span{font-size:12px;color:var(--muted)}
+.outline-item{display:block;width:100%;text-align:left;border:0;background:none;padding:4px 6px;border-radius:5px;font-size:13px}
+.outline-item:hover{background:var(--line-soft)}
+.outline-children{padding-left:12px}
+.cmt{border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0;font-size:12.5px;cursor:pointer;background:var(--panel)}
+.cmt:hover{border-color:var(--accent)}
+.cmt b{display:flex;justify-content:space-between;font-weight:500}
+.cmt b span{color:var(--muted);font-weight:400}
+.cmt p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.empty{color:var(--muted);font-size:12.5px;padding:10px 4px}
+
+.desk{position:relative;min-width:0;min-height:0;background:var(--desk)}
+.viewer{position:absolute;inset:0;overflow:auto;outline:none}
+.pages{display:flex;flex-direction:column;align-items:center;gap:16px;padding:20px 16px 60px;min-width:min-content}
+.pages.spread{flex-direction:row;flex-wrap:wrap;justify-content:center;align-items:flex-start;max-width:100%}
+.page{position:relative;background:#fff;box-shadow:var(--shadow);flex:none}
+.page canvas.pdf{position:absolute;inset:0;width:100%;height:100%}
+.page canvas.ov{position:absolute;inset:0;width:100%;height:100%;z-index:3}
+.page .plabel{position:absolute;left:0;bottom:-18px;font-size:11px;color:var(--muted);font-family:var(--f-mono)}
+.night .page canvas.pdf{filter:invert(.92) hue-rotate(180deg)}
+.textLayer{position:absolute;text-align:initial;inset:0;overflow:hidden;opacity:.25;line-height:1;text-size-adjust:none;forced-color-adjust:none;transform-origin:0 0;z-index:2}
+.textLayer :is(span,br){color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0% 0%}
+.textLayer span.markedContent{top:0;height:0}
+.textLayer ::selection{background:rgba(44,73,184,.35)}
+.page.drawing .textLayer{pointer-events:none}
+.page.drawing canvas.ov{cursor:crosshair}
+.page.tool-select canvas.ov{cursor:default}
+.page canvas.ov{pointer-events:none}
+.page.drawing canvas.ov{pointer-events:auto}
+.linklayer a{position:absolute;z-index:4;display:block}
+.linklayer a:hover{background:rgba(44,73,184,.12);outline:1px solid rgba(44,73,184,.4)}
+.selpop{position:absolute;z-index:40;display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:3px}
+.selpop button{border:0;background:transparent;border-radius:5px;padding:5px 9px;font-size:12.5px}
+.selpop button:hover{background:var(--line-soft)}
+.viewer.hand{cursor:grab}
+.viewer.hand .textLayer{pointer-events:none}
+.viewer.hand.grabbing{cursor:grabbing}
+.inlineedit{position:absolute;z-index:6;border:1px dashed var(--accent);background:rgba(255,255,255,.92);color:#111;font-family:Helvetica,Arial,sans-serif;
+  padding:0;margin:0;resize:both;min-width:60px;min-height:1.4em;line-height:1.2;outline:none;overflow:hidden;white-space:pre}
+
+/* Organizer */
+.organizer{position:absolute;inset:0;overflow:auto;padding:16px max(16px,env(safe-area-inset-right,0px)) 80px max(16px,env(safe-area-inset-left,0px))}
+.orggrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:18px}
+.otile{position:relative;background:var(--panel);border:2px solid transparent;border-radius:10px;padding:10px 10px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:grab;user-select:none}
+.otile.sel{border-color:var(--accent);background:var(--accent-soft)}
+.otile.dragover{box-shadow:-5px 0 0 -1px var(--accent)}
+.otile canvas{box-shadow:var(--shadow);background:#fff;max-width:100%}
+.otile .meta{display:flex;justify-content:space-between;align-items:center;width:100%;font-size:12px;color:var(--muted)}
+.otile .acts{display:flex;gap:2px}
+.otile .acts button{width:26px;height:26px;border:0;border-radius:5px;background:transparent;display:grid;place-items:center}
+.otile .acts button:hover{background:var(--line-soft)}
+.otile .acts svg{width:15px;height:15px}
+.otile input[type=checkbox]{position:absolute;top:8px;left:8px;width:18px;height:18px;accent-color:var(--accent)}
+
+/* Werkzeuge */
+.toolbox{position:absolute;inset:0;overflow:auto;padding:22px max(16px,env(safe-area-inset-right,0px)) 80px max(16px,env(safe-area-inset-left,0px))}
+.toolbox h2{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:22px 0 10px}
+.toolbox h2:first-child{margin-top:0}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(290px,100%),1fr));gap:10px}
+.tcard{display:flex;gap:12px;align-items:flex-start;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.tcard:hover{border-color:var(--accent)}
+.tcard svg{width:26px;height:26px;flex:none;color:var(--accent)}
+.tcard b{display:block;font-weight:600}
+.tcard span{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
+
+/* Suche */
+.searchbar{position:absolute;top:10px;right:max(16px,env(safe-area-inset-right,0px));z-index:20;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);display:flex;align-items:center;gap:4px;padding:4px}
+.searchbar input{width:200px;height:30px;border:1px solid var(--line);border-radius:5px;padding:0 8px;background:var(--bg)}
+.searchbar .num{font-size:12px;color:var(--muted);min-width:54px;text-align:center}
+
+/* Statusleiste */
+.status{display:flex;gap:14px;align-items:center;font-size:12px;color:var(--muted);background:var(--panel);border-top:1px solid var(--line);
+  padding-block:4px;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));white-space:nowrap;overflow:hidden}
+.status .msg{overflow:hidden;text-overflow:ellipsis}
+
+/* Dialoge */
+.backdrop{position:fixed;inset:0;background:rgba(10,14,24,.45);z-index:100;display:grid;place-items:center;padding:16px}
+.dlg{background:var(--panel);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:min(560px,100%);max-height:calc(100% - 20px);display:flex;flex-direction:column}
+.dlg header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line)}
+.dlg header h3{margin:0;font-size:16px;font-weight:600}
+.dlg .body{padding:16px 18px;overflow:auto;display:flex;flex-direction:column;gap:12px}
+.dlg footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--line)}
+.field{display:flex;flex-direction:column;gap:4px}
+.field>span{font-size:12.5px;color:var(--muted)}
+.field input[type=text],.field input[type=number],.field input[type=password],.field select,.field textarea{height:34px;border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:0 8px}
+.field textarea{height:auto;min-height:70px;padding:6px 8px;resize:vertical}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+.row>.field{flex:1;min-width:120px}
+.check{display:flex;gap:8px;align-items:center}
+.check input{accent-color:var(--accent);width:16px;height:16px}
+.note{font-size:12.5px;color:var(--muted);background:var(--line-soft);border-radius:6px;padding:8px 10px}
+.radios{display:flex;gap:6px;flex-wrap:wrap}
+.radios label{border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+.radios input{display:none}
+.radios label:has(input:checked){border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.sigpad{border:1px dashed var(--line);border-radius:8px;background:#fff;touch-action:none;width:100%;height:170px;display:block}
+.sigtyped{font-family:var(--f-hand);font-size:44px;color:#14246b;background:#fff;border:1px dashed var(--line);border-radius:8px;padding:10px 14px;min-height:80px}
+.stamps{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.stamps button{border:1px solid var(--line);border-radius:8px;background:#fff;padding:8px;display:grid;place-items:center}
+.stamps button:hover{border-color:var(--accent)}
+.formlist{display:flex;flex-direction:column;gap:10px}
+.progress{height:6px;background:var(--line-soft);border-radius:3px;overflow:hidden}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+
+/* Startbildschirm Drop */
+.drop{position:absolute;inset:0;z-index:50;display:none;place-items:center;background:color-mix(in srgb,var(--accent) 18%,transparent);border:3px dashed var(--accent)}
+.drop.show{display:grid}
+.drop div{background:var(--panel);padding:18px 26px;border-radius:12px;box-shadow:var(--shadow);font-weight:500}
+.toast{position:fixed;left:50%;bottom:calc(40px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:8px;z-index:200;font-size:13.5px;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
+.present .top,.present .ctx,.present .side,.present .status{display:none}
+.present .desk{background:#000}
+
+@media (max-width:760px){
+  .side{position:absolute;z-index:30;top:0;bottom:0;left:0;box-shadow:var(--shadow)}
+  .main{grid-template-columns:1fr;position:relative}
+  .hide-sm{display:none!important}
+  .docname,.top>.sep{display:none}
+  .top{gap:4px}
+  .searchbar input{width:130px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 2.5h8l5 5v14H6z"/><path d="M14 2.5v5h5" /><path d="M9 13h6M9 16.5h6" stroke="var(--accent)"/></svg>
+      PDFwerk
+    </div>
+    <span class="docname" id="docName">–</span>
+    <div class="grp">
+      <button class="btn icon" id="btnSide" title="Seitenleiste ein/aus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+      <button class="btn" id="btnOpen" title="PDF oder Bilder öffnen (Strg+O)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h6l2 2h10v10H3z"/></svg><span class="hide-sm">Öffnen</span></button>
+      <button class="btn primary" id="btnSave" title="Speichern (Strg+S)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg><span class="hide-sm">Speichern</span></button>
+      <button class="btn icon" id="btnPrint" title="Drucken (Strg+P)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 8V3h10v5M7 17H4v-7h16v7h-3"/><path d="M7 14h10v7H7z"/></svg></button>
+    </div>
+    <div class="sep hide-sm"></div>
+    <div class="grp">
+      <button class="btn icon" id="btnUndo" title="Rückgängig (Strg+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+      <button class="btn icon" id="btnRedo" title="Wiederholen (Strg+Y)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+    </div>
+    <div class="spacer"></div>
+    <nav class="tabs" id="modeTabs">
+      <button data-mode="read" class="on">Lesen</button>
+      <button data-mode="comment">Bearbeiten</button>
+      <button data-mode="pages">Seiten</button>
+      <button data-mode="tools">Werkzeuge</button>
+    </nav>
+    <div class="spacer hide-sm"></div>
+    <div class="grp">
+      <button class="btn icon" id="btnPrev" title="Vorherige Seite"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 6-6 6 6 6"/></svg></button>
+      <input class="pageinput num" id="pageInput" value="1" aria-label="Seite">
+      <span class="num" id="pageCount" style="color:var(--muted);font-size:13px">/ 0</span>
+      <button class="btn icon" id="btnNext" title="Nächste Seite"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></button>
+    </div>
+    <div class="grp">
+      <button class="btn icon" id="btnZoomOut" title="Verkleinern (Strg −)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14"/></svg></button>
+      <select class="zoomsel num" id="zoomSel" aria-label="Zoom">
+        <option value="fitw">Breite</option><option value="fitp">Ganze Seite</option>
+        <option value="0.5">50 %</option><option value="0.75">75 %</option><option value="1">100 %</option><option value="1.25">125 %</option>
+        <option value="1.5">150 %</option><option value="2">200 %</option><option value="3">300 %</option><option value="custom" hidden>–</option>
+      </select>
+      <button class="btn icon" id="btnZoomIn" title="Vergrößern (Strg +)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5v14"/></svg></button>
+    </div>
+    <div class="grp">
+      <button class="btn icon" id="btnSearch" title="Suchen (Strg+F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg></button>
+      <button class="btn icon" id="btnMore" title="Ansicht"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+    </div>
+  </header>
+
+  <div class="ctx" id="ctxBar"></div>
+
+  <div class="main">
+    <aside class="side" id="side">
+      <div class="tabs" id="sideTabs">
+        <button data-side="thumbs" class="on">Seiten</button>
+        <button data-side="outline">Lesezeichen</button>
+        <button data-side="comments">Kommentare</button>
+      </div>
+      <div class="sidebody" id="sideBody"></div>
+    </aside>
+    <section class="desk" id="desk">
+      <div class="viewer" id="viewer" tabindex="0"><div class="pages" id="pages"></div></div>
+      <div class="organizer" id="organizer" hidden></div>
+      <div class="toolbox" id="toolbox" hidden></div>
+      <div class="searchbar" id="searchBar" hidden>
+        <input id="searchInput" type="text" placeholder="Im Dokument suchen" aria-label="Suchbegriff">
+        <span class="num" id="searchCount"></span>
+        <button class="btn icon" id="searchPrev" title="Vorheriger Treffer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 15 6-6 6 6"/></svg></button>
+        <button class="btn icon" id="searchNext" title="Nächster Treffer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6"/></svg></button>
+        <button class="btn icon" id="searchClose" title="Schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="drop" id="drop"><div>PDF oder Bilder hier ablegen</div></div>
+    </section>
+  </div>
+
+  <footer class="status">
+    <span class="msg" id="statusMsg">Bereit</span>
+    <span class="spacer"></span>
+    <span class="num" id="statusSize"></span>
+    <span class="num hide-sm" id="statusDim"></span>
+  </footer>
+</div>
+<input type="file" id="fileInput" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,.pdf" multiple hidden>
+<input type="file" id="fileInput2" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,.pdf" multiple hidden>
+<input type="file" id="imgInput" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

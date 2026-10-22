@@ -1,0 +1,16 @@
+{
+  "name": "pdfwerk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PDF-Viewer und -Editor im Browser",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "jszip": "3.10.1",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "3.11.174"
+  }
+}
