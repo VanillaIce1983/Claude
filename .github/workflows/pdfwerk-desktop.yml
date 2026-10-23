@@ -120,6 +120,7 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a npm run check:release -- "release/${{ matrix.exe }}"; else npm run check:release -- "release/${{ matrix.exe }}"; fi
 
       - name: Testpaket bauen
+        id: testpaket
         run: npx electron-builder --dir --publish never -c.directories.output=release-test
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ runner.os == 'macOS' && 'false' || '' }}
@@ -130,6 +131,17 @@ jobs:
         timeout-minutes: 15
         run: |
           if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a npm run test:desktop; else npm run test:desktop; fi
+        env:
+          PDFWERK_EXE: ${{ github.workspace }}/pdfwerk/release-test/${{ matrix.exe }}
+
+      # Messung zum gemeldeten Einfrieren beim Wechsel zwischen Lesen, Bearbeiten, Seiten und Werkzeuge auf echten macOS- und
+      # Windows-Rechnern: Tabellen und eine Zeile DIAG-JSON im Protokoll. Hält den Lauf nicht auf, auch nicht bei Exit-Code 1 (Wechsel über 5 s).
+      - name: Diagnose Moduswechsel
+        if: ${{ !cancelled() && steps.testpaket.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a node scripts/diag-modes.mjs; else node scripts/diag-modes.mjs; fi
         env:
           PDFWERK_EXE: ${{ github.workspace }}/pdfwerk/release-test/${{ matrix.exe }}
 
