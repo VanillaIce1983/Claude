@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 let chromium;
 try { ({ chromium } = require('playwright')); } catch { ({ chromium } = await import('/opt/node22/lib/node_modules/playwright/index.mjs')); }
 const { PDFDocument } = require('pdf-lib');
-import { SECRET, FIELD_SECRET, KEEP, makeSecretPdf, findText } from './testdateien.mjs';
+import { SECRET, FIELD_SECRET, KEEP, makeSecretPdf, findText, makeLongPdf, browseLongPdf } from './testdateien.mjs';
 
 const out = mkdtempSync(join(tmpdir(), 'pdfwerk-'));
 const page = new URL('../PDFwerk.html', import.meta.url).pathname;
@@ -123,6 +123,15 @@ const bright = await p.evaluate(async (b64) => {
   return max;
 }, Buffer.from(red).toString('base64'));
 ok(bright < 80, 'geschwärztes Formularfeld ist auch im Seitenbild schwarz (hellster Wert ' + bright + ')');
+
+// Langes Dokument: nur Seiten nahe am Lesepunkt bleiben gerendert, sonst friert das System unter dem Speicherdruck ein
+const longFile = join(out, 'lang.pdf');
+writeFileSync(longFile, await makeLongPdf(120));
+await p.setInputFiles('#fileInput', longFile);
+await p.waitForFunction(() => (S.name === 'lang.pdf' && S.pages.length === 120) || !!document.querySelector('.backdrop'));
+if (await p.$('.backdrop')) await submit();   // ungespeicherte Änderungen verwerfen
+await p.waitForFunction(() => S.name === 'lang.pdf' && S.pages.length === 120);
+await browseLongPdf(p, ok);
 
 ok(!errs.length, 'keine Skriptfehler' + (errs.length ? ': ' + errs.join(' | ') : ''));
 await b.close();

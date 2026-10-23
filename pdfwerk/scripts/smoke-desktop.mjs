@@ -1,4 +1,5 @@
-// Rauchtest der Desktop-Fassung: startet die Electron-Hülle und spielt Öffnen, Speichern, Schließen und die Sicherheitsregeln durch.
+// Rauchtest der Desktop-Fassung: startet die Electron-Hülle und spielt Öffnen, Speichern, Schließen, die Sicherheitsregeln
+// und das Blättern in einem langen Dokument durch.
 // Voraussetzung: npm run build. Ohne Bildschirm: xvfb-run -a npm run test:desktop
 // PDFWERK_EXE=<Programmdatei> prüft statt des Quellordners das fertige Paket (z. B. release/linux-unpacked/pdfwerk).
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, chmodSync, renameSync } from 'node:fs';
@@ -10,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const { _electron } = require('playwright-core');
 const { PDFDocument, StandardFonts, PDFName } = require('pdf-lib');
-import { SECRET, FIELD_SECRET, KEEP, NOTE, makeSecretPdf, findText, makeEncryptedPdf, makeCommentedPdf, readComments } from './testdateien.mjs';
+import { SECRET, FIELD_SECRET, KEEP, NOTE, makeSecretPdf, findText, makeEncryptedPdf, makeCommentedPdf, readComments, makeLongPdf, browseLongPdf } from './testdateien.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const exe = process.env.PDFWERK_EXE ? resolve(process.env.PDFWERK_EXE) : null;
@@ -699,7 +700,22 @@ const META = {
   await finish(run);
 }
 
-/* ---------- 5. Nur gepacktes Programm: keine Fernsteuerung von außen ---------- */
+/* ---------- 5. Langes Dokument: nur Seiten nahe am Lesepunkt bleiben gerendert, sonst friert das Programm ein ---------- */
+{
+  const long = join(out, 'lang.pdf');
+  writeFileSync(long, await makeLongPdf(120));
+  const run = await launch([long]);
+  const { app, errors } = run;
+  const p = await app.firstWindow();
+  await step('Langes Dokument', async () => {
+    await p.waitForFunction(() => typeof S !== 'undefined' && S.pages.length === 120 && views.length === 120, null, { timeout: 30000 });
+    await browseLongPdf(p, ok);
+    ok(!errors.length, 'keine Konsolenfehler' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  });
+  await finish(run);
+}
+
+/* ---------- 6. Nur gepacktes Programm: keine Fernsteuerung von außen ---------- */
 if (exe) {
   await step('Fernsteuerung', async () => {
     const env = { ...process.env };

@@ -1,5 +1,6 @@
 // Testdateien für scripts/smoke.mjs und scripts/smoke-desktop.mjs: geheimer Inhalt zum Schwärzen,
-// verschlüsselte PDFs, Notizen mit Antworten, und eine Suche nach Text in allen Objekten einer Datei.
+// verschlüsselte PDFs, Notizen mit Antworten, ein langes Dokument samt Prüfung gegen das Einfrieren,
+// und eine Suche nach Text in allen Objekten einer Datei.
 import { createHash, randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -114,4 +115,53 @@ export async function readComments(bytes) {
     return { ref: String(ref), type: String(d.get(PDFName.of('Subtype'))), author: txt(d, 'T'), date: txt(d, 'M'), text: txt(d, 'Contents'),
       irtOnPage: irt ? annots.includes(irt) : null, popupOnPage: pop ? annots.includes(pop) : null };
   });
+}
+
+// Langes Dokument: jede Seite mit einigen Zeilen Text
+export async function makeLongPdf(pages = 120) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let i = 0; i < pages; i++) {
+    const page = doc.addPage([595, 842]);
+    for (let y = 780; y > 60; y -= 36) page.drawText(`Seite ${i + 1} Zeile ${y}`, { x: 60, y, size: 14, font });
+  }
+  return doc.save();
+}
+// Gegen das Einfrieren (jede besuchte Seite behielt ihre Leinwand, Gigabytes bei langen Dokumenten): ein geöffnetes langes
+// Dokument schnell vor- und zurückblättern. Danach dürfen höchstens MAX_LIVE Seiten plus die sichtbaren eine Leinwand haben,
+// sichtbare Seiten sind gerendert, und eine weit hinten gezeichnete Anmerkung erscheint beim Zurückblättern wieder.
+// p: Playwright-Seite mit PDFwerk, ok(bedingung, text) meldet das Ergebnis.
+export async function browseLongPdf(p, ok) {
+  await p.evaluate(() => setMode('read'));
+  const n = await p.evaluate(() => S.pages.length), far = n - 20;
+  const rendered = (i, ms = 20000) => p.waitForFunction((i) => views[i].live && views[i].scale === S.scale && views[i].pdfC.width > 0, i, { timeout: ms }).then(() => true, () => false);
+  await p.evaluate((i) => scrollToPage(i, false), far);
+  await rendered(far);
+  await p.evaluate((i) => addAnn(i, { type: 'rect', x1: 100, y1: 300, x2: 400, y2: 600, color: '#d0312d', width: 6 }), far);
+  // in kurzen Abständen springen, vorwärts und zurück: die Beobachter melden dabei oft mehrere Wechsel auf einmal
+  await p.evaluate(async (n) => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    for (let k = 0; k < n; k += 2) { scrollToPage(k, false); await wait(30); }
+    for (let k = n - 1; k >= 0; k -= 7) { scrollToPage(k, false); await wait(k % 3 ? 15 : 120); }
+    scrollToPage(0, false);
+  }, n);
+  const settled = await p.waitForFunction(() => views.every((v) => !v.rendering) && views.every((v) => !v.visible || (v.live && v.scale === S.scale && v.pdfC.width > 0)),
+    null, { timeout: 20000 }).then(() => true, () => false);
+  const s = await p.evaluate((far) => ({
+    withCanvas: views.filter((v) => v.pdfC.width * v.pdfC.height > 0 || v.ovC.width * v.ovC.height > 0).length,
+    visible: views.filter((v) => v.visible).length, white: views.map((v, i) => (v.visible && !v.pdfC.width ? i + 1 : 0)).filter(Boolean), max: MAX_LIVE,
+    farReleased: !views[far].live && views[far].pdfC.width === 0, farText: views[far].tl.textContent.includes(`Seite ${far + 1} Zeile`),
+  }), far);
+  ok(settled, 'langes Dokument: sichtbare Seiten sind nach dem Durchblättern gerendert' + (settled ? '' : ` (weiß: Seite ${s.white.join(', ')})`));
+  ok(s.withCanvas <= s.max + s.visible, `… höchstens ${s.max} + sichtbare Seiten haben eine Leinwand (${s.withCanvas} von ${n}, ${s.visible} sichtbar)`);
+  ok(s.farReleased && s.farText, `… die ferne Seite ${far + 1} ist freigegeben, ihre Textebene bleibt zum Markieren und Kopieren`);
+  await p.evaluate((i) => scrollToPage(i, false), far);
+  const back = await rendered(far) && await p.waitForFunction((i) => {
+    const c = views[i].ovC;
+    if (!c.width) return false;
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    for (let k = 3; k < d.length; k += 4) if (d[k]) return true;
+    return false;
+  }, far, { timeout: 10000 }).then(() => true, () => false);
+  ok(back, `… die Anmerkung auf Seite ${far + 1} ist nach dem Zurückblättern wieder sichtbar`);
 }

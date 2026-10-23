@@ -171,6 +171,8 @@ button{cursor:pointer}
 .main{display:grid;grid-template-columns:auto 1fr;min-height:0}
 .side{width:232px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
 .side.closed{display:none}
+/* ohne Seitenleiste bekäme die Arbeitsfläche sonst die schmale auto-Spalte */
+.main:has(> .side.closed){grid-template-columns:1fr}
 .side .tabs{margin:8px;justify-content:stretch}
 .side .tabs button{flex:1;padding:4px 4px;font-size:12px}
 .sidebody{flex:1;overflow:auto;padding:4px 10px 16px}
@@ -289,6 +291,9 @@ button{cursor:pointer}
 .drop div{background:var(--panel);padding:18px 26px;border-radius:12px;box-shadow:var(--shadow);font-weight:500}
 .toast{position:fixed;left:50%;bottom:calc(40px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:8px;z-index:200;font-size:13.5px;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
 .present .top,.present .ctx,.present .side,.present .status{display:none}
+/* ohne Kopf, Kontext- und Seitenleiste landet die Ansicht sonst in einer Rasterzeile und -spalte der Größe 0 */
+.present .app{grid-template-rows:1fr}
+.present .main{grid-template-columns:1fr}
 .present .desk{background:#000}
 
 @media (max-width:760px){
@@ -562,7 +567,7 @@ const S = {
   orgSel: new Set(),
   downloads: null,
 };
-const views = [];       // je Seite: {div, pdfC, ovC, tl, scale, task, vp}
+const views = [];       // je Seite: {div, pdfC, ovC, tl, scale, task, vp, visible, near, live, tlScale}
 const thumbCache = new Map();
 
 /* ---------- Kleinigkeiten der Oberfläche ---------- */
@@ -798,9 +803,9 @@ function historyBytes() {
 }
 function snapshot() {
   S.history.push({ bytes: S.bytes, ann: cloneAnn(), name: S.name, path: S.path });
+  S.future = [];   // vor der Grenze: der Wiederholen-Verlauf fällt ohnehin weg und zählt nicht mit
   if (S.history.length > 40) S.history.shift();
   while (S.history.length > 1 && historyBytes() > HISTORY_BYTES) S.history.shift();
-  S.future = [];
   setDirty(true);
   updateUndoButtons();
 }
@@ -843,44 +848,60 @@ function canvasDpr(vp) {
   const d = DPR();
   return vp.width * vp.height * d * d > MAX_CANVAS_PX ? Math.sqrt(MAX_CANVAS_PX / (vp.width * vp.height)) : d;
 }
+// Die Textebene bleibt (sie ist klein): eine Auswahl über mehrere Seiten und Kopieren reichen sonst nur über die gerenderten
 function releasePage(i) {
   const v = views[i];
-  if (!v || (!v.live && !v.rendering)) return;
+  if (!v || v.visible || (!v.live && !v.rendering)) return;
   v.task?.cancel();
   v.live = false; v.scale = 0; v.rendering = 0;
   v.pdfC.width = v.pdfC.height = 0;
   v.ovC.width = v.ovC.height = 0;
-  v.tl.textContent = '';
+  // Bilder und Zeichenbefehle der Seite gibt pdf.js nur mit cleanup() frei, bei Scans sonst rund 10 MB je besuchte Seite
+  S.pdf.getPage(i + 1).then((pg) => { if (!views[i]?.live) pg.cleanup(); }).catch(() => {});
 }
 // nie mehr als MAX_LIVE Seiten gerendert halten, die vom Lesepunkt entferntesten zuerst freigeben
 function trimLive() {
+  if ($('#viewer').hidden) return;   // verborgen gilt keine Seite als sichtbar; die Bilder bleiben für die Rückkehr
   const spare = views.map((v, i) => i).filter((i) => views[i].live && !views[i].visible);
   const total = views.filter((v) => v.live).length;
   spare.sort((a, b) => Math.abs(b - S.cur) - Math.abs(a - S.cur));
   for (let k = 0; k < total - MAX_LIVE && k < spare.length; k++) releasePage(spare[k]);
 }
 
+let viewerStale = false;   // Ansicht wurde verborgen geleert, setMode baut sie beim Einblenden auf
 function buildViewer(keepPos) {
   const pagesEl = $('#pages');
   const viewer = $('#viewer');
-  const anchor = keepPos ? S.cur : 0;
+  if (!keepPos) S.cur = 0;
   io?.disconnect();
   ioFar?.disconnect();
   views.forEach((v) => { v.task?.cancel(); v.pdfC.width = v.pdfC.height = 0; v.ovC.width = v.ovC.height = 0; });
   views.length = 0;
   pagesEl.textContent = '';
+  // verborgen (Seiten, Werkzeuge) hat die Ansicht keine Breite, der Maßstab fiele auf 0,1 und der Lesepunkt verrutschte
+  viewerStale = viewer.hidden;
+  if (viewerStale) return;
   pagesEl.classList.toggle('spread', S.spread);
   S.scale = computeScale();
   syncZoomSelect();
+  // Freigeben, sobald eine Seite weder sichtbar (io) noch nah (ioFar) ist. Beide melden in beliebiger Reihenfolge, ein Rückruf
+  // auch „weg“ und „wieder da“ zugleich: es zählt der letzte Stand beider. Verborgen (Seiten, Werkzeuge) melden sie alle Seiten
+  // als fern; die Bilder bleiben dann für die Rückkehr.
+  const releaseFar = (entries) => {
+    if (viewer.hidden) return;
+    for (const e of entries) { const i = +e.target.dataset.i; if (!views[i].visible && !views[i].near) releasePage(i); }
+  };
   io = new IntersectionObserver((entries) => {
     for (const e of entries) {
       const i = +e.target.dataset.i;
       views[i].visible = e.isIntersecting;
       if (e.isIntersecting) renderPage(i);
     }
+    releaseFar(entries);
   }, { root: viewer, rootMargin: '600px 0px' });
   ioFar = new IntersectionObserver((entries) => {
-    for (const e of entries) if (!e.isIntersecting) releasePage(+e.target.dataset.i);
+    for (const e of entries) views[+e.target.dataset.i].near = e.isIntersecting;
+    releaseFar(entries);
   }, { root: viewer, rootMargin: '2400px' });
   S.pages.forEach((p, i) => {
     const div = h('div', { class: 'page', 'data-i': i });
@@ -890,14 +911,16 @@ function buildViewer(keepPos) {
     const tl = h('div', { class: 'textLayer' });
     div.append(pdfC, tl, ovC, h('span', { class: 'plabel' }, String(i + 1)));
     pagesEl.append(div);
-    views.push({ div, pdfC, ovC, tl, scale: 0, task: null, vp: null, visible: false, live: false });
+    views.push({ div, pdfC, ovC, tl, scale: 0, task: null, vp: null, visible: false, near: false, live: false, tlScale: 0 });
     sizePage(i);
     attachPageEvents(i);
     io.observe(div);
     ioFar.observe(div);
   });
   applyToolClass();
-  requestAnimationFrame(() => { if (views[anchor]) scrollToPage(anchor, false); updatePageIndicator(); });
+  // Lesepunkt im nächsten Bild anfahren; ein gezielter Sprung (scrollToPage) bis dahin geht vor
+  nav.build = true;
+  requestAnimationFrame(() => { if (nav.build) { nav.build = false; scrollToPage(S.cur, false); } updatePageIndicator(); });
 }
 
 function sizePage(i) {
@@ -933,7 +956,9 @@ async function renderPage(i) {
   v.vp = vp; v.scale = scale; v.rendering = 0;
   drawOverlay(i);
   trimLive();
-  // Textebene zum Markieren und Kopieren
+  // Textebene zum Markieren und Kopieren, nur bei neuem Maßstab neu aufbauen (eine Auswahl darin bleibt so bestehen)
+  if (v.tlScale === scale) return;
+  v.tlScale = scale;
   v.tl.textContent = '';
   v.tl.style.setProperty('--scale-factor', scale);
   try {
@@ -951,6 +976,7 @@ async function getText(i) {
 function rezoom(z, focus) {
   S.zoom = z;
   const viewer = $('#viewer');
+  if (viewer.hidden) return;   // ohne Größe fiele der Maßstab auf 0,1; setMode passt den Zoom beim Einblenden an
   const oldScale = S.scale;
   const newScale = computeScale();
   if (Math.abs(newScale - oldScale) < 1e-4) { syncZoomSelect(); return; }
@@ -962,7 +988,8 @@ function rezoom(z, focus) {
   // unsichtbare Seiten freigeben; sichtbare zeigen ihr altes Bild gestreckt, bis sie neu gerendert sind
   views.forEach((v, i) => {
     if (!v.visible) releasePage(i);
-    else { v.scale = 0; v.rendering = 0; v.task?.cancel(); v.tl.textContent = ''; v.ovC.width = v.ovC.height = 0; }
+    else { v.scale = 0; v.rendering = 0; v.task?.cancel(); v.ovC.width = v.ovC.height = 0; }
+    v.tl.textContent = ''; v.tlScale = 0;
     sizePage(i);
   });
   viewer.scrollLeft = sx; viewer.scrollTop = sy;
@@ -983,13 +1010,23 @@ function zoomStep(dir, focus) {
   rezoom(next, focus);
 }
 
+// Während eines Sprungs bleibt S.cur beim Ziel: beim weichen Scrollen bis zu dessen Ende, nach buildViewer bis zum nächsten Bild.
+// Die Scroll-Ereignisse unterwegs zählen nicht, sonst verschluckt schnelles Blättern Tastendrücke.
+const nav = { build: false, timer: 0, to: null };
+function endNav() { clearTimeout(nav.timer); nav.timer = 0; }
+// laufenden weichen Sprung sofort ans Ziel bringen; vor dem Verbergen der Ansicht, sonst bliebe er auf halbem Weg stehen
+function finishNav() { if (nav.timer) { $('#viewer').scrollTo(nav.to); endNav(); } }
 function scrollToPage(i, smooth = true, yOffsetPt = null) {
   const v = views[i]; if (!v) return;
   const viewer = $('#viewer');
   let top = v.div.offsetTop - 12;
   if (yOffsetPt != null) top = v.div.offsetTop + yOffsetPt * S.scale - viewer.clientHeight / 3;
-  viewer.scrollTo({ top, left: S.spread ? viewer.scrollLeft : v.div.offsetLeft - 20, behavior: smooth ? 'smooth' : 'auto' });
+  const left = S.spread ? viewer.scrollLeft : v.div.offsetLeft - 20;
+  viewer.scrollTo({ top, left, behavior: smooth ? 'smooth' : 'auto' });
   S.cur = i; updatePageIndicator();
+  nav.build = false; endNav();
+  // Rückfall, falls kein scrollend kommt (Ziel schon erreicht oder ältere Engine)
+  if (smooth) { nav.to = { top, left }; nav.timer = setTimeout(() => { nav.timer = 0; onViewerScroll(); }, 1500); }
 }
 function updatePageIndicator() {
   $('#pageInput').value = S.pages.length ? S.cur + 1 : 0;
@@ -1002,6 +1039,7 @@ function updatePageIndicator() {
 }
 function onViewerScroll() {
   const viewer = $('#viewer');
+  if (nav.build || nav.timer || viewer.hidden) return;
   const mid = viewer.scrollTop + viewer.clientHeight * 0.35;
   let best = S.cur;
   for (let i = 0; i < views.length; i++) {
@@ -1022,6 +1060,7 @@ async function getThumb(i, width = 150) {
     const page = await S.pdf.getPage(i + 1);
     const vp1 = page.getViewport({ scale: 1 });
     const c = await renderToCanvas(page, (width * DPR()) / vp1.width);
+    if (!views[i]?.live) page.cleanup();   // Bilddaten freigeben, die Seite wird gerade nicht angezeigt
     const blob = await canvasBlob(c, 'image/png');
     c.width = c.height = 0;
     return URL.createObjectURL(blob);
@@ -1904,14 +1943,25 @@ async function imagesToDoc(files, { size = 'image', margin = 0 } = {}) {
 }
 
 /* ---------- Seitenansicht (Organizer) ---------- */
-let orgAnchor = null;
+let orgAnchor = null, orgIO;
 function renderOrganizer() {
   const el = $('#organizer');
   el.textContent = '';
   const grid = h('div', { class: 'orggrid' });
   let dragFrom = null;
+  // Vorschaubilder erst nahe am sichtbaren Bereich erzeugen: alle auf einmal blockieren bei langen Dokumenten die Oberfläche
+  orgIO?.disconnect();
+  const ver = S.version;
+  orgIO = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting || e.target.dataset.done) continue;
+      e.target.dataset.done = 1;
+      const ph = e.target.querySelector('.ph');
+      getThumb(+e.target.dataset.i, 150).then((url) => { if (ver === S.version) ph.replaceWith(thumbImg(url, 150)); }).catch(() => {});
+    }
+  }, { root: el, rootMargin: '300px' });
   S.pages.forEach((p, i) => {
-    const ph = h('div', { style: `width:150px;height:${Math.round(150 * p.h / p.w)}px;background:#fff;box-shadow:var(--shadow)` });
+    const ph = h('div', { class: 'ph', style: `width:150px;height:${Math.round(150 * p.h / p.w)}px;background:#fff;box-shadow:var(--shadow)` });
     const cb = h('input', { type: 'checkbox', checked: S.orgSel.has(i), 'aria-label': 'Seite ' + (i + 1) + ' auswählen', onclick: (e) => { e.stopPropagation(); toggleOrg(i, e.target.checked); } });
     const tile = h('div', { class: 'otile' + (S.orgSel.has(i) ? ' sel' : ''), draggable: 'true', 'data-i': i },
       cb, ph,
@@ -1944,8 +1994,7 @@ function renderOrganizer() {
       await reorder(rest);
     });
     grid.append(tile);
-    const ver = S.version;
-    getThumb(i, 150).then((url) => { if (ver === S.version) ph.replaceWith(thumbImg(url, 150)); }).catch(() => {});
+    orgIO.observe(tile);
   });
   const endZone = h('div', { class: 'otile', style: 'justify-content:center;min-height:160px;border:2px dashed var(--line);cursor:pointer;background:transparent', onclick: () => pickInsertFiles(S.pages.length) },
     h('div', { html: svg('plus', 'style="width:28px;height:28px;color:var(--muted)"') }), h('span', { style: 'font-size:12.5px;color:var(--muted);text-align:center' }, 'PDF oder Bilder anhängen'));
@@ -2481,7 +2530,7 @@ async function replaceDoc(bytes, name, { detach = false } = {}) {
   snapshot();
   if (detach) S.path = null;
   const keepHist = S.history;
-  await openBytes(bytes, name, { fresh: false });
+  await openBytes(bytes, name, { fresh: false, keepPos: !detach });
   S.history = keepHist; setDirty(true); updateUndoButtons();
 }
 
@@ -2933,14 +2982,20 @@ function setMode(m) {
   $$('#modeTabs button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
   if (m === 'read' && !['select', 'hand'].includes(S.tool)) S.tool = 'select';
   if (m !== 'comment') S.selected = null;
+  if (m === 'pages' || m === 'tools') finishNav();
   $('#viewer').hidden = m === 'pages' || m === 'tools';
   $('#organizer').hidden = m !== 'pages';
   $('#toolbox').hidden = m !== 'tools';
   if (m === 'pages') renderOrganizer();
   if (m === 'tools') renderToolbox();
-  // Größe kann sich geändert haben, während die Ansicht versteckt war: nur den Zoom anpassen, nicht alles neu aufbauen
-  if (m === 'read' || m === 'comment') requestAnimationFrame(() => { const cur = S.cur; if (typeof S.zoom === 'string' && Math.abs(computeScale() - S.scale) > 1e-3) { rezoom(S.zoom); scrollToPage(cur, false); } });
-  applyToolClass(); renderCtx(); redrawAllOverlays();
+  applyToolClass(); renderCtx();
+  if (m === 'read' || m === 'comment') {
+    // verborgen geöffnete Fassung jetzt mit der richtigen Größe aufbauen, am Lesepunkt
+    if (viewerStale) buildViewer(true);
+    // Größe kann sich geändert haben, während die Ansicht versteckt war: nur den Zoom anpassen, nicht alles neu aufbauen
+    else requestAnimationFrame(() => { const cur = S.cur; if (Math.abs(computeScale() - S.scale) > 1e-3) { rezoom(S.zoom); scrollToPage(cur, false); } });
+  }
+  redrawAllOverlays();
 }
 
 /* ---------- Dateien öffnen ---------- */
@@ -3080,6 +3135,7 @@ function bind() {
 
   const viewer = $('#viewer');
   viewer.addEventListener('scroll', () => { onViewerScroll(); hideSelPop(); }, { passive: true });
+  viewer.addEventListener('scrollend', () => { if (nav.timer) { endNav(); onViewerScroll(); } });
   viewer.addEventListener('wheel', (e) => {
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();

@@ -74,6 +74,8 @@ button{cursor:pointer}
 .main{display:grid;grid-template-columns:auto 1fr;min-height:0}
 .side{width:232px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
 .side.closed{display:none}
+/* ohne Seitenleiste bekäme die Arbeitsfläche sonst die schmale auto-Spalte */
+.main:has(> .side.closed){grid-template-columns:1fr}
 .side .tabs{margin:8px;justify-content:stretch}
 .side .tabs button{flex:1;padding:4px 4px;font-size:12px}
 .sidebody{flex:1;overflow:auto;padding:4px 10px 16px}
@@ -192,6 +194,9 @@ button{cursor:pointer}
 .drop div{background:var(--panel);padding:18px 26px;border-radius:12px;box-shadow:var(--shadow);font-weight:500}
 .toast{position:fixed;left:50%;bottom:calc(40px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:8px;z-index:200;font-size:13.5px;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
 .present .top,.present .ctx,.present .side,.present .status{display:none}
+/* ohne Kopf, Kontext- und Seitenleiste landet die Ansicht sonst in einer Rasterzeile und -spalte der Größe 0 */
+.present .app{grid-template-rows:1fr}
+.present .main{grid-template-columns:1fr}
 .present .desk{background:#000}
 
 @media (max-width:760px){
