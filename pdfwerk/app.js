@@ -196,7 +196,7 @@ async function openBytes(bytes, name, { keepAnn = false, keepPos = false, fresh 
   S.textCache = [];
   S.search.hits = []; S.search.idx = -1;
   S.selected = null;
-  thumbCache.clear();
+  clearThumbs();
   if (fresh) { S.history = []; S.future = []; S.dirty = false; S.pristine = false; S.orgSel.clear(); S.path = path ?? null; S.opened++; }
   if (!keepPos) S.cur = 0;
   S.cur = clamp(S.cur, 0, S.pages.length - 1);
@@ -329,9 +329,18 @@ function syncDoc() {
 /* ---------- Verlauf ---------- */
 function cloneAnn(a = S.ann) { return JSON.parse(JSON.stringify(a)); }
 // Ein Verlaufsschritt merkt sich auch Name und Speicherort: Rückgängig nach „Zusammenfügen“ zeigt wieder auf die alte Datei
+// Rückgängig merkt sich ganze Dokumentfassungen; bei großen PDFs begrenzt der Speicher, nicht die Anzahl
+const HISTORY_BYTES = 400 * 1048576;
+function historyBytes() {
+  const seen = new Set([S.bytes]);
+  let n = 0;
+  for (const e of [...S.history, ...S.future]) if (!seen.has(e.bytes)) { seen.add(e.bytes); n += e.bytes.length; }
+  return n;
+}
 function snapshot() {
   S.history.push({ bytes: S.bytes, ann: cloneAnn(), name: S.name, path: S.path });
   if (S.history.length > 40) S.history.shift();
+  while (S.history.length > 1 && historyBytes() > HISTORY_BYTES) S.history.shift();
   S.future = [];
   setDirty(true);
   updateUndoButtons();
@@ -366,12 +375,39 @@ function computeScale() {
   return S.zoom;
 }
 
+// Gerendert bleiben nur Seiten nahe am sichtbaren Bereich; jede Seite belegt sonst ihre volle Bildschirmauflösung,
+// bei langen Dokumenten Gigabytes, und das System friert unter dem Speicherdruck ein.
+const MAX_LIVE = 12;                 // höchstens so viele Seiten gleichzeitig gerendert
+const MAX_CANVAS_PX = 16777216;      // 4096 × 4096: darüber wird die Auflösung einer Seite begrenzt
+let ioFar;
+function canvasDpr(vp) {
+  const d = DPR();
+  return vp.width * vp.height * d * d > MAX_CANVAS_PX ? Math.sqrt(MAX_CANVAS_PX / (vp.width * vp.height)) : d;
+}
+function releasePage(i) {
+  const v = views[i];
+  if (!v || (!v.live && !v.rendering)) return;
+  v.task?.cancel();
+  v.live = false; v.scale = 0; v.rendering = 0;
+  v.pdfC.width = v.pdfC.height = 0;
+  v.ovC.width = v.ovC.height = 0;
+  v.tl.textContent = '';
+}
+// nie mehr als MAX_LIVE Seiten gerendert halten, die vom Lesepunkt entferntesten zuerst freigeben
+function trimLive() {
+  const spare = views.map((v, i) => i).filter((i) => views[i].live && !views[i].visible);
+  const total = views.filter((v) => v.live).length;
+  spare.sort((a, b) => Math.abs(b - S.cur) - Math.abs(a - S.cur));
+  for (let k = 0; k < total - MAX_LIVE && k < spare.length; k++) releasePage(spare[k]);
+}
+
 function buildViewer(keepPos) {
   const pagesEl = $('#pages');
   const viewer = $('#viewer');
   const anchor = keepPos ? S.cur : 0;
   io?.disconnect();
-  views.forEach((v) => v.task?.cancel());
+  ioFar?.disconnect();
+  views.forEach((v) => { v.task?.cancel(); v.pdfC.width = v.pdfC.height = 0; v.ovC.width = v.ovC.height = 0; });
   views.length = 0;
   pagesEl.textContent = '';
   pagesEl.classList.toggle('spread', S.spread);
@@ -384,17 +420,22 @@ function buildViewer(keepPos) {
       if (e.isIntersecting) renderPage(i);
     }
   }, { root: viewer, rootMargin: '600px 0px' });
+  ioFar = new IntersectionObserver((entries) => {
+    for (const e of entries) if (!e.isIntersecting) releasePage(+e.target.dataset.i);
+  }, { root: viewer, rootMargin: '2400px' });
   S.pages.forEach((p, i) => {
     const div = h('div', { class: 'page', 'data-i': i });
-    const pdfC = h('canvas', { class: 'pdf' });
-    const ovC = h('canvas', { class: 'ov' });
+    // ohne Größe anlegen: eine Leinwand hat sonst 300 × 150 Pixel, bei 1000 Seiten Hunderte MB
+    const pdfC = h('canvas', { class: 'pdf', width: 0, height: 0 });
+    const ovC = h('canvas', { class: 'ov', width: 0, height: 0 });
     const tl = h('div', { class: 'textLayer' });
     div.append(pdfC, tl, ovC, h('span', { class: 'plabel' }, String(i + 1)));
     pagesEl.append(div);
-    views.push({ div, pdfC, ovC, tl, scale: 0, task: null, vp: null, visible: false });
+    views.push({ div, pdfC, ovC, tl, scale: 0, task: null, vp: null, visible: false, live: false });
     sizePage(i);
     attachPageEvents(i);
     io.observe(div);
+    ioFar.observe(div);
   });
   applyToolClass();
   requestAnimationFrame(() => { if (views[anchor]) scrollToPage(anchor, false); updatePageIndicator(); });
@@ -404,30 +445,35 @@ function sizePage(i) {
   const p = S.pages[i], v = views[i];
   v.div.style.width = Math.floor(p.w * S.scale) + 'px';
   v.div.style.height = Math.floor(p.h * S.scale) + 'px';
+  v.vp = p.vp1.clone({ scale: S.scale });
 }
 
 async function renderPage(i) {
   const v = views[i];
   if (!v || v.scale === S.scale || v.rendering === S.scale) return;
   v.rendering = S.scale;
+  v.live = true;
   const ver = S.version;
   const page = await S.pdf.getPage(i + 1);
   if (ver !== S.version || v.rendering !== S.scale) return;
   const scale = S.scale;
   const vp = page.getViewport({ scale });
-  const dpr = DPR();
-  const off = document.createElement('canvas');
+  const dpr = canvasDpr(vp);
+  // in eine neue Leinwand rendern und diese einsetzen: kein Umkopieren, das alte Bild bleibt bis dahin sichtbar
+  const off = h('canvas', { class: 'pdf' });
   off.width = Math.floor(vp.width * dpr); off.height = Math.floor(vp.height * dpr);
   const ctx = off.getContext('2d');
   v.task?.cancel();
   v.task = page.render({ canvasContext: ctx, viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null, annotationMode: pdfjsLib.AnnotationMode.ENABLE });
-  try { await v.task.promise; } catch (e) { if (e?.name !== 'RenderingCancelledException') console.error(e); v.rendering = 0; return; }
-  if (ver !== S.version || scale !== S.scale) return;
-  v.pdfC.width = off.width; v.pdfC.height = off.height;
-  v.pdfC.getContext('2d').drawImage(off, 0, 0);
+  try { await v.task.promise; } catch (e) { off.width = off.height = 0; if (e?.name !== 'RenderingCancelledException') console.error(e); if (v.rendering === scale) v.rendering = 0; return; }
+  if (ver !== S.version || scale !== S.scale || !v.live) { off.width = off.height = 0; return; }
+  const old = v.pdfC;
+  old.replaceWith(off);
+  old.width = old.height = 0;
+  v.pdfC = off;
   v.vp = vp; v.scale = scale; v.rendering = 0;
-  v.ovC.width = off.width; v.ovC.height = off.height;
   drawOverlay(i);
+  trimLive();
   // Textebene zum Markieren und Kopieren
   v.tl.textContent = '';
   v.tl.style.setProperty('--scale-factor', scale);
@@ -454,7 +500,12 @@ function rezoom(z, focus) {
   const ratio = newScale / oldScale;
   const sx = (viewer.scrollLeft + fx) * ratio - fx, sy = (viewer.scrollTop + fy) * ratio - fy;
   S.scale = newScale;
-  views.forEach((v, i) => { v.scale = 0; v.rendering = 0; v.task?.cancel(); sizePage(i); v.tl.textContent = ''; v.ovC.width = v.ovC.width; });
+  // unsichtbare Seiten freigeben; sichtbare zeigen ihr altes Bild gestreckt, bis sie neu gerendert sind
+  views.forEach((v, i) => {
+    if (!v.visible) releasePage(i);
+    else { v.scale = 0; v.rendering = 0; v.task?.cancel(); v.tl.textContent = ''; v.ovC.width = v.ovC.height = 0; }
+    sizePage(i);
+  });
   viewer.scrollLeft = sx; viewer.scrollTop = sy;
   syncZoomSelect();
   clearTimeout(rezoom.t);
@@ -504,6 +555,7 @@ function onViewerScroll() {
 
 /* ---------- Seitenleiste ---------- */
 let sideTab = 'thumbs', thumbIO;
+// Vorschaubild als PNG-Adresse: der Browser hält davon nur die komprimierte Fassung, nicht eine Leinwand je Seite
 async function getThumb(i, width = 150) {
   const key = i + ':' + width + ':' + S.version;
   if (thumbCache.has(key)) return thumbCache.get(key);
@@ -511,18 +563,18 @@ async function getThumb(i, width = 150) {
     const page = await S.pdf.getPage(i + 1);
     const vp1 = page.getViewport({ scale: 1 });
     const c = await renderToCanvas(page, (width * DPR()) / vp1.width);
-    c.style.width = width + 'px';
-    return c;
+    const blob = await canvasBlob(c, 'image/png');
+    c.width = c.height = 0;
+    return URL.createObjectURL(blob);
   })();
   thumbCache.set(key, pr);
   return pr;
 }
-function copyCanvas(src) {
-  const c = document.createElement('canvas');
-  c.width = src.width; c.height = src.height; c.style.width = src.style.width;
-  c.getContext('2d').drawImage(src, 0, 0);
-  return c;
+function clearThumbs() {
+  for (const pr of thumbCache.values()) pr.then((url) => URL.revokeObjectURL(url)).catch(() => {});
+  thumbCache.clear();
 }
+const thumbImg = (url, width) => h('img', { src: url, alt: '', draggable: 'false', style: `width:${width}px;max-width:100%;box-shadow:var(--shadow);background:#fff;display:block` });
 function renderSide() {
   $$('#sideTabs button').forEach((b) => b.classList.toggle('on', b.dataset.side === sideTab));
   const body = $('#sideBody');
@@ -536,7 +588,7 @@ function renderSide() {
         e.target.dataset.done = 1;
         const i = +e.target.dataset.i, ver = S.version;
         // .catch: wird inzwischen ein anderes Dokument geöffnet, bricht pdf.js das Zeichnen ab
-        getThumb(i, 130).then((c) => { if (ver === S.version) e.target.querySelector('.ph').replaceWith(copyCanvas(c)); }).catch(() => {});
+        getThumb(i, 130).then((url) => { if (ver === S.version) e.target.querySelector('.ph').replaceWith(thumbImg(url, 130)); }).catch(() => {});
       }
     }, { root: body, rootMargin: '300px' });
     S.pages.forEach((p, i) => {
@@ -619,7 +671,13 @@ function scrBox(i, a) {
 function drawOverlay(i) {
   const v = views[i];
   if (!v?.vp) return;
-  const c = v.ovC, ctx = c.getContext('2d'), dpr = c.width / v.vp.width;
+  // Zeichenebene nur anlegen, wenn es auf einer gerenderten Seite etwas zu zeigen gibt
+  const c = v.ovC;
+  const need = v.live && v.scale === S.scale && (S.ann[i]?.length || drag?.page === i || S.selected?.p === i || S.search.hits.some((hit) => hit.p === i));
+  if (!need) { if (c.width) c.width = c.height = 0; return; }
+  const pd = canvasDpr(v.vp), cw = Math.floor(v.vp.width * pd), ch = Math.floor(v.vp.height * pd);
+  if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+  const ctx = c.getContext('2d'), dpr = c.width / v.vp.width;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, c.width, c.height);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1428,7 +1486,7 @@ function renderOrganizer() {
     });
     grid.append(tile);
     const ver = S.version;
-    getThumb(i, 150).then((c) => { if (ver === S.version) ph.replaceWith(copyCanvas(c)); }).catch(() => {});
+    getThumb(i, 150).then((url) => { if (ver === S.version) ph.replaceWith(thumbImg(url, 150)); }).catch(() => {});
   });
   const endZone = h('div', { class: 'otile', style: 'justify-content:center;min-height:160px;border:2px dashed var(--line);cursor:pointer;background:transparent', onclick: () => pickInsertFiles(S.pages.length) },
     h('div', { html: svg('plus', 'style="width:28px;height:28px;color:var(--muted)"') }), h('span', { style: 'font-size:12.5px;color:var(--muted);text-align:center' }, 'PDF oder Bilder anhängen'));
