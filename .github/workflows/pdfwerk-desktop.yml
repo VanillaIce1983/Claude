@@ -141,7 +141,16 @@ jobs:
         continue-on-error: true
         timeout-minutes: 20
         run: |
-          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a node scripts/diag-modes.mjs; else node scripts/diag-modes.mjs; fi
+          code=0
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a node scripts/diag-modes.mjs || code=$?; else node scripts/diag-modes.mjs || code=$?; fi
+          # macOS mit Maus oder „Rollbalken einblenden: Immer“ hat klassische Bildlaufleisten wie Windows, der Runner sonst überlagernde
+          if [ "$RUNNER_OS" = macOS ]; then
+            defaults write -g AppleShowScrollBars -string Always
+            echo '=== Noch einmal mit klassischen Bildlaufleisten (AppleShowScrollBars=Always)'
+            node scripts/diag-modes.mjs || code=$?
+            defaults delete -g AppleShowScrollBars || true
+          fi
+          exit $code
         env:
           PDFWERK_EXE: ${{ github.workspace }}/pdfwerk/release-test/${{ matrix.exe }}
 

@@ -35,9 +35,9 @@ const TASTE = { read: '1', comment: '2', pages: '3', tools: '4' };
 const RUNDE = ['comment', 'pages', 'tools', 'read', 'pages', 'comment', 'tools', 'comment', 'read', 'tools', 'pages', 'read'];
 const WEGE = ['Klick', 'Taste', 'Menü'];
 const MOD = process.platform === 'darwin' ? 'meta' : 'control';
-// in der Oberfläche mitgestoppt (synchroner Anteil; nur die Funktionen, die es gibt)
-const FUNKTIONEN = ['setMode', 'renderOrganizer', 'renderToolbox', 'buildViewer', 'renderCtx', 'applyToolClass', 'redrawAllOverlays',
-  'drawOverlay', 'renderSide', 'renderPage', 'releasePage', 'trimLive', 'getThumb', 'commitEdit', 'rezoom'];
+// in der Oberfläche mitgestoppt (synchroner Anteil; nur die Funktionen, die es gibt); die ersten fünf auch einzeln gezählt, wenn sie schnell sind
+const FUNKTIONEN = ['setMode', 'buildViewer', 'renderOrganizer', 'renderToolbox', 'rezoom', 'renderCtx', 'applyToolClass', 'redrawAllOverlays',
+  'drawOverlay', 'renderSide', 'renderPage', 'releasePage', 'trimLive', 'getThumb', 'commitEdit'];
 
 const ergebnis = {
   werkzeug: 'diag-modes', start: new Date().toISOString(), programm: exe || root, runden: RUNDEN, grenzeMs: GRENZE,
@@ -111,7 +111,7 @@ const HAUPT_MESSUNG = ({ app, BrowserWindow, screen }) => {
     const merke = (typ, info = {}) => { if (D.ereignisse.length < 5000) D.ereignisse.push({ t: Date.now(), typ, ...info }); };
     app.on('child-process-gone', (_e, d) => merke('child-process-gone', { prozess: d.type, grund: d.reason, code: d.exitCode, name: d.name || d.serviceName }));
     app.on('render-process-gone', (_e, _wc, d) => merke('render-process-gone', { grund: d.reason, code: d.exitCode }));
-    // Chromiums Hang-Erkennung: Fenster und Seite melden „reagiert nicht“ und „reagiert wieder“
+    // Chromiums Hang-Erkennung. Mit verbundenem Debugger (Playwright) bleibt „unresponsive“ aus, „responsive“ nach einem Hänger kommt aber
     const fenster = (w) => {
       for (const [quelle, o] of [['Fenster', w], ['Seite', w.webContents]]) for (const typ of ['unresponsive', 'responsive']) o.on(typ, () => merke(typ, { quelle }));
     };
@@ -142,14 +142,14 @@ const SEITE_MESSUNG = (namen) => {
   if (window.__diag) return window.__diag.info;
   const D = (window.__diag = { aufrufe: [], lang: [], loaf: [], info: { gestoppt: [], loaf: false } });
   const t = (x) => Math.round(performance.timeOrigin + x);
-  for (const n of namen) {
-    const f = window[n];
+  for (const [k, n] of namen.entries()) {
+    const f = window[n], immer = k < 5;
     if (typeof f !== 'function') continue;
     window[n] = function (...a) {
       const s = performance.now();
       try { return f.apply(this, a); } finally {
         const d = performance.now() - s;
-        if ((n === 'setMode' || d >= 2) && D.aufrufe.length < 50000) D.aufrufe.push([n, t(s), Math.round(d * 10) / 10, n === 'setMode' ? String(a[0]) : null]);
+        if ((immer || d >= 2) && D.aufrufe.length < 50000) D.aufrufe.push([n, t(s), Math.round(d * 10) / 10, n === 'setMode' ? String(a[0]) : null]);
       }
     };
     D.info.gestoppt.push(n);
@@ -193,6 +193,8 @@ const ZUSTAND = () => {
   const px = cs.reduce((a, c) => a + c.width * c.height, 0);
   return {
     seiten: S.pages.length, zoomProzent: Math.round(S.scale * 100), dpr: devicePixelRatio, fenster: `${innerWidth}×${innerHeight}`, verdeckt: document.hidden,
+    // Breite der Bildlaufleiste: 0 = überlagernd (macOS mit Trackpad), sonst klassisch (Windows, macOS mit Maus)
+    bildlaufleiste: (() => { const v = document.querySelector('#viewer'); return v && !v.hidden ? v.offsetWidth - v.clientWidth : null; })(),
     leinwaende: cs.length, leinwandMB: Math.round((px * 4) / 1048576), knoten: document.getElementsByTagName('*').length, bilder: document.images.length,
     gerendert: typeof views !== 'undefined' ? views.filter((v) => v.live).length : null,
     vorschauen: typeof thumbCache !== 'undefined' ? thumbCache.size : null,
@@ -349,7 +351,7 @@ async function szenario(s, name, vorbereitung) {
     return;
   }
   const v = sz.vorher;
-  console.log(`  ${v.seiten} Seiten, Zoom ${v.zoomProzent} %, Fenster ${v.fenster}, DPR ${v.dpr}${v.verdeckt ? ', FENSTER VERDECKT' : ''}`);
+  console.log(`  ${v.seiten} Seiten, Zoom ${v.zoomProzent} %, Fenster ${v.fenster}, DPR ${v.dpr}, Bildlaufleiste ${v.bildlaufleiste ?? '?'} px${v.verdeckt ? ', FENSTER VERDECKT' : ''}`);
   sz.start = Date.now();
   let von = 'read';
   lauf: for (let r = 1; r <= RUNDEN; r++) {
@@ -396,8 +398,11 @@ async function auswerten(s, sz) {
     const ev = haupt.ereignisse.filter((e) => im(e.t, a, b + 1000));
     if (ev.length) w.ereignisse = ev.map((e) => e.typ + (e.quelle ? ` (${e.quelle})` : '') + (e.prozess ? ` ${e.prozess}` : ''));
     const fn = {};
-    for (const [n, t, d] of seite.aufrufe) if (im(t, a, b) && n !== 'setMode') fn[n] = (fn[n] || 0) + d;
-    w.funktionen = Object.entries(fn).filter(([, d]) => d >= 3).sort((x, y) => y[1] - x[1]).slice(0, 4).map(([n, d]) => `${n} ${Math.round(d)} ms`);
+    for (const [n, t, d] of seite.aufrufe) if (im(t, a, b) && n !== 'setMode') { fn[n] ??= { ms: 0, n: 0 }; fn[n].ms += d; fn[n].n++; }
+    // Neuaufbau der Ansicht beim Wechsel: in 1.0.0 bei klassischen Bildlaufleisten fast jedes Mal
+    w.neuaufbau = fn.buildViewer?.n || 0;
+    w.funktionen = Object.entries(fn).filter(([n, x]) => x.ms >= 3 || FUNKTIONEN.slice(0, 5).includes(n)).sort((x, y) => y[1].ms - x[1].ms).slice(0, 4)
+      .map(([n, x]) => `${n}${x.n > 1 ? ` ${x.n}×` : ''} ${Math.round(x.ms)} ms`);
     // auch in der Gesamtliste
     Object.assign(alle.find((x) => x.szenario === sz.name && x.t0 === w.t0) || {}, w);
   }
@@ -421,7 +426,8 @@ async function auswerten(s, sz) {
   const ms = sz.wechsel.map((w) => w.ms);
   const l = maxBy(sz.wechsel, (w) => w.ms);
   sz.zusammenfassung = { wechsel: ms.length, medianMs: median(ms), p95Ms: quantil(ms, 0.95), maxMs: l?.ms ?? null, laengster: l ? `${MODI[l.von]} → ${MODI[l.nach]} (${l.weg})` : null,
-    ueberGrenze: sz.wechsel.filter((w) => w.ms > GRENZE).length };
+    ueberGrenze: sz.wechsel.filter((w) => w.ms > GRENZE).length,
+    neuaufbau: sz.wechsel.filter((w) => w.neuaufbau).length, nachLesenBearbeiten: sz.wechsel.filter((w) => w.nach === 'read' || w.nach === 'comment').length };
 }
 
 /* ---------- Bericht ---------- */
@@ -432,10 +438,10 @@ function bericht() {
   console.log(`Programm: ${ergebnis.programm}`);
   for (const se of ergebnis.sitzungen) {
     const g = se.gpuVorher, n = se.gpuNachher;
-    const bs = se.bildschirm ? `${se.bildschirm.breite}×${se.bildschirm.hoehe} ×${se.bildschirm.skalierung} ${se.bildschirm.hz || '?'} Hz` : '?';
+    const bs = se.bildschirm ? `${se.bildschirm.breite}×${se.bildschirm.hoehe} ×${se.bildschirm.skalierung} ${Math.round(se.bildschirm.hz) || '?'} Hz` : '?';
     console.log(`\nSitzung „${se.name}“: Electron ${se.electron || '?'}, Chromium ${se.chrome || '?'}, ${se.gepackt ? 'gepackt' : 'Quellordner'}, Bildschirm ${bs}`);
     if (g?.status) {
-      console.log(`  GPU: ${g.geraet ? `${g.geraet.name || ''} vendor 0x${(g.geraet.vendorId || 0).toString(16)} device 0x${(g.geraet.deviceId || 0).toString(16)}${g.geraet.treiber ? ` Treiber ${g.geraet.treiber}` : ''}` : 'unbekannt'}${g.modell ? `, ${g.modell}` : ''}, Hardwarebeschleunigung ${g.hardware ? 'an' : 'aus'}`);
+      console.log(`  GPU: ${g.geraet?.name || g.geraet?.vendorId ? `${g.geraet.name || ''} vendor 0x${(g.geraet.vendorId || 0).toString(16)} device 0x${(g.geraet.deviceId || 0).toString(16)}${g.geraet.treiber ? ` Treiber ${g.geraet.treiber}` : ''}` : 'Gerät nicht ermittelbar'}${g.modell ? `, ${g.modell}` : ''}, Hardwarebeschleunigung ${g.hardware ? 'an' : 'aus'}`);
       console.log('  GPU-Status: ' + Object.entries(g.status).map(([k, v]) => `${k}=${v}`).join(', '));
       const geaendert = n?.status ? Object.keys(g.status).filter((k) => g.status[k] !== n.status[k]) : [];
       if (geaendert.length) console.log('  GPU-Status GEÄNDERT bis zum Ende: ' + geaendert.map((k) => `${k} ${g.status[k]} → ${n.status[k]}`).join(', '));
@@ -448,7 +454,7 @@ function bericht() {
     if (sz.uebersprungen) { console.log('  übersprungen'); continue; }
     sz.hinweise.forEach((h) => console.log('  ' + h));
     const v = sz.vorher, n = sz.nachher;
-    if (v) console.log(`  ${v.seiten} Seiten, Zoom ${v.zoomProzent} %, Fenster ${v.fenster}, DPR ${v.dpr}, ${v.anmerkungen ?? '?'} Anmerkungen${v.verdeckt ? ', FENSTER VERDECKT' : ''}`);
+    if (v) console.log(`  ${v.seiten} Seiten, Zoom ${v.zoomProzent} %, Fenster ${v.fenster}, DPR ${v.dpr}, Bildlaufleiste ${v.bildlaufleiste ?? '?'} px, ${v.anmerkungen ?? '?'} Anmerkungen${v.verdeckt ? ', FENSTER VERDECKT' : ''}`);
     if (!sz.wechsel.length) continue;
     const zeilen = [];
     for (let i = 0; i < RUNDE.length; i++) {
@@ -461,6 +467,7 @@ function bericht() {
     }
     tabelle([`Wechsel (längster aus ${RUNDEN} Runde${RUNDEN > 1 ? 'n' : ''})`, ...WEGE], zeilen, new Set([1, 2, 3]));
     const z = sz.zusammenfassung;
+    if (z) console.log(`  Ansicht neu aufgebaut (buildViewer) bei ${z.neuaufbau} von ${z.nachLesenBearbeiten} Wechseln nach Lesen/Bearbeiten`);
     if (z) console.log(`  ${z.wechsel} Wechsel: Median ${fmt(z.medianMs)}, 95 % ${fmt(z.p95Ms)}, längster ${fmt(z.maxMs)} (${z.laengster})${z.ueberGrenze ? `, ${z.ueberGrenze} über ${fmt(GRENZE)}` : ''}`);
     if (sz.langeAufgaben) {
       const la = sz.langeAufgaben.map(([, d]) => d), lf = maxBy(sz.langeFrames, (x) => x.ms), hv = sz.hauptprozessVerzoegerung.map(([, d]) => d);
