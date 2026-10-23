@@ -190,7 +190,8 @@ button{cursor:pointer}
 .empty{color:var(--muted);font-size:12.5px;padding:10px 4px}
 
 .desk{position:relative;min-width:0;min-height:0;background:var(--desk)}
-.viewer{position:absolute;inset:0;overflow:auto;outline:none}
+/* fester Platz für die Bildlaufleiste: sonst ändert ihr Erscheinen die Breite und damit den Zoom „Breite“ */
+.viewer{position:absolute;inset:0;overflow:auto;outline:none;scrollbar-gutter:stable}
 .pages{display:flex;flex-direction:column;align-items:center;gap:16px;padding:20px 16px 60px;min-width:min-content}
 .pages.spread{flex-direction:row;flex-wrap:wrap;justify-content:center;align-items:flex-start;max-width:100%}
 .page{position:relative;background:#fff;box-shadow:var(--shadow);flex:none}
@@ -2937,7 +2938,8 @@ function setMode(m) {
   $('#toolbox').hidden = m !== 'tools';
   if (m === 'pages') renderOrganizer();
   if (m === 'tools') renderToolbox();
-  if (m === 'read' || m === 'comment') { const z = S.zoom; requestAnimationFrame(() => { if (Math.abs(computeScale() - S.scale) > 1e-3) { S.zoom = z; buildViewer(true); } }); }
+  // Größe kann sich geändert haben, während die Ansicht versteckt war: nur den Zoom anpassen, nicht alles neu aufbauen
+  if (m === 'read' || m === 'comment') requestAnimationFrame(() => { const cur = S.cur; if (typeof S.zoom === 'string' && Math.abs(computeScale() - S.scale) > 1e-3) { rezoom(S.zoom); scrollToPage(cur, false); } });
   applyToolClass(); renderCtx(); redrawAllOverlays();
 }
 

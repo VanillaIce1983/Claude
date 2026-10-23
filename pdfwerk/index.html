@@ -93,7 +93,8 @@ button{cursor:pointer}
 .empty{color:var(--muted);font-size:12.5px;padding:10px 4px}
 
 .desk{position:relative;min-width:0;min-height:0;background:var(--desk)}
-.viewer{position:absolute;inset:0;overflow:auto;outline:none}
+/* fester Platz für die Bildlaufleiste: sonst ändert ihr Erscheinen die Breite und damit den Zoom „Breite“ */
+.viewer{position:absolute;inset:0;overflow:auto;outline:none;scrollbar-gutter:stable}
 .pages{display:flex;flex-direction:column;align-items:center;gap:16px;padding:20px 16px 60px;min-width:min-content}
 .pages.spread{flex-direction:row;flex-wrap:wrap;justify-content:center;align-items:flex-start;max-width:100%}
 .page{position:relative;background:#fff;box-shadow:var(--shadow);flex:none}

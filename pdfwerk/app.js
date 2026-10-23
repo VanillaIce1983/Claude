@@ -2479,7 +2479,8 @@ function setMode(m) {
   $('#toolbox').hidden = m !== 'tools';
   if (m === 'pages') renderOrganizer();
   if (m === 'tools') renderToolbox();
-  if (m === 'read' || m === 'comment') { const z = S.zoom; requestAnimationFrame(() => { if (Math.abs(computeScale() - S.scale) > 1e-3) { S.zoom = z; buildViewer(true); } }); }
+  // Größe kann sich geändert haben, während die Ansicht versteckt war: nur den Zoom anpassen, nicht alles neu aufbauen
+  if (m === 'read' || m === 'comment') requestAnimationFrame(() => { const cur = S.cur; if (typeof S.zoom === 'string' && Math.abs(computeScale() - S.scale) > 1e-3) { rezoom(S.zoom); scrollToPage(cur, false); } });
   applyToolClass(); renderCtx(); redrawAllOverlays();
 }
 
