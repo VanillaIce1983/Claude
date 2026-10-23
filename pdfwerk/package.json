@@ -1,7 +1,7 @@
 {
   "name": "pdfwerk",
   "productName": "PDFwerk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "PDF-Viewer und -Editor",
   "author": "PDFwerk",
@@ -34,8 +34,16 @@
     "appId": "app.pdfwerk.desktop",
     "productName": "PDFwerk",
     "copyright": "© PDFwerk",
-    "directories": { "output": "release", "buildResources": "build" },
-    "files": ["desktop/**/*", "!desktop/*.d.ts", "dist/desktop/**/*", "package.json"],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "desktop/**/*",
+      "!desktop/*.d.ts",
+      "dist/desktop/**/*",
+      "package.json"
+    ],
     "asar": true,
     "npmRebuild": false,
     "publish": null,
@@ -47,11 +55,29 @@
     },
     "win": {
       "fileAssociations": [
-        { "ext": "pdf", "name": "PDFwerk.Dokument", "description": "PDF-Dokument", "mimeType": "application/pdf", "role": "Editor" }
+        {
+          "ext": "pdf",
+          "name": "PDFwerk.Dokument",
+          "description": "PDF-Dokument",
+          "mimeType": "application/pdf",
+          "role": "Editor"
+        }
       ],
       "target": [
-        { "target": "nsis", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "build/icon.png",
       "artifactName": "PDFwerk-${version}-win-${arch}.${ext}"
@@ -65,7 +91,9 @@
       "shortcutName": "PDFwerk",
       "uninstallDisplayName": "PDFwerk",
       "language": "1031",
-      "installerLanguages": ["de_DE"],
+      "installerLanguages": [
+        "de_DE"
+      ],
       "multiLanguageInstaller": false,
       "buildUniversalInstaller": false,
       "include": "scripts/installer.nsh",
@@ -73,12 +101,41 @@
     },
     "mac": {
       "fileAssociations": [
-        { "ext": "pdf", "name": "PDF-Dokument", "description": "PDF-Dokument", "role": "Editor" },
-        { "ext": ["png", "jpg", "jpeg", "webp", "gif"], "name": "Bild", "description": "Bild", "role": "Viewer", "rank": "Alternate" }
+        {
+          "ext": "pdf",
+          "name": "PDF-Dokument",
+          "description": "PDF-Dokument",
+          "role": "Editor"
+        },
+        {
+          "ext": [
+            "png",
+            "jpg",
+            "jpeg",
+            "webp",
+            "gif"
+          ],
+          "name": "Bild",
+          "description": "Bild",
+          "role": "Viewer",
+          "rank": "Alternate"
+        }
       ],
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.productivity",
       "icon": "build/icon.png",
@@ -94,9 +151,16 @@
     },
     "linux": {
       "fileAssociations": [
-        { "ext": "pdf", "name": "PDF-Dokument", "description": "PDF-Dokument", "mimeType": "application/pdf" }
+        {
+          "ext": "pdf",
+          "name": "PDF-Dokument",
+          "description": "PDF-Dokument",
+          "mimeType": "application/pdf"
+        }
       ],
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Office",
       "icon": "build/icon.png",
       "artifactName": "PDFwerk-${version}-${arch}.${ext}"

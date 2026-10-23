@@ -59,12 +59,12 @@ Dieselbe Oberfläche als installierbares Programm ([Electron](https://www.electr
 
 | System | Datei |
 | --- | --- |
-| Windows (fast alle PCs) | `PDFwerk-Setup-1.0.0-x64.exe` – Installationsprogramm |
-| Windows auf ARM (z. B. Snapdragon) | `PDFwerk-Setup-1.0.0-arm64.exe` |
-| Windows ohne Installation | `PDFwerk-1.0.0-win-x64.zip` bzw. `PDFwerk-1.0.0-win-arm64.zip` entpacken und `PDFwerk.exe` starten |
-| macOS mit Apple Silicon (M1 und neuer) | `PDFwerk-1.0.0-arm64.dmg` |
-| macOS mit Intel-Prozessor | `PDFwerk-1.0.0-x64.dmg` |
-| Linux | `PDFwerk-1.0.0-x86_64.AppImage` (ausführbar machen und starten) |
+| Windows (fast alle PCs) | `PDFwerk-Setup-1.0.1-x64.exe` – Installationsprogramm |
+| Windows auf ARM (z. B. Snapdragon) | `PDFwerk-Setup-1.0.1-arm64.exe` |
+| Windows ohne Installation | `PDFwerk-1.0.1-win-x64.zip` bzw. `PDFwerk-1.0.1-win-arm64.zip` entpacken und `PDFwerk.exe` starten |
+| macOS mit Apple Silicon (M1 und neuer) | `PDFwerk-1.0.1-arm64.dmg` |
+| macOS mit Intel-Prozessor | `PDFwerk-1.0.1-x64.dmg` |
+| Linux | `PDFwerk-1.0.1-x86_64.AppImage` (ausführbar machen und starten) |
 
 Welcher Mac: Apple-Menü → „Über diesen Mac“, Eintrag „Chip“ (Apple M…) oder „Prozessor“ (Intel).
 
