@@ -37,8 +37,12 @@ namespace Spiegelwerk.AssemblyContext
                 return $"Komponente \"{c.Name2}\" ist unterdrückt.";
             if (c.IsVirtual)
                 return $"Komponente \"{c.Name2}\" ist virtuell; bitte zuerst extern speichern.";
+            // Lightweight components have no document loaded; the file type tells without loading it.
             object doc = c.GetModelDoc2();
-            if (doc != null && !(doc is PartDoc))
+            bool isAssembly = doc != null
+                ? !(doc is PartDoc)
+                : string.Equals(Path.GetExtension(c.GetPathName() ?? ""), ".sldasm", StringComparison.OrdinalIgnoreCase);
+            if (isAssembly)
                 return $"Komponente \"{c.Name2}\" ist eine Baugruppe; gespiegelt werden nur Teile.";
             return null;
         }

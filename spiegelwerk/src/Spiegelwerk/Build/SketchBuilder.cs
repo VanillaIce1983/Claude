@@ -92,7 +92,7 @@ namespace Spiegelwerk.Build
         private void CreateGeometry(SketchMap map, List<string> notes)
         {
             SketchModel m = map.Mirrored.Sketch;
-            var merges = new List<(SketchPoint keep, SketchPoint other)>();
+            SketchRelationManager rm = map.Sketch.RelationManager;
 
             foreach (SkSegment seg in m.Segments)
             {
@@ -120,43 +120,29 @@ namespace Spiegelwerk.Build
                     if (!map.Points.TryGetValue(id, out SketchPoint existing))
                         map.Points[id] = got;
                     else if (SwDoc.IdOf(existing) != SwDoc.IdOf(got))
-                        merges.Add((existing, got));
+                        map.Points[id] = Weld(rm, existing, got, created, want, notes);
                     // Same id: SOLIDWORKS already welded the bit-identical endpoints on creation.
                 }
             }
 
             foreach (SkPoint p in m.FreePoints())
                 map.Points[p.Id] = _sm.CreatePoint(p.X, p.Y, 0);
-
-            // Endpoints shared in the original (one SketchPoint, two segments) that came out as
-            // two points are welded again so contours stay closed: merge first, coincident if
-            // the merge is refused.
-            SketchRelationManager rm = map.Sketch.RelationManager;
-            foreach (var (keep, other) in merges)
-            {
-                if (rm.AddRelation(new object[] { keep, other }, (int)swConstraintType_e.swConstraintType_MERGEPOINTS) != null) continue;
-                if (rm.AddRelation(new object[] { keep, other }, (int)swConstraintType_e.swConstraintType_COINCIDENT) != null) continue;
-                notes.Add($"Gemeinsamer Endpunkt bei ({keep.X * 1000:0.###}|{keep.Y * 1000:0.###}) mm konnte nicht verbunden werden; die Kontur ist eventuell offen.");
-            }
-
-            // A merge may remove either of the two points; read the surviving ones back.
-            if (merges.Count > 0) RefreshPoints(map);
         }
 
-        private static void RefreshPoints(SketchMap map)
+        /// <summary>
+        /// An endpoint shared in the original (one SketchPoint, several segments) that came out
+        /// as a second point is welded to the first right away: merge, or coincident if the merge
+        /// is refused. A merge removes one of the two points, so the survivor is read back from
+        /// the segment just created before the next segment at this corner is welded to it.
+        /// </summary>
+        private static SketchPoint Weld(SketchRelationManager rm, SketchPoint existing, SketchPoint got, SketchSegment created, SkPoint want, List<string> notes)
         {
-            SketchModel m = map.Mirrored.Sketch;
-            foreach (SkSegment seg in m.Segments)
-            {
-                if (!map.Segments.TryGetValue(seg.Id, out SketchSegment created)) continue;
-                List<SketchPoint> pts = PointsOf(created);
-                foreach (string id in seg.PointIds())
-                {
-                    SkPoint want = m.Point(id);
-                    SketchPoint? got = pts.OrderBy(p => Dist(p, want)).FirstOrDefault(p => Dist(p, want) <= Tol.Length);
-                    if (got != null) map.Points[id] = got;
-                }
-            }
+            if (rm.AddRelation(new object[] { existing, got }, (int)swConstraintType_e.swConstraintType_MERGEPOINTS) != null)
+                return PointsOf(created).Where(p => Dist(p, want) <= Tol.Length).OrderBy(p => Dist(p, want)).FirstOrDefault() ?? got;
+            if (rm.AddRelation(new object[] { existing, got }, (int)swConstraintType_e.swConstraintType_COINCIDENT) != null)
+                return existing;
+            notes.Add($"Gemeinsamer Endpunkt bei ({want.X * 1000:0.###}|{want.Y * 1000:0.###}) mm konnte nicht verbunden werden; die Kontur ist eventuell offen.");
+            return existing;
         }
 
         private SketchSegment? CreateSegment(SketchModel m, SkSegment s)
@@ -253,6 +239,11 @@ namespace Spiegelwerk.Build
                     CreateExternalLink(map, rel, notes);
                     continue;
                 }
+                if (rel.Kind == RelationKind.OffsetLink)
+                {
+                    CreateOffsetLink(map, rel, notes);
+                    continue;
+                }
 
                 string what = $"Beziehung {rel.Kind} zu {Describe(rel.Entities)}";
                 List<object>? objs = ResolveAll(map, rel.Entities, what, notes);
@@ -327,11 +318,44 @@ namespace Spiegelwerk.Build
         }
 
         /// <summary>
+        /// Offset entities keep their direction to the source – parallel for lines, concentric
+        /// for arcs and circles – and the captured offset dimension sets the distance. Nothing
+        /// is fixed: if the link cannot be made, the segment simply stays where it was drawn.
+        /// </summary>
+        private void CreateOffsetLink(SketchMap map, SkRelation rel, List<string> notes)
+        {
+            SketchRelationManager rm = map.Sketch.RelationManager;
+            SkRef source = rel.Entities[rel.Entities.Count - 1];
+            object? target = ResolveRef(map, source, notes);
+            if (target == null && !source.IsLocal && _ctx.Options.ExternalReferences == ExternalReferenceHandling.Fix)
+                target = Substitute(map, source);
+
+            foreach (SkRef local in rel.Entities.Take(rel.Entities.Count - 1))
+            {
+                if (!map.Segments.TryGetValue(local.Id, out SketchSegment seg)) continue;
+                SkSegment model = map.Mirrored.Sketch.Segment(local.Id);
+                RelationKind? link = model.Kind == SkSegmentKind.Line ? RelationKind.Parallel
+                    : model.Kind == SkSegmentKind.Arc || model.Kind == SkSegmentKind.Circle ? RelationKind.Concentric
+                    : (RelationKind?)null;
+                string what = $"Versetztes Element {local.Id}";
+                if (link == null || target == null)
+                    notes.Add($"{what}: ohne Bezug zur Quelle, bleibt an seiner Stelle.");
+                else if (!AddRelation(map, rm, new List<object> { seg, target }, link.Value))
+                    notes.Add($"{what}: {link} zur Quelle konnte nicht erzeugt werden.");
+            }
+        }
+
+        /// <summary>
         /// Resolves all entities of a relation or dimension. Missing external references get a
         /// fixed stand-in (Fix) or make the relation/dimension drop out (Drop). Null: skip it.
         /// </summary>
         private List<object>? ResolveAll(SketchMap map, List<SkRef> refs, string what, List<string> notes)
         {
+            if (refs.Count == 0)
+            {
+                notes.Add($"{what}: im Original ohne lesbare Bezüge, entfällt.");
+                return null;
+            }
             var result = new List<object>();
             foreach (SkRef r in refs)
             {
@@ -348,7 +372,7 @@ namespace Spiegelwerk.Build
                 }
                 result.Add(o);
             }
-            return result.Count > 0 ? result : null;
+            return result;
         }
 
         /// <summary>
@@ -391,10 +415,28 @@ namespace Spiegelwerk.Build
                         created = Construction(_sm.CreateCircleByRadius(c.X, c.Y, 0, r.Edge.Radius), rm);
                         break;
                     }
+                    case SkRefKind.Plane when !r.PlaneGeometry.Normal.IsParallelTo(frame.ZAxis, 1e-6):
+                    {
+                        // A plane crossing the sketch is seen in the sketch as the line where they meet.
+                        Line3? cut = r.PlaneGeometry.IntersectWith(frame.Plane);
+                        if (cut == null) break;
+                        Vec3 mid = cut.Value.Point + cut.Value.Direction * (SketchCentre(map) - cut.Value.Point).Dot(cut.Value.Direction);
+                        Vec3 a = Local(mid - cut.Value.Direction * 0.05), b = Local(mid + cut.Value.Direction * 0.05);
+                        created = Construction(_sm.CreateLine(a.X, a.Y, 0, b.X, b.Y, 0), rm);
+                        break;
+                    }
                 }
             }
             if (created != null) _substitutes[key] = created;
             return created;
+        }
+
+        private static Vec3 SketchCentre(SketchMap map)
+        {
+            SketchModel m = map.Mirrored.Sketch;
+            if (m.Points.Count == 0) return m.Frame.Origin;
+            Vec3 sum = m.Points.Aggregate(Vec3.Zero, (acc, pt) => acc + m.ToModel(pt));
+            return sum / m.Points.Count;
         }
 
         private static SketchSegment? Construction(SketchSegment? seg, SketchRelationManager rm)

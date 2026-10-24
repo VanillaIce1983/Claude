@@ -157,12 +157,19 @@ namespace Spiegelwerk.Core.Sketch
         Pierce,
 
         /// <summary>
-        /// "On edge" / "offset" link of converted or offset entities (swConstraintType USEEDGE,
-        /// OFFSETEDGE, SKETCHOFFSET). Not a relation SOLIDWORKS can add directly: the builder
-        /// re-links the segment to the mirrored edge (collinear/coradial) or applies the
-        /// fallback for missing references.
+        /// "On edge" link of converted entities (swConstraintType USEEDGE). Not a relation
+        /// SOLIDWORKS can add directly: the builder re-links the segment to the mirrored edge
+        /// (collinear/coradial) or applies the fallback for missing references.
         /// </summary>
         ExternalLink,
+
+        /// <summary>
+        /// Offset link of offset entities (OFFSETEDGE to a model edge, SKETCHOFFSET within the
+        /// sketch): the builder keeps the direction (parallel/concentric to the source) and lets
+        /// the captured offset dimension set the distance – never collinear, that would pull
+        /// the offset geometry onto its source.
+        /// </summary>
+        OffsetLink,
     }
 
     public sealed class SkRelation

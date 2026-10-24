@@ -89,6 +89,9 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Entries without a counterpart in the target.</summary>
         public IEnumerable<ReportEntry> NotMirrored => Entries.Where(e => !e.IsMirrored);
 
+        /// <summary>Entries that keep <see cref="AllMirrored"/> false: no counterpart, failed, or with a note to check.</summary>
+        public IEnumerable<ReportEntry> Blocking => Entries.Where(e => !(e.Status == ReportStatus.Ok || (e.Status == ReportStatus.Skipped && e.HasEquivalent)));
+
         public string Summary =>
             $"{Count(ReportStatus.Ok)} in Ordnung, {Count(ReportStatus.Warning)} mit Hinweis, " +
             $"{Count(ReportStatus.Failed)} fehlgeschlagen, {Count(ReportStatus.Skipped)} übersprungen" +

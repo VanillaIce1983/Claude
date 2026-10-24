@@ -33,6 +33,17 @@ namespace Spiegelwerk.Core.Geometry
 
         public Plane3 Flipped() => new Plane3(Origin, -Normal);
 
+        /// <summary>The line where two planes meet; null if they are parallel.</summary>
+        public Line3? IntersectWith(Plane3 o)
+        {
+            Vec3 u = Normal.Cross(o.Normal);
+            if (u.Length <= Tol.Angle) return null;
+            // With d = n·p₀ for each plane: p = (d₁ (n₂ × u) + d₂ (u × n₁)) / |u|² lies on both.
+            double d1 = Normal.Dot(Origin), d2 = o.Normal.Dot(o.Origin);
+            Vec3 p = (o.Normal.Cross(u) * d1 + u.Cross(Normal) * d2) / u.Dot(u);
+            return new Line3(p, u);
+        }
+
         /// <summary>The point of the plane closest to the world origin; a canonical origin.</summary>
         public Vec3 ClosestPointToOrigin() => Project(Vec3.Zero);
 

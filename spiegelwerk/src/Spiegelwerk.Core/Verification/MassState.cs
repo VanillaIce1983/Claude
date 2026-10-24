@@ -66,13 +66,17 @@ namespace Spiegelwerk.Core.Verification
         /// <summary>Characteristic length for the moment noise of parts lying around the origin, metres.</summary>
         private const double NoiseLength = 0.01;
 
-        public MassComparison(double volumeRatio, double momentRatio, double volumeError, double centroidError)
+        public MassComparison(double volumeRatio, double momentRatio, double volumeError, double centroidError, bool noNetVolume = false)
         {
             VolumeRatio = volumeRatio;
             MomentRatio = momentRatio;
             VolumeError = volumeError;
             CentroidError = centroidError;
+            NoNetVolume = noNetVolume;
         }
+
+        /// <summary>The expected change has (almost) no net volume; a centroid of it is meaningless.</summary>
+        public bool NoNetVolume { get; }
 
         /// <summary>Volume difference divided by its tolerance (≤ 1 passes).</summary>
         public double VolumeRatio { get; }
@@ -101,10 +105,14 @@ namespace Spiegelwerk.Core.Verification
             double dv = Math.Abs(expected.Volume - actual.Volume);
             double dm = (expected.Moment - actual.Moment).Length;
             double scale = Math.Max(v, volTol);
-            return new MassComparison(dv / volTol, dm / momTol, dv / scale, dm / scale);
+            return new MassComparison(dv / volTol, dm / momTol, dv / scale, dm / scale, v <= volTol);
         }
 
-        public override string ToString() =>
-            Passes ? "Volumen und Schwerpunkt stimmen" : $"Abweichung: Volumen {VolumeError:P3}, Schwerpunkt {CentroidError * 1000:0.###} mm";
+        public override string ToString()
+        {
+            if (Passes) return "Volumen und Schwerpunkt stimmen";
+            if (NoNetVolume) return $"Abweichung: Änderung ohne Nettovolumen, Moment {MomentRatio:0.#}-fach über der Toleranz";
+            return $"Abweichung: Volumen {VolumeError:P3}, Schwerpunkt {CentroidError * 1000:0.###} mm";
+        }
     }
 }

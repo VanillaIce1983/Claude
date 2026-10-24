@@ -286,10 +286,10 @@ namespace Spiegelwerk.Build
         {
             if (!report.AllMirrored)
             {
-                var missing = report.NotMirrored.Select(e => e.Feature).ToList();
-                report.General.Add(missing.Count > 0
-                    ? $"Original nicht gelöscht: ohne fehlerfreies Gegenstück sind {string.Join(", ", missing)}."
-                    : "Original nicht gelöscht, weil nicht alle Features fehlerfrei gespiegelt wurden.");
+                var blocking = report.Blocking.Select(e => $"{e.Feature} ({MirrorReport.StatusText(e.Status)})").ToList();
+                report.General.Add(blocking.Count > 0
+                    ? $"Original nicht gelöscht: ohne fehlerfreies Gegenstück sind {string.Join(", ", blocking)}."
+                    : "Original nicht gelöscht, weil der Lauf abgebrochen wurde.");
                 return;
             }
             var names = new HashSet<string>(originals.Select(f => f.Name), StringComparer.Ordinal);

@@ -29,22 +29,44 @@ namespace Spiegelwerk.Capture
             List<Feature> result = Select(all, standard, features, bodies);
 
             var kept = new List<Feature>();
+            var skippedNames = new HashSet<string>(StringComparer.Ordinal);
             foreach (Feature f in result)
             {
-                string? reason = SkipReason(f);
-                if (reason == null) kept.Add(f);
-                else skipped.Add((f, reason));
+                string? reason = SkipReason(f) ?? SkippedSketchOf(f, skippedNames);
+                if (reason == null)
+                {
+                    kept.Add(f);
+                }
+                else
+                {
+                    skipped.Add((f, reason));
+                    skippedNames.Add(f.Name);
+                }
             }
             return kept;
         }
 
+        /// <summary>
+        /// Suppressed features, and features (not sketches) that fail in the original. A sketch
+        /// with an error may still feed a healthy feature; the copy gets its own status check.
+        /// </summary>
         private static string? SkipReason(Feature f)
         {
             if (f.IsSuppressed()) return "Im Original unterdrückt – nicht gespiegelt.";
+            if (SwDoc.IsSketch(f)) return null;
             bool isWarning = false;
             int code = f.GetErrorCode2(out isWarning);
             if (code != 0 && !isWarning) return $"Im Original fehlerhaft (Code {code}) – nicht gespiegelt.";
             return null;
+        }
+
+        /// <summary>A feature whose sketch was left out cannot be built either; say why.</summary>
+        private static string? SkippedSketchOf(Feature f, HashSet<string> skippedNames)
+        {
+            IEnumerable<Feature> sketches = SwDoc.SubFeatures(f).Where(SwDoc.IsSketch);
+            if (f.GetParents() is object[] parents) sketches = sketches.Concat(parents.OfType<Feature>().Where(SwDoc.IsSketch));
+            Feature? missing = sketches.FirstOrDefault(s => skippedNames.Contains(s.Name));
+            return missing == null ? null : $"Skizze \"{missing.Name}\" wurde übersprungen – nicht gespiegelt.";
         }
 
         private static List<Feature> Select(List<Feature> all, HashSet<string> standard, IReadOnlyCollection<Feature> features, IReadOnlyCollection<Body2> bodies)

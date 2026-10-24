@@ -120,8 +120,10 @@ namespace Spiegelwerk.Capture
                 }
                 if (r.FeatureScope && !r.AutoSelect)
                     r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
-                ReadSide(d, true, r.Side1, r.IsThin);
-                if (r.BothDirections || r.IsThin) ReadSide(d, false, r.Side2, r.IsThin);
+                ReadSide(d, true, r.Side1, r.IsThin, true);
+                // A single-direction thin feature still needs the second wall thickness; its
+                // direction-2 end condition is unused (and may hold stale settings).
+                if (r.BothDirections || r.IsThin) ReadSide(d, false, r.Side2, r.IsThin, r.BothDirections);
 
                 // "Direction of extrusion": extruded along a line/edge/plane normal instead of the sketch normal.
                 d.GetDirectionReference(out object dir1, out int _, out object dir2, out int _);
@@ -150,7 +152,7 @@ namespace Spiegelwerk.Capture
             }
         }
 
-        private void ReadSide(ExtrudeFeatureData2 d, bool forward, ExtrudeSide side, bool thin)
+        private void ReadSide(ExtrudeFeatureData2 d, bool forward, ExtrudeSide side, bool thin, bool used)
         {
             side.End = (EndCondition)d.GetEndCondition(forward);
             side.Depth = d.GetDepth(forward);
@@ -160,7 +162,7 @@ namespace Spiegelwerk.Capture
             side.OffsetReverse = d.GetReverseOffset(forward);
             side.TranslateSurface = d.GetTranslateSurface(forward);
             if (thin) side.WallThickness = d.GetWallThickness(forward);
-            if (ExtrudeSide.NeedsReference(side.End))
+            if (used && ExtrudeSide.NeedsReference(side.End))
             {
                 object reference = d.GetEndConditionReference(forward, out int _);
                 side.Reference = ToGeometryRef(reference);

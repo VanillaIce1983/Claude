@@ -215,7 +215,7 @@ namespace Spiegelwerk.UI
                         }
                         catch (Exception ex)
                         {
-                            report.General.Add($"— {name}: nicht gespiegelt – {ex.Message}");
+                            report.Entries.Add(new ReportEntry(name, "Komponente", ReportStatus.Failed, $"nicht gespiegelt – {ex.Message}"));
                             if (_options.StopOnError)
                             {
                                 report.Aborted = true;

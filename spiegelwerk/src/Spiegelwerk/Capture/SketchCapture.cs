@@ -147,15 +147,27 @@ namespace Spiegelwerk.Capture
             foreach (SketchRelation rel in Objects<SketchRelation>(rm.GetRelations((int)swSketchRelationFilterType_e.swAll)))
             {
                 var type = (swConstraintType_e)rel.GetRelationType();
-                if (IsExternalLink(type))
+                if (type == swConstraintType_e.swConstraintType_USEEDGE)
                 {
-                    // Converted/offset entities: the segment(s) of this sketch plus the edge or
-                    // entity they were derived from (definition entities).
-                    var locals = Objects<object>(rel.GetEntities()).Select(e => ToRef(e, self)).Where(r => r.IsLocal);
-                    var sources = Objects<object>(rel.GetDefinitionEntities2()).Concat(Objects<object>(rel.GetEntities()))
+                    // Converted entities: the segment(s) of this sketch plus the model edge they lie on.
+                    var locals = Objects<object>(rel.GetEntities()).Select(e => ToRef(e, self)).Where(r => r.IsLocal).ToList();
+                    var source = Objects<object>(rel.GetDefinitionEntities2()).Concat(Objects<object>(rel.GetEntities()))
                         .Select(e => ToRef(e, self)).Where(r => !r.IsLocal).Take(1);
-                    var link = locals.Concat(sources).ToList();
-                    if (link.Any(r => r.IsLocal)) model.Relations.Add(new SkRelation(RelationKind.ExternalLink, link));
+                    if (locals.Count > 0) model.Relations.Add(new SkRelation(RelationKind.ExternalLink, locals.Concat(source)));
+                    continue;
+                }
+                if (type == swConstraintType_e.swConstraintType_OFFSETEDGE || type == swConstraintType_e.swConstraintType_SKETCHOFFSET)
+                {
+                    // Offset entities: the offset segment(s) plus their source – a model edge, or a
+                    // segment of this same sketch – as the last entity.
+                    var offsets = Objects<object>(rel.GetEntities()).Select(e => ToRef(e, self)).Where(r => r.Kind == SkRefKind.Segment).ToList();
+                    var offsetIds = new HashSet<string>(offsets.Select(r => r.Id));
+                    SkRef? source = Objects<object>(rel.GetDefinitionEntities2()).Select(e => ToRef(e, self))
+                        .FirstOrDefault(r => !(r.Kind == SkRefKind.Segment && offsetIds.Contains(r.Id)) && r.Kind != SkRefKind.Point);
+                    if (offsets.Count > 0 && source != null)
+                        model.Relations.Add(new SkRelation(RelationKind.OffsetLink, offsets.Concat(new[] { source })));
+                    else
+                        model.Warnings.Add("Versatz-Beziehung ohne lesbare Quelle wird nicht übernommen; die versetzten Elemente bleiben an ihrer Stelle.");
                     continue;
                 }
                 RelationKind? kind = MapRelation(type);
@@ -312,10 +324,7 @@ namespace Spiegelwerk.Capture
             _ => Array.Empty<string>(),
         };
 
-        /// <summary>"On edge" of converted entities, offset entities.</summary>
-        private static bool IsExternalLink(swConstraintType_e t) =>
-            t == swConstraintType_e.swConstraintType_USEEDGE || t == swConstraintType_e.swConstraintType_OFFSETEDGE ||
-            t == swConstraintType_e.swConstraintType_SKETCHOFFSET;
+
 
         /// <summary>Relations that are only the solver's view of a dimension; dimensions are read separately.</summary>
         private static bool IsDimensionConstraint(swConstraintType_e t) =>

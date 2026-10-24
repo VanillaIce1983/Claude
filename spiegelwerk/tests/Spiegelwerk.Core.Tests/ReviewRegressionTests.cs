@@ -135,6 +135,36 @@ namespace Spiegelwerk.Core.Tests
             Assert.Throws<ArgumentException>(() => SketchMirror.Mirror(s, new Reflection(Plane3.RightYZ), target));
         }
 
+        [Fact]
+        public void Two_planes_meet_in_a_line_on_both()
+        {
+            var rnd = new Random(31);
+            for (int i = 0; i < 50; i++)
+            {
+                var a = new Plane3(RandomPoint(rnd), RandomUnit(rnd));
+                var b = new Plane3(RandomPoint(rnd), RandomUnit(rnd));
+                Line3? l = a.IntersectWith(b);
+                Assert.NotNull(l);
+                foreach (double t in new[] { -0.3, 0, 0.7 })
+                {
+                    Vec3 q = l!.Value.Point + l.Value.Direction * t;
+                    Assert.True(a.Contains(q, 1e-9) && b.Contains(q, 1e-9));
+                }
+            }
+            Assert.Null(Plane3.FrontXY.IntersectWith(new Plane3(new Vec3(0, 0, 0.01), -Vec3.UnitZ)));
+        }
+
+        [Fact]
+        public void Report_text_for_a_change_without_net_volume_shows_the_moment()
+        {
+            double dv = 4e-8;
+            MassState right = MassState.FromBodies(new[] { (dv, new Vec3(0.02, 0, 0)), (-dv, new Vec3(-0.02, 0, 0)) });
+            MassState wrong = MassState.FromBodies(new[] { (dv, new Vec3(-0.02, 0, 0)), (-dv, new Vec3(0.02, 0, 0)) });
+            MassComparison cmp = MassComparison.Compare(right, wrong, new MassState(1e-4, Vec3.Zero));
+            Assert.True(cmp.NoNetVolume);
+            Assert.Contains("ohne Nettovolumen", cmp.ToString());
+        }
+
         // ------------------------------------------------------------ report
 
         private static FeatureRecord Rec(string name) => new UnsupportedRecord(name, "X", "", false);
@@ -154,6 +184,8 @@ namespace Spiegelwerk.Core.Tests
 
             report.Add(Rec("Fase1"), ReportStatus.Warning, "");
             Assert.False(report.AllMirrored);
+            // The explanation must name everything that blocks, warnings included.
+            Assert.Equal(new[] { "Fase1" }, report.Blocking.Select(e => e.Feature));
         }
     }
 }
