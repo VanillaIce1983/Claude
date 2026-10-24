@@ -22,12 +22,16 @@ namespace Spiegelwerk.Capture
         /// their absorbed sketches) and features already failing in the original. Rebuilding a
         /// suppressed feature unsuppressed would change the part.
         /// </param>
+        /// <param name="seedBodies">
+        /// The features of the seed bodies of a selected body pattern were pulled in: like
+        /// selected bodies, they have to be rebuilt as a body of their own.
+        /// </param>
         public static List<Feature> Collect(ModelDoc2 doc, SwMath math, IReadOnlyCollection<Feature> features, IReadOnlyCollection<Body2> bodies,
-            List<(Feature feature, string reason)> skipped)
+            List<(Feature feature, string reason)> skipped, out bool seedBodies)
         {
             List<Feature> all = SwDoc.FeaturesInCreationOrder(doc);
             var standard = new HashSet<string>(SwDoc.StandardPlanes(doc, math).Select(f => f.Name), StringComparer.Ordinal);
-            List<Feature> result = Select(doc, all, standard, features, bodies);
+            List<Feature> result = Select(doc, all, standard, features, bodies, out seedBodies);
 
             var kept = new List<Feature>();
             var skippedNames = new HashSet<string>(StringComparer.Ordinal);
@@ -70,8 +74,10 @@ namespace Spiegelwerk.Capture
             return missing == null ? null : $"Skizze \"{missing.Name}\" wurde übersprungen – nicht gespiegelt.";
         }
 
-        private static List<Feature> Select(ModelDoc2 doc, List<Feature> all, HashSet<string> standard, IReadOnlyCollection<Feature> features, IReadOnlyCollection<Body2> bodies)
+        private static List<Feature> Select(ModelDoc2 doc, List<Feature> all, HashSet<string> standard, IReadOnlyCollection<Feature> features,
+            IReadOnlyCollection<Body2> bodies, out bool seedBodies)
         {
+            seedBodies = false;
             if (features.Count == 0 && bodies.Count == 0)
                 return all.Where(f => !SwDoc.IsSystemFeature(f) && !standard.Contains(f.Name)).ToList();
 
@@ -84,7 +90,7 @@ namespace Spiegelwerk.Capture
             // Seeds of wanted patterns (also of patterns of patterns).
             var queue = new Queue<Feature>(all.Where(x => wanted.Contains(x.Name)));
             while (queue.Count > 0)
-                foreach (Feature seed in SeedsOf(doc, queue.Dequeue()))
+                foreach (Feature seed in SeedsOf(doc, queue.Dequeue(), ref seedBodies))
                     if (wanted.Add(seed.Name)) queue.Enqueue(seed);
 
             // Sketches the wanted features are built from (absorbed or shared).
@@ -102,7 +108,7 @@ namespace Spiegelwerk.Capture
         /// What a linear or circular pattern repeats: its seed features, the features the seed
         /// faces belong to, the features that made the seed bodies (as when bodies are selected).
         /// </summary>
-        private static List<Feature> SeedsOf(ModelDoc2 doc, Feature f)
+        private static List<Feature> SeedsOf(ModelDoc2 doc, Feature f, ref bool seedBodies)
         {
             var result = new List<Feature>();
             switch (f.GetDefinition())
@@ -110,7 +116,7 @@ namespace Spiegelwerk.Capture
                 case LinearPatternFeatureData lp when lp.AccessSelections(doc, null):
                     try
                     {
-                        AddSeeds(result, lp.BodyPattern, lp.PatternFeatureArray, lp.PatternFaceArray, lp.PatternBodyArray);
+                        seedBodies |= AddSeeds(result, lp.BodyPattern, lp.PatternFeatureArray, lp.PatternFaceArray, lp.PatternBodyArray);
                     }
                     finally
                     {
@@ -120,7 +126,7 @@ namespace Spiegelwerk.Capture
                 case CircularPatternFeatureData cp when cp.AccessSelections(doc, null):
                     try
                     {
-                        AddSeeds(result, cp.BodyPattern, cp.PatternFeatureArray, cp.PatternFaceArray, cp.PatternBodyArray);
+                        seedBodies |= AddSeeds(result, cp.BodyPattern, cp.PatternFeatureArray, cp.PatternFaceArray, cp.PatternBodyArray);
                     }
                     finally
                     {
@@ -131,19 +137,22 @@ namespace Spiegelwerk.Capture
             return result;
         }
 
-        private static void AddSeeds(List<Feature> into, bool bodyPattern, object features, object faces, object bodies)
+        /// <returns>True if features of seed bodies were added.</returns>
+        private static bool AddSeeds(List<Feature> into, bool bodyPattern, object features, object faces, object bodies)
         {
             if (bodyPattern)
             {
+                int before = into.Count;
                 if (bodies is object[] bs)
                     foreach (Body2 b in bs.OfType<Body2>())
                         if (b.GetFeatures() is object[] made) into.AddRange(made.OfType<Feature>());
-                return;
+                return into.Count > before;
             }
             if (features is object[] fs) into.AddRange(fs.OfType<Feature>());
             if (faces is object[] fcs)
                 foreach (Face2 face in fcs.OfType<Face2>())
                     if (face.GetFeature() is Feature owner) into.Add(owner);
+            return false;
         }
     }
 }

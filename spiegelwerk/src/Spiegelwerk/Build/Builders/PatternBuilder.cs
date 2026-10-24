@@ -41,8 +41,13 @@ namespace Spiegelwerk.Build.Builders
             var r = (PatternRecord)record;
             var notes = new List<string>();
 
-            // Directions first: they may add a helper plane or axis, after which faces and
-            // bodies found earlier would be stale.
+            // Nothing to pattern: fail before a direction can add a helper plane or axis.
+            if (FindSeeds(ctx, r, new List<string>()) == null)
+                return Fail("Keines der Saat-Elemente des Musters wurde im Ziel gefunden" +
+                            (r.SeedFeatures.Count == 0 ? " (bei Flächen- und Körpermustern müssen die Features, aus denen die Saat stammt, mitgespiegelt werden)." : "."), notes);
+
+            // Directions next: they may add a helper plane or axis, after which faces and
+            // bodies found earlier would be stale – the seeds are therefore looked up again.
             object? dir1, dir2 = null;
             if (r is LinearPatternRecord lin)
             {

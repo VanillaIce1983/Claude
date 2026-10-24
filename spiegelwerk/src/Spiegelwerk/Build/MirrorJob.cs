@@ -88,7 +88,7 @@ namespace Spiegelwerk.Build
                 throw new InvalidOperationException("Die Rückrollleiste steht nicht am Ende des Feature-Baums. Bitte ans Ende setzen und erneut spiegeln.");
 
             var skipped = new List<(Feature feature, string reason)>();
-            List<Feature> features = FeatureCollector.Collect(source, _math, req.Features, req.Bodies, skipped);
+            List<Feature> features = FeatureCollector.Collect(source, _math, req.Features, req.Bodies, skipped, out bool seedBodies);
             foreach (var (feature, reason) in skipped)
                 report.Entries.Add(new ReportEntry(feature.Name, feature.GetTypeName2(), ReportStatus.Skipped, reason));
             if (features.Count == 0)
@@ -104,7 +104,8 @@ namespace Spiegelwerk.Build
             // ---- 2. target
             ModelDoc2 target = opt.Target == MirrorTarget.SamePart ? source : CreatePart(source, opt, report);
             report.TargetName = target.GetTitle();
-            bool separateBody = opt.Target == MirrorTarget.SamePart && (req.Features.Count == 0 || req.Bodies.Count > 0);
+            // Whole part, selected bodies, or seed bodies of a selected body pattern: a body of its own.
+            bool separateBody = opt.Target == MirrorTarget.SamePart && (req.Features.Count == 0 || req.Bodies.Count > 0 || seedBodies);
             var ctx = new BuildContext(_sw, target, _math, new Reflection(req.MirrorPlane), opt, report, separateBody);
             report.General.Add($"Spiegelebene: {req.MirrorPlane}");
 
