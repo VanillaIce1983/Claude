@@ -127,7 +127,7 @@ Volumen V und erstes Moment M = Σ Vᵢ·cᵢ aller Volumenkörper sind additiv;
 
     V′ = V,    M′ = M − 2((M − V·p₀)·n)n
 
-`MassComparison` vergleicht die relative Volumenabweichung und den Abstand der Schwerpunkte der Änderung (Grenze 10 µm). Damit wird aus „in welche Richtung legt SOLIDWORKS das standardmäßig?“ eine Messung.
+`MassComparison` vergleicht Volumen und Moment getrennt – relativ zur Größe der Änderung (1e-4 beim Volumen, 10 µm beim Schwerpunkt), aber nie feiner als das Rauschen, das aus dem ganzen Teil folgt. Getrennt deshalb, weil eine Änderung mit dem Nettovolumen null (eine Verrundung, die innen ansetzt und außen wegnimmt) trotzdem ein klares Moment hat. Damit wird aus „in welche Richtung legt SOLIDWORKS das standardmäßig?“ eine Messung; eine Variante, die das Feature in einen Fehlerzustand bringt, gewinnt dabei nie.
 
 ### Baugruppe
 
@@ -151,15 +151,17 @@ Die Standardebenen werden über ihre Geometrie gefunden, nicht über den Namen (
 
 Kanten und Flächen haben keine dokumentübergreifende Identität. Spiegelwerk speichert beim Erfassen einen Fingerabdruck (`EdgeSignature`: Kurventyp, Endpunkte, Punkt in Parametermitte, Länge, bei Kreisen Mittelpunkt/Radius/Achse; `FaceSignature`: Flächentyp, Inhalt, ein Punkt auf der Fläche, bei Ebenen die Außennormale). Gelesen wird während `AccessSelections` – dann ist das Modell auf den Stand des Features zurückgerollt, und eine Kante, die später von einer Verrundung geteilt wird, ist noch ganz.
 
-Beim Aufbau wird der gespiegelte Fingerabdruck im Ziel gesucht (`TopologyMatcher`). Das Ziel befindet sich in diesem Moment genau im gespiegelten Zustand des Originals, deshalb passt die Suche exakt. Zwei Halbkreise mit gleichen Endpunkten unterscheidet der Mittelpunkt; gibt es dieselbe Kante zweimal (selbes Teil, Kante auf der Spiegelebene), gewinnt der Körper, den der Lauf selbst erzeugt hat.
+Beim Aufbau wird der gespiegelte Fingerabdruck im Ziel gesucht (`TopologyMatcher`). Das Ziel befindet sich in diesem Moment genau im gespiegelten Zustand des Originals, deshalb passt die Suche exakt. Zwei Halbkreise mit gleichen Endpunkten unterscheidet der Mittelpunkt; gibt es dieselbe Kante zweimal (selbes Teil, Kante auf der Spiegelebene), gewinnt der Körper, den der Lauf selbst erzeugt hat. Geschlossene Kanten haben eine Naht, die der Kern frei wählt: Vollkreise werden deshalb über Mittelpunkt, Radius und Achse verglichen, geschlossene Ellipsen und Splines über den Abstand der gespiegelten Punkte zur Kandidatenkurve, den der Kern misst. Bezüge, die vor dem Erzeugen eines Features gefunden werden, gehen als „sichere“ Entitäten (`GetSafeEntity`) über den Neuaufbau.
 
 Findet sich eine ebene Bezugsfläche nicht, wird eine Ebene durch die gespiegelte Fläche verwendet; „bis Fläche“ auf eine zur Skizze parallele Ebene kann auch in die gleichwertige feste Tiefe umgewandelt werden.
 
 ## Selbes Teil
 
-Wird das ganze Teil oder ein Körper im selben Teil gespiegelt, entsteht ein eigener Körper: Der erste Aufsatz verschmilzt nicht, alle folgenden Schnitte und verschmelzenden Aufsätze werden über den Feature-Bereich auf die vom Lauf erzeugten Körper beschränkt. So schneidet ein gespiegelter Schnitt nie das Original, auch wenn sich beide überlappen. Feature-Namen bekommen den Namenszusatz.
+Wird das ganze Teil oder ein Körper im selben Teil gespiegelt, entsteht ein eigener Körper. Aufsätze werden zunächst ohne Verschmelzen erzeugt; Verschmelzen und Feature-Bereich setzt dann ein einziges `ModifyDefinition`, und zwar mit den Körpern aus dem zurückgerollten Zustand vor dem Feature – dort gibt es den gespiegelten Körper noch für sich, nie schon mit dem Original verschmolzen. Schnitte wirken nur auf die vom Lauf erzeugten Körper; gibt es noch keinen, wird der Schnitt gar nicht angelegt. Lässt sich der Feature-Bereich nicht setzen, wird das Feature wieder entfernt. So schneidet oder verschmilzt ein gespiegeltes Feature nie mit dem Original, auch wenn sich beide berühren – ein Fall, den der Volumenvergleich nicht sehen könnte. Feature-Namen bekommen den Namenszusatz.
 
-„Original löschen“ wird nur ausgeführt, wenn alle Features fehlerfrei gespiegelt wurden und kein anderes Feature vom Original abhängt.
+Ebenen des Originals verwendet der `PlaneResolver` im selben Teil nicht: Er kennt nur die Standardebenen und die Ebenen, die der Lauf selbst anlegt.
+
+„Original löschen“ wird nur ausgeführt, wenn jedes Feature ein fehlerfreies Gegenstück hat (`MirrorReport.AllMirrored` – übersprungene Achsen, 3D-Skizzen oder Koordinatensysteme blockieren) und kein anderes Feature vom Original abhängt.
 
 ## Einen Feature-Typ ergänzen
 

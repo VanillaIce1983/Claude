@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using SolidWorks.Interop.sldworks;
@@ -140,8 +141,8 @@ namespace Spiegelwerk.UI
             var g4 = (PropertyManagerPageGroup)_page.AddGroupBox(GrpCheck, "Prüfung und Bezüge", groupOpts);
             _chkVerify = Check(g4, ChkVerify, "Jeden Schritt prüfen (Volumen, Schwerpunkt)",
                 "Vergleicht jedes neue Feature mit dem gespiegelten Original und korrigiert Richtungen", true);
-            _chkFix = Check(g4, ChkFix, "Fehlende Skizzenbezüge fixieren",
-                "Beziehungen zu Elementen, die es im Ziel nicht gibt, werden durch 'Fixiert' ersetzt statt weggelassen", true);
+            _chkFix = Check(g4, ChkFix, "Fehlende Skizzenbezüge ersetzen",
+                "Bezüge, die es im Ziel nicht gibt (Ursprung, Kanten), werden durch fixierte Hilfsgeometrie an gespiegelter Lage ersetzt statt weggelassen", true);
             _chkStop = Check(g4, ChkStop, "Beim ersten Fehler abbrechen", "", false);
         }
 
@@ -181,7 +182,9 @@ namespace Spiegelwerk.UI
             _options.VerifySteps = _chkVerify.Checked;
             _options.ExternalReferences = _chkFix.Checked ? ExternalReferenceHandling.Fix : ExternalReferenceHandling.Drop;
             _options.StopOnError = _chkStop.Checked;
-            string suffix = _txtSuffix.Text?.Trim() ?? "";
+            // Used in file names (assembly) and feature names (same part): keep it to characters both accept.
+            char[] invalid = System.IO.Path.GetInvalidFileNameChars().Concat(new[] { '@' }).ToArray();
+            string suffix = new string((_txtSuffix.Text ?? "").Trim().Where(ch => Array.IndexOf(invalid, ch) < 0).ToArray());
             _options.NameSuffix = suffix.Length > 0 ? suffix : "_gespiegelt";
         }
 
@@ -201,7 +204,25 @@ namespace Spiegelwerk.UI
                     report = new MirrorReport();
                     var asm = new AssemblyMirror(_sw);
                     foreach (Component2 c in _components)
-                        report.Append(asm.Run((AssemblyDoc)_doc, c, _plane.Value, _options).Report, c.Name2);
+                    {
+                        // One component failing must not cost the report of the ones already saved and inserted.
+                        string name = c.Name2;
+                        try
+                        {
+                            MirrorReport part = asm.Run((AssemblyDoc)_doc, c, _plane.Value, _options).Report;
+                            report.Append(part, name);
+                            if (part.Aborted && _options.StopOnError) break;
+                        }
+                        catch (Exception ex)
+                        {
+                            report.General.Add($"— {name}: nicht gespiegelt – {ex.Message}");
+                            if (_options.StopOnError)
+                            {
+                                report.Aborted = true;
+                                break;
+                            }
+                        }
+                    }
                 }
                 else
                 {
@@ -283,6 +304,8 @@ namespace Spiegelwerk.UI
         {
             // Only planar faces make a mirror plane.
             if (Id == SelPlane && Selection is Face2 f) return TopologyCapture.PlaneOfFace(f).HasValue;
+            // Sub-assemblies, virtual and suppressed components cannot be mirrored: refuse them right away.
+            if (Id == SelItems && Selection is Component2 c) return AssemblyMirror.CheckComponent(c) == null;
             return true;
         }
 

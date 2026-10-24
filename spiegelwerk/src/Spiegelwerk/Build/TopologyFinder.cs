@@ -50,10 +50,18 @@ namespace Spiegelwerk.Build
         public Edge? FindEdge(EdgeSignature mirrored, List<string> notes)
         {
             Load();
-            MatchResult m = TopologyMatcher.FindEdge(mirrored, _edges!.Select(e => e.sig).ToList(), i => _edges![i].own);
+            List<(Edge edge, EdgeSignature sig, bool own)> edges = _edges!;
+            MatchResult m = TopologyMatcher.FindEdge(mirrored, edges.Select(e => e.sig).ToList(), i => edges[i].own,
+                (i, p) => DistanceToEdge(edges[i].edge, p));
             if (!m.Found) return null;
             if (m.Ambiguous) notes.Add($"Kante {mirrored}: {m.Candidates} Kandidaten, die passendste wurde gewählt.");
-            return _edges![m.Index].edge;
+            return edges[m.Index].edge;
+        }
+
+        private static double DistanceToEdge(Edge e, Vec3 p)
+        {
+            var c = e.GetClosestPointOn(p.X, p.Y, p.Z) as double[];
+            return c == null || c.Length < 3 ? double.PositiveInfinity : Vec3.FromArray(c).DistanceTo(p);
         }
 
         public Face2? FindFace(FaceSignature mirrored, List<string> notes)
@@ -67,23 +75,36 @@ namespace Spiegelwerk.Build
             return faces[m.Index].face;
         }
 
+        /// <summary>A vertex at the given point; on a body this job created, if there is one there too.</summary>
         public Vertex? FindVertex(Vec3 mirrored)
         {
+            Vertex? fallback = null;
             foreach (Body2 body in Sw.SwDoc.SolidBodies(_ctx.Doc))
+            {
+                bool own = _ctx.IsOwnBody(body);
                 if (body.GetVertices() is object[] vs)
                     foreach (Vertex v in vs.OfType<Vertex>())
-                        if (TopologyCapture.Vertex(v).AlmostEquals(mirrored)) return v;
-            return null;
+                        if (TopologyCapture.Vertex(v).AlmostEquals(mirrored))
+                        {
+                            if (own) return v;
+                            fallback ??= v;
+                        }
+            }
+            return fallback;
         }
 
-        /// <summary>A linear edge of the target lying on the given line.</summary>
+        /// <summary>A linear edge of the target lying on the given line, preferring bodies this job created.</summary>
         public Edge? FindLinearEdgeOn(Line3 line)
         {
             Load();
-            foreach (var (edge, sig, _) in _edges!)
+            Edge? fallback = null;
+            foreach (var (edge, sig, own) in _edges!)
                 if (sig.Kind == CurveKind.Line && line.DistanceTo(sig.Start) <= Tol.Length && line.DistanceTo(sig.End) <= Tol.Length)
-                    return edge;
-            return null;
+                {
+                    if (own) return edge;
+                    fallback ??= edge;
+                }
+            return fallback;
         }
 
         /// <summary>

@@ -26,11 +26,17 @@ namespace Spiegelwerk.Build
             _ctx = ctx;
         }
 
+        /// <summary>
+        /// Known planes: the standard planes and the planes this job creates – never other
+        /// planes already in the document. In the same part those belong to the original, and
+        /// a mirrored sketch placed on one of them would depend on the original again.
+        /// </summary>
         private void Init()
         {
             if (_standard != null) return;
             _standard = SwDoc.StandardPlanes(_ctx.Doc, _ctx.Math);
-            _known.AddRange(SwDoc.RefPlanes(_ctx.Doc, _ctx.Math));
+            Plane3[] geometry = { Plane3.FrontXY, Plane3.TopXZ, Plane3.RightYZ };
+            for (int i = 0; i < 3; i++) _known.Add((_standard[i], geometry[i]));
         }
 
         /// <summary>A plane feature coinciding with <paramref name="wanted"/> (either normal orientation).</summary>

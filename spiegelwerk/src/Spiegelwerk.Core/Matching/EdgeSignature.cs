@@ -58,28 +58,56 @@ namespace Spiegelwerk.Core.Matching
         /// 0 for a perfect match, larger is worse, <see cref="double.PositiveInfinity"/> if the
         /// edges cannot be the same. Endpoint order is ignored because the kernel may run a
         /// mirrored edge the other way round.
+        ///
+        /// Closed edges (full circles, closed ellipses and splines) have a seam whose position
+        /// the kernel chooses freely – a rebuilt circle's seam is usually somewhere else than
+        /// the mirrored seam of the original. They are compared by seam-independent data only.
         /// </summary>
-        public double DistanceTo(EdgeSignature o, double tol = Tol.Length)
+        /// <param name="distanceToCandidate">
+        /// Kernel distance from a point to the candidate curve (this signature's points are
+        /// tested against <paramref name="o"/>). Needed for closed ellipses/splines and used to
+        /// tell open splines apart; without it such edges match on endpoints and length only.
+        /// </param>
+        public double DistanceTo(EdgeSignature o, Func<Vec3, double>? distanceToCandidate = null, double tol = Tol.Length)
         {
-            if (Kind != o.Kind) return double.PositiveInfinity;
+            if (Kind != o.Kind || IsClosed != o.IsClosed) return double.PositiveInfinity;
             double lenTol = Math.Max(tol, Length * Tol.Relative);
             if (Math.Abs(Length - o.Length) > lenTol) return double.PositiveInfinity;
+
+            if (Kind == CurveKind.Circle)
+            {
+                double centre = Center.DistanceTo(o.Center), radius = Math.Abs(Radius - o.Radius);
+                if (centre > tol || radius > tol || !Axis.IsParallelTo(o.Axis, 1e-6)) return double.PositiveInfinity;
+                if (IsClosed) return centre + radius;
+            }
+
+            if (IsClosed)
+            {
+                // Closed ellipse or spline: the mirrored points must lie on the candidate curve.
+                if (distanceToCandidate == null) return double.PositiveInfinity;
+                double onCurve = Math.Max(distanceToCandidate(Start), distanceToCandidate(Mid));
+                return onCurve <= tol ? onCurve : double.PositiveInfinity;
+            }
 
             double ends = Math.Min(
                 Start.DistanceTo(o.Start) + End.DistanceTo(o.End),
                 Start.DistanceTo(o.End) + End.DistanceTo(o.Start));
             if (ends > 2 * tol) return double.PositiveInfinity;
 
-            if (Kind == CurveKind.Circle)
+            // Two half circles share both endpoints; only the middle tells them apart. For lines
+            // and circles the middle parameter is the geometric middle; for other curves the
+            // parametrisation may run differently, so the middle is checked on the curve.
+            if (Kind == CurveKind.Line || Kind == CurveKind.Circle)
             {
-                if (Center.DistanceTo(o.Center) > tol || Math.Abs(Radius - o.Radius) > tol) return double.PositiveInfinity;
-                if (!Axis.IsParallelTo(o.Axis, 1e-6)) return double.PositiveInfinity;
+                double mid = Mid.DistanceTo(o.Mid);
+                return mid > tol ? double.PositiveInfinity : ends + mid;
             }
-
-            // Two half circles share both endpoints; only the middle tells them apart.
-            double mid = Mid.DistanceTo(o.Mid);
-            if ((Kind == CurveKind.Line || Kind == CurveKind.Circle) && mid > tol) return double.PositiveInfinity;
-            return ends + mid;
+            if (distanceToCandidate != null)
+            {
+                double onCurve = distanceToCandidate(Mid);
+                return onCurve > tol ? double.PositiveInfinity : ends + onCurve;
+            }
+            return ends;
         }
 
         public override string ToString() => $"{Kind} {Start} → {End}, L={Length:0.######}";

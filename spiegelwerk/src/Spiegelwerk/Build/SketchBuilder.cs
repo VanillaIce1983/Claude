@@ -19,12 +19,20 @@ namespace Spiegelwerk.Build
     ///  4. add relations, 5. add dimensions and check every dimension measures what the
     ///     original measured before setting its value – a dimension that picked the wrong
     ///     angle or side is removed instead of being allowed to distort the sketch.
+    /// References that do not exist in the target (origin off the mirror plane, edges of
+    /// features that were not mirrored) are replaced by fixed construction geometry at the
+    /// mirrored location; the original relation or dimension then attaches to that stand-in,
+    /// so the sketch keeps exactly the degrees of freedom of the original.
+    /// One instance per sketch.
     /// </summary>
     internal sealed class SketchBuilder
     {
         private readonly BuildContext _ctx;
         private readonly ModelDoc2 _doc;
         private readonly SketchManager _sm;
+
+        /// <summary>Stand-ins for missing external references, by reference key.</summary>
+        private readonly Dictionary<string, object> _substitutes = new Dictionary<string, object>(StringComparer.Ordinal);
 
         public SketchBuilder(BuildContext ctx)
         {
@@ -58,6 +66,7 @@ namespace Spiegelwerk.Build
                     CreateRelations(map, notes);
                 }
                 CreateDimensions(map, notes);
+                CheckConstrainedStatus(map, notes);
             }
             catch
             {
@@ -108,23 +117,46 @@ namespace Spiegelwerk.Build
                         notes.Add($"Punkt {id} von {seg} liegt nicht an der erwarteten Stelle.");
                         continue;
                     }
-                    if (map.Points.TryGetValue(id, out SketchPoint existing))
-                        merges.Add((existing, got));
-                    else
+                    if (!map.Points.TryGetValue(id, out SketchPoint existing))
                         map.Points[id] = got;
+                    else if (SwDoc.IdOf(existing) != SwDoc.IdOf(got))
+                        merges.Add((existing, got));
+                    // Same id: SOLIDWORKS already welded the bit-identical endpoints on creation.
                 }
             }
 
             foreach (SkPoint p in m.FreePoints())
                 map.Points[p.Id] = _sm.CreatePoint(p.X, p.Y, 0);
 
-            // Endpoints shared in the original (one SketchPoint, two segments) are separate
-            // points after AddToDB creation; a coincident relation joins them again so
-            // contours stay closed.
+            // Endpoints shared in the original (one SketchPoint, two segments) that came out as
+            // two points are welded again so contours stay closed: merge first, coincident if
+            // the merge is refused.
             SketchRelationManager rm = map.Sketch.RelationManager;
             foreach (var (keep, other) in merges)
-                if (rm.AddRelation(new object[] { keep, other }, (int)swConstraintType_e.swConstraintType_COINCIDENT) == null)
-                    notes.Add("Gemeinsamer Endpunkt konnte nicht verbunden werden; die Kontur ist eventuell offen.");
+            {
+                if (rm.AddRelation(new object[] { keep, other }, (int)swConstraintType_e.swConstraintType_MERGEPOINTS) != null) continue;
+                if (rm.AddRelation(new object[] { keep, other }, (int)swConstraintType_e.swConstraintType_COINCIDENT) != null) continue;
+                notes.Add($"Gemeinsamer Endpunkt bei ({keep.X * 1000:0.###}|{keep.Y * 1000:0.###}) mm konnte nicht verbunden werden; die Kontur ist eventuell offen.");
+            }
+
+            // A merge may remove either of the two points; read the surviving ones back.
+            if (merges.Count > 0) RefreshPoints(map);
+        }
+
+        private static void RefreshPoints(SketchMap map)
+        {
+            SketchModel m = map.Mirrored.Sketch;
+            foreach (SkSegment seg in m.Segments)
+            {
+                if (!map.Segments.TryGetValue(seg.Id, out SketchSegment created)) continue;
+                List<SketchPoint> pts = PointsOf(created);
+                foreach (string id in seg.PointIds())
+                {
+                    SkPoint want = m.Point(id);
+                    SketchPoint? got = pts.OrderBy(p => Dist(p, want)).FirstOrDefault(p => Dist(p, want) <= Tol.Length);
+                    if (got != null) map.Points[id] = got;
+                }
+            }
         }
 
         private SketchSegment? CreateSegment(SketchModel m, SkSegment s)
@@ -214,61 +246,186 @@ namespace Spiegelwerk.Build
         private void CreateRelations(SketchMap map, List<string> notes)
         {
             SketchRelationManager rm = map.Sketch.RelationManager;
-            var fixedAlready = new HashSet<object>();
-
             foreach (SkRelation rel in map.Mirrored.Sketch.Relations)
             {
-                List<object?> objs = rel.Entities.Select(e => ResolveRef(map, e, notes)).ToList();
-                if (objs.Any(o => o == null))
+                if (rel.Kind == RelationKind.ExternalLink)
                 {
-                    Fallback(map, rel.Entities, objs, $"Beziehung {rel.Kind} zu {Describe(rel.Entities)}", fixedAlready, notes);
+                    CreateExternalLink(map, rel, notes);
                     continue;
                 }
 
-                // Typed API first; it accepts sketch entities of this sketch.
-                if (!rel.HasExternal && rm.AddRelation(objs.ToArray(), (int)SketchCapture.ToSw(rel.Kind)) != null) continue;
-
-                // Relations to external entities (origin, edges, other sketches) go through the
-                // selection-based command, the same way the UI creates them.
-                if (!AddBySelection(map, objs!, rel.Kind))
-                    notes.Add($"Beziehung {rel.Kind} zu {Describe(rel.Entities)} konnte nicht erzeugt werden.");
+                string what = $"Beziehung {rel.Kind} zu {Describe(rel.Entities)}";
+                List<object>? objs = ResolveAll(map, rel.Entities, what, notes);
+                if (objs == null) continue;
+                if (!AddRelation(map, rm, objs, rel.Kind))
+                    notes.Add($"{what} konnte nicht erzeugt werden.");
             }
+        }
+
+        /// <summary>
+        /// Typed API whenever every entity is a sketch point or segment – also the origin point
+        /// and entities of other sketches; selection plus SketchAddConstraints for edges, faces,
+        /// planes, or if the typed call is refused.
+        /// </summary>
+        private bool AddRelation(SketchMap map, SketchRelationManager rm, List<object> objs, RelationKind kind)
+        {
+            bool sketchOnly = objs.All(o => o is SketchPoint || o is SketchSegment);
+            if (sketchOnly && rm.AddRelation(objs.ToArray(), (int)SketchCapture.ToSw(kind)) != null) return true;
+            return AddBySelection(map, objs, kind);
         }
 
         private bool AddBySelection(SketchMap map, List<object> objs, RelationKind kind)
         {
-            string? cmd = SketchCapture.ToConstraintString(kind);
-            if (cmd == null) return false;
             SketchRelationManager rm = map.Sketch.RelationManager;
-            int before = rm.GetRelationsCount((int)swSketchRelationFilterType_e.swAll);
-            SwSelect.Clear(_doc);
-            for (int i = 0; i < objs.Count; i++)
-                if (!SwSelect.Select(_doc, objs[i], 0, i > 0)) return false;
-            _doc.SketchAddConstraints(cmd);
-            SwSelect.Clear(_doc);
-            return rm.GetRelationsCount((int)swSketchRelationFilterType_e.swAll) > before;
+            foreach (string cmd in SketchCapture.ToConstraintStrings(kind))
+            {
+                int before = rm.GetRelationsCount((int)swSketchRelationFilterType_e.swAll);
+                SwSelect.Clear(_doc);
+                bool selected = true;
+                for (int i = 0; i < objs.Count; i++) selected &= SwSelect.Select(_doc, objs[i], 0, i > 0);
+                if (selected) _doc.SketchAddConstraints(cmd);
+                SwSelect.Clear(_doc);
+                if (!selected) return false;
+                if (rm.GetRelationsCount((int)swSketchRelationFilterType_e.swAll) > before) return true;
+            }
+            return false;
         }
 
         /// <summary>
-        /// The relation or dimension refers to something that does not exist in the target.
-        /// "Fix" keeps the local entities where they are (fully defined, but no longer driven
-        /// by the reference); "Drop" leaves them free.
+        /// Converted / offset entities ("On Edge"): re-linked to the mirrored edge, or to its
+        /// stand-in – collinear for lines, coradial for arcs and circles. Splines and the like
+        /// cannot be linked and are fixed in place (with the Fix option).
         /// </summary>
-        private void Fallback(SketchMap map, List<SkRef> refs, List<object?> resolved, string what, HashSet<object> fixedAlready, List<string> notes)
+        private void CreateExternalLink(SketchMap map, SkRelation rel, List<string> notes)
         {
-            if (_ctx.Options.ExternalReferences == ExternalReferenceHandling.Drop)
-            {
-                notes.Add($"{what}: Bezug fehlt im Ziel, entfällt.");
-                return;
-            }
             SketchRelationManager rm = map.Sketch.RelationManager;
-            for (int i = 0; i < refs.Count; i++)
+            SkRef? external = rel.Entities.FirstOrDefault(e => !e.IsLocal);
+            foreach (SkRef local in rel.Entities.Where(e => e.Kind == SkRefKind.Segment))
             {
-                if (!refs[i].IsLocal || resolved[i] == null || !fixedAlready.Add(resolved[i]!)) continue;
-                rm.AddRelation(new[] { resolved[i]! }, (int)swConstraintType_e.swConstraintType_FIXED);
+                if (!map.Segments.TryGetValue(local.Id, out SketchSegment seg)) continue;
+                SkSegment model = map.Mirrored.Sketch.Segment(local.Id);
+                RelationKind? link = model.Kind == SkSegmentKind.Line ? RelationKind.Collinear
+                    : model.Kind == SkSegmentKind.Arc || model.Kind == SkSegmentKind.Circle ? RelationKind.Coradial
+                    : (RelationKind?)null;
+
+                string what = $"Übernommenes Element {local.Id} (auf Kante)";
+                object? target = external == null ? null : ResolveRef(map, external, notes);
+                if (target == null && external != null && _ctx.Options.ExternalReferences == ExternalReferenceHandling.Fix)
+                    target = Substitute(map, external);
+                if (link != null && target != null)
+                {
+                    if (AddRelation(map, rm, new List<object> { seg, target }, link.Value)) continue;
+                    notes.Add($"{what}: {link} zur Kante konnte nicht erzeugt werden.");
+                    continue;
+                }
+                if (_ctx.Options.ExternalReferences == ExternalReferenceHandling.Fix &&
+                    rm.AddRelation(new object[] { seg }, (int)swConstraintType_e.swConstraintType_FIXED) != null)
+                    notes.Add($"{what}: ohne Bezug zur Kante, an Ort und Stelle fixiert.");
+                else
+                    notes.Add($"{what}: ohne Bezug zur Kante, frei.");
             }
-            notes.Add($"{what}: Bezug fehlt im Ziel, die Skizzenelemente wurden fixiert.");
         }
+
+        /// <summary>
+        /// Resolves all entities of a relation or dimension. Missing external references get a
+        /// fixed stand-in (Fix) or make the relation/dimension drop out (Drop). Null: skip it.
+        /// </summary>
+        private List<object>? ResolveAll(SketchMap map, List<SkRef> refs, string what, List<string> notes)
+        {
+            var result = new List<object>();
+            foreach (SkRef r in refs)
+            {
+                object? o = ResolveRef(map, r, notes);
+                if (o == null && !r.IsLocal && _ctx.Options.ExternalReferences == ExternalReferenceHandling.Fix)
+                {
+                    o = Substitute(map, r);
+                    if (o != null) notes.Add($"{what}: {Describe(new[] { r })} fehlt im Ziel, ersetzt durch fixierte Hilfsgeometrie.");
+                }
+                if (o == null)
+                {
+                    notes.Add($"{what}: {Describe(new[] { r })} fehlt im Ziel, entfällt.");
+                    return null;
+                }
+                result.Add(o);
+            }
+            return result.Count > 0 ? result : null;
+        }
+
+        /// <summary>
+        /// Fixed construction geometry standing in for a missing external reference, projected
+        /// into the sketch like SOLIDWORKS projects external entities. Null if the reference
+        /// carries no geometry that can be drawn in the sketch.
+        /// </summary>
+        private object? Substitute(SketchMap map, SkRef r)
+        {
+            string key = r.Kind + ":" + r.Id + "@" + r.SketchName + ":" + r.Position + ":" + r.Edge;
+            if (_substitutes.TryGetValue(key, out object existing)) return existing;
+
+            Frame3 frame = map.Mirrored.Sketch.Frame;
+            Vec3 Local(Vec3 p) => frame.ToLocal(frame.Plane.Project(p));
+            SketchRelationManager rm = map.Sketch.RelationManager;
+            object? created = null;
+            using (new SketchInputScope(_sm))
+            {
+                switch (r.Kind)
+                {
+                    case SkRefKind.Origin:
+                    case SkRefKind.ModelVertex:
+                    case SkRefKind.OtherSketchPoint:
+                    {
+                        Vec3 l = Local(r.Position);
+                        SketchPoint p = _sm.CreatePoint(l.X, l.Y, 0);
+                        if (p != null) rm.AddRelation(new object[] { p }, (int)swConstraintType_e.swConstraintType_FIXED);
+                        created = p;
+                        break;
+                    }
+                    case SkRefKind.ModelEdge when r.Edge!.Kind == Core.Matching.CurveKind.Line:
+                    {
+                        Vec3 a = Local(r.Edge.Start), b = Local(r.Edge.End);
+                        created = Construction(_sm.CreateLine(a.X, a.Y, 0, b.X, b.Y, 0), rm);
+                        break;
+                    }
+                    case SkRefKind.ModelEdge when r.Edge!.Kind == Core.Matching.CurveKind.Circle && r.Edge.Axis.IsParallelTo(frame.ZAxis, 1e-6):
+                    {
+                        Vec3 c = Local(r.Edge.Center);
+                        created = Construction(_sm.CreateCircleByRadius(c.X, c.Y, 0, r.Edge.Radius), rm);
+                        break;
+                    }
+                }
+            }
+            if (created != null) _substitutes[key] = created;
+            return created;
+        }
+
+        private static SketchSegment? Construction(SketchSegment? seg, SketchRelationManager rm)
+        {
+            if (seg == null) return null;
+            seg.ConstructionGeometry = true;
+            rm.AddRelation(new object[] { seg }, (int)swConstraintType_e.swConstraintType_FIXED);
+            // "Fixed" leaves the ends of a line free along it; fix the points too.
+            foreach (SketchPoint p in PointsOf(seg))
+                rm.AddRelation(new object[] { p }, (int)swConstraintType_e.swConstraintType_FIXED);
+            return seg;
+        }
+
+        /// <summary>Compares how well the copy is defined with the original.</summary>
+        private static void CheckConstrainedStatus(SketchMap map, List<string> notes)
+        {
+            var status = (swConstrainedStatus_e)map.Sketch.GetConstrainedStatus();
+            var original = (swConstrainedStatus_e)map.Source.ConstrainedStatus;
+            if (status == swConstrainedStatus_e.swOverConstrained || status == swConstrainedStatus_e.swNoSolution || status == swConstrainedStatus_e.swInvalidSolution)
+                notes.Add($"Die gespiegelte Skizze ist {StatusText(status)} – bitte prüfen.");
+            else if (original == swConstrainedStatus_e.swFullyConstrained && status == swConstrainedStatus_e.swUnderConstrained)
+                notes.Add("Die gespiegelte Skizze ist unterbestimmt, das Original war voll bestimmt.");
+        }
+
+        private static string StatusText(swConstrainedStatus_e s) => s switch
+        {
+            swConstrainedStatus_e.swOverConstrained => "überbestimmt",
+            swConstrainedStatus_e.swNoSolution => "nicht lösbar",
+            swConstrainedStatus_e.swInvalidSolution => "ungültig gelöst",
+            _ => s.ToString(),
+        };
 
         /// <summary>Resolves a (mirrored) reference to an object of the target document.</summary>
         private object? ResolveRef(SketchMap map, SkRef r, List<string> notes)
@@ -303,18 +460,13 @@ namespace Spiegelwerk.Build
 
         private void CreateDimensions(SketchMap map, List<string> notes)
         {
-            var fixedAlready = new HashSet<object>();
             foreach (SkDimension dim in map.Mirrored.Sketch.Dimensions)
             {
-                List<object?> objs = dim.Refs.Select(e => ResolveRef(map, e, notes)).ToList();
                 string what = $"Bemaßung {dim.Name}";
-                if (objs.Count == 0 || objs.Any(o => o == null))
-                {
-                    Fallback(map, dim.Refs, objs, what, fixedAlready, notes);
-                    continue;
-                }
+                List<object>? objs = ResolveAll(map, dim.Refs, what, notes);
+                if (objs == null) continue;
 
-                DisplayDimension? dd = PlaceDimension(map, dim, objs!);
+                DisplayDimension? dd = PlaceDimension(map, dim, objs);
                 if (dd == null)
                 {
                     notes.Add($"{what} ({dim.Kind}) konnte nicht so erzeugt werden, dass sie {Format(dim)} misst; entfällt.");
@@ -322,10 +474,22 @@ namespace Spiegelwerk.Build
                 }
 
                 Dimension d = dd.GetDimension2(0);
-                if (dim.Driven)
+                bool isDriven = d.DrivenState == (int)swDimensionDrivenState_e.swDimensionDriven;
+                if (dim.Driven && !isDriven)
+                {
                     d.DrivenState = (int)swDimensionDrivenState_e.swDimensionDriven;
-                else
-                    d.SetSystemValue3(dim.Value, (int)swSetValueInConfiguration_e.swSetValue_InAllConfigurations, null);
+                }
+                else if (!dim.Driven && isDriven)
+                {
+                    // SOLIDWORKS made it a reference dimension because it would over-define the copy.
+                    notes.Add($"{what} ist in der Kopie getrieben (überbestimmend); Gleichungen darauf wirken nicht.");
+                }
+                else if (!dim.Driven)
+                {
+                    int status = d.SetSystemValue3(dim.Value, (int)swSetValueInConfiguration_e.swSetValue_InAllConfigurations, null);
+                    if (status != (int)swSetValueReturnStatus_e.swSetValue_Successful)
+                        notes.Add($"{what}: Wert konnte nicht gesetzt werden ({(swSetValueReturnStatus_e)status}).");
+                }
                 TryRename(d, dim.Name);
             }
         }

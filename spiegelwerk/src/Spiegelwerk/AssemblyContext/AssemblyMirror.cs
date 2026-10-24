@@ -30,19 +30,33 @@ namespace Spiegelwerk.AssemblyContext
             _math = new SwMath(sw);
         }
 
+        /// <summary>Why a component cannot be mirrored, or null. Also used to reject it when it is picked.</summary>
+        public static string? CheckComponent(Component2 c)
+        {
+            if (c.GetSuppression2() == (int)swComponentSuppressionState_e.swComponentSuppressed)
+                return $"Komponente \"{c.Name2}\" ist unterdrückt.";
+            if (c.IsVirtual)
+                return $"Komponente \"{c.Name2}\" ist virtuell; bitte zuerst extern speichern.";
+            object doc = c.GetModelDoc2();
+            if (doc != null && !(doc is PartDoc))
+                return $"Komponente \"{c.Name2}\" ist eine Baugruppe; gespiegelt werden nur Teile.";
+            return null;
+        }
+
         public MirrorJobResult Run(AssemblyDoc asm, Component2 component, Plane3 assemblyPlane, MirrorOptions options)
         {
             var asmDoc = (ModelDoc2)asm;
-            if (component.GetSuppression2() == (int)swComponentSuppressionState_e.swComponentSuppressed)
-                throw new InvalidOperationException($"Komponente \"{component.Name2}\" ist unterdrückt.");
+            string? problem = CheckComponent(component);
+            if (problem != null) throw new InvalidOperationException(problem);
             if (component.GetSuppression2() != (int)swComponentSuppressionState_e.swComponentFullyResolved)
                 component.SetSuppression2((int)swComponentSuppressionState_e.swComponentFullyResolved);
-
             if (!(component.GetModelDoc2() is PartDoc) || !(component.GetModelDoc2() is ModelDoc2 part))
-                throw new InvalidOperationException("Nur Teile können gespiegelt werden, keine Unterbaugruppen.");
+                throw new InvalidOperationException($"Komponente \"{component.Name2}\" ließ sich nicht als Teil laden.");
+
             string partPath = component.GetPathName();
-            if (component.IsVirtual)
-                throw new InvalidOperationException("Virtuelle Komponenten bitte zuerst extern speichern.");
+            // Before anything is built: an unusable file name fails here without side effects.
+            string newPath = UniquePath(partPath, options.NameSuffix);
+            string refConfig = component.ReferencedConfiguration;
 
             Affine placement = _math.ToAffine(component.Transform2);
             Plane3 partPlane = ComponentPlacement.ChoosePartMirrorPlane(placement, assemblyPlane);
@@ -51,14 +65,39 @@ namespace Spiegelwerk.AssemblyContext
             int err = 0, warn = 0;
             bool wasVisible = part.Visible;
             ModelDoc2 opened = _sw.OpenDoc6(partPath, (int)swDocumentTypes_e.swDocPART, (int)swOpenDocOptions_e.swOpenDocOptions_Silent, "", ref err, ref warn) ?? part;
+            string? previousConfig = null;
+            MirrorJobResult result;
+            try
+            {
+                // The instance may use another configuration than the one active in the part.
+                if (!string.IsNullOrEmpty(refConfig) && opened.GetActiveConfiguration() is Configuration active &&
+                    !string.Equals(active.Name, refConfig, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!opened.ShowConfiguration2(refConfig))
+                        throw new InvalidOperationException($"Konfiguration \"{refConfig}\" von \"{component.Name2}\" ließ sich nicht aktivieren.");
+                    previousConfig = active.Name;
+                }
 
-            options.Target = MirrorTarget.NewPart;
-            var request = new MirrorRequest(opened, partPlane, options);
-            MirrorJobResult result = new MirrorJob(_sw).Run(request);
+                options.Target = MirrorTarget.NewPart;
+                result = new MirrorJob(_sw).Run(new MirrorRequest(opened, partPlane, options));
+                result.Report.General.Add($"Quelle: {Path.GetFileName(partPath)}, Konfiguration \"{refConfig}\".");
+            }
+            finally
+            {
+                // Put the part back as it was, also when the job failed.
+                if (previousConfig != null) opened.ShowConfiguration2(previousConfig);
+                if (!wasVisible) _sw.CloseDoc(opened.GetTitle());
+                _sw.ActivateDoc3(asmDoc.GetTitle(), false, (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref err);
+            }
+
             ModelDoc2? target = result.Target;
             if (target == null) return result;
+            if (result.Report.Aborted)
+            {
+                result.Report.General.Add($"Abgebrochen: \"{target.GetTitle()}\" bleibt ungespeichert zur Prüfung offen und wird nicht eingefügt.");
+                return result;
+            }
 
-            string newPath = UniquePath(partPath, options.NameSuffix);
             if (!target.Extension.SaveAs(newPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                     (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref err, ref warn))
             {
@@ -67,9 +106,6 @@ namespace Spiegelwerk.AssemblyContext
             }
             result.Report.General.Add($"Gespeichert: {newPath}");
             result.Report.General.Add($"Teil gespiegelt an seiner Ebene {partPlane}, Platzierung gleicht das aus.");
-
-            if (!wasVisible) _sw.CloseDoc(opened.GetTitle());
-            _sw.ActivateDoc3(asmDoc.GetTitle(), false, (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref err);
 
             if (options.InsertIntoAssembly)
             {

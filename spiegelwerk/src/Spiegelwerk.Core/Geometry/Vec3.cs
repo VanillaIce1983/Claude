@@ -44,10 +44,14 @@ namespace Spiegelwerk.Core.Geometry
             return this / len;
         }
 
-        /// <summary>Same direction or opposite direction (unit vectors expected).</summary>
-        public bool IsParallelTo(Vec3 o, double angleTol = Tol.Angle) => Math.Abs(Math.Abs(Dot(o)) - 1.0) < angleTol;
+        /// <summary>
+        /// Same or opposite direction (unit vectors expected). The tolerance bounds the sine of
+        /// the angle, i.e. the angle in radians: 1 - |cos| would let through 1000 times larger
+        /// tilts for the same number.
+        /// </summary>
+        public bool IsParallelTo(Vec3 o, double angleTol = Tol.Angle) => Cross(o).Length <= angleTol;
 
-        public bool IsSameDirection(Vec3 o, double angleTol = Tol.Angle) => Dot(o) > 1.0 - angleTol;
+        public bool IsSameDirection(Vec3 o, double angleTol = Tol.Angle) => Dot(o) > 0 && IsParallelTo(o, angleTol);
 
         public bool AlmostEquals(Vec3 o, double tol = Tol.Length) => DistanceTo(o) <= tol;
 

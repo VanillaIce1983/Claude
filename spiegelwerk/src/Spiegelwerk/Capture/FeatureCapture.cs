@@ -33,7 +33,7 @@ namespace Spiegelwerk.Capture
             string type = f.GetTypeName2();
             try
             {
-                if (type == "ProfileFeature") return new SketchRecord(f.Name, _sketches.Read(f));
+                if (type == "ProfileFeature") return new SketchRecord(f.Name, ReadSketch(f));
                 if (type == "3DProfileFeature") return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);
                 if (type == "RefPlane") return new RefPlaneRecord(f.Name, _math.PlaneOf((RefPlane)f.GetSpecificFeature2()));
 
@@ -54,6 +54,30 @@ namespace Spiegelwerk.Capture
             catch (NotSupportedException ex)
             {
                 return new UnsupportedRecord(f.Name, type, ex.Message, ChangesSolid(type));
+            }
+        }
+
+        /// <summary>
+        /// A sketch that refers to model edges, vertices or faces is read again with the
+        /// rollback bar right after it: later features (fillets, cuts) may have split or
+        /// shortened those edges, and their fingerprints must describe the state the sketch saw.
+        /// </summary>
+        private Core.Sketch.SketchModel ReadSketch(Feature f)
+        {
+            Core.Sketch.SketchModel model = _sketches.Read(f);
+            bool refersToModel = model.Relations.SelectMany(x => x.Entities).Concat(model.Dimensions.SelectMany(x => x.Refs))
+                .Any(x => x.Kind == Core.Sketch.SkRefKind.ModelEdge || x.Kind == Core.Sketch.SkRefKind.ModelVertex || x.Kind == Core.Sketch.SkRefKind.Plane);
+            if (!refersToModel) return model;
+
+            FeatureManager fm = _doc.FeatureManager;
+            if (!fm.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, f.Name)) return model;
+            try
+            {
+                return _sketches.Read(f);
+            }
+            finally
+            {
+                fm.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToEnd, "");
             }
         }
 
@@ -99,22 +123,31 @@ namespace Spiegelwerk.Capture
                 ReadSide(d, true, r.Side1, r.IsThin);
                 if (r.BothDirections || r.IsThin) ReadSide(d, false, r.Side2, r.IsThin);
 
+                // "Direction of extrusion": extruded along a line/edge/plane normal instead of the sketch normal.
+                d.GetDirectionReference(out object dir1, out int _, out object dir2, out int _);
+                r.DirectionReference1 = ToGeometryRef(dir1);
+                r.DirectionReference2 = ToGeometryRef(dir2);
+
                 if (d.GetContoursCount() > 0)
-                {
-                    foreach (object c in (object[])d.Contours)
-                    {
-                        if (c is SketchContour sc)
-                            r.Contours.Add(((object[])sc.GetSketchSegments()).Cast<SketchSegment>().Select(SwDoc.IdOf).ToList());
-                        else
-                            r.Notes.Add("Ausgewählte Skizzenbereiche (Regionen) werden nicht übernommen; es wird die ganze Skizze verwendet.");
-                    }
-                }
+                    ReadContours((object[])d.Contours, r.Contours, r.Notes);
             }
             finally
             {
                 d.ReleaseSelectionAccess();
             }
             return r;
+        }
+
+        /// <summary>Selected contours as sets of segment ids; regions cannot be mapped.</summary>
+        private static void ReadContours(object[] contours, List<List<string>> into, List<string> notes)
+        {
+            foreach (object c in contours)
+            {
+                if (c is SketchContour sc)
+                    into.Add(((object[])sc.GetSketchSegments()).Cast<SketchSegment>().Select(SwDoc.IdOf).ToList());
+                else
+                    notes.Add("Ausgewählte Skizzenbereiche (Regionen) werden nicht übernommen; es wird die ganze Skizze verwendet.");
+            }
         }
 
         private void ReadSide(ExtrudeFeatureData2 d, bool forward, ExtrudeSide side, bool thin)
@@ -131,6 +164,8 @@ namespace Spiegelwerk.Capture
             {
                 object reference = d.GetEndConditionReference(forward, out int _);
                 side.Reference = ToGeometryRef(reference);
+                if (side.Reference == null || side.Reference.Kind == GeometryRefKind.Unknown)
+                    throw new NotSupportedException($"Bezug der Endbedingung {side.End} ist im Original nicht lesbar.");
             }
         }
 
@@ -156,6 +191,10 @@ namespace Spiegelwerk.Capture
                     r.Thickness2 = d.GetWallThickness(false);
                 }
                 r.Axis = ToGeometryRef(d.Axis);
+                if (d.FeatureScope && !d.AutoSelect)
+                    r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
+                if (d.GetContoursCount() > 0)
+                    ReadContours((object[])d.Contours, r.Contours, r.Notes);
             }
             finally
             {
@@ -185,23 +224,24 @@ namespace Spiegelwerk.Capture
                 r.KeepFeatures = d.KeepFeatures;
                 r.RoundCorners = d.RoundCorners;
 
-                for (int i = 0; i < d.FilletItemsCount; i++)
+                // FilletItemsCount/GetFilletItemAtIndex only describe multiple-radius fillets
+                // (-1 otherwise); a plain fillet lists its items as edges and faces.
+                int n = r.MultipleRadius ? d.FilletItemsCount : 0;
+                for (int i = 0; i < n; i++)
                 {
                     object item = d.GetFilletItemAtIndex(i);
-                    double radius = r.MultipleRadius ? d.GetRadius(item) : r.Radius;
-                    switch (item)
-                    {
-                        case Edge e:
-                            r.Items.Add(new FilletItem(TopologyCapture.Edge(e), null, radius));
-                            break;
-                        case Face2 face:
-                            r.Items.Add(new FilletItem(null, TopologyCapture.Face(face), radius));
-                            break;
-                        default:
-                            r.Notes.Add("Ein Verrundungselement (Schleife oder Feature) wird nicht übernommen.");
-                            break;
-                    }
+                    if (item != null) AddFilletItem(r, item, d.GetRadius(item));
                 }
+                if (r.Items.Count == 0)
+                {
+                    if (d.GetEdgeCount() > 0 && d.Edges is object[] edges)
+                        foreach (object e in edges) AddFilletItem(r, e, r.MultipleRadius ? d.GetRadius(e) : r.Radius);
+                    const int single = (int)swSimpleFilletWhichFaces_e.swSimpleFilletSingleRadius;
+                    if (d.GetFaceCount(single) > 0 && d.GetFaces(single) is object[] faces)
+                        foreach (object face in faces) AddFilletItem(r, face, r.MultipleRadius ? d.GetRadius(face) : r.Radius);
+                }
+                if (d.GetLoopCount() > 0 || d.GetFeatureCount() > 0)
+                    r.Notes.Add("Schleifen oder Features als Verrundungselemente werden nicht übernommen.");
             }
             finally
             {
@@ -209,6 +249,22 @@ namespace Spiegelwerk.Capture
             }
             if (r.Items.Count == 0) throw new NotSupportedException("Verrundung ohne übertragbare Kanten oder Flächen.");
             return r;
+        }
+
+        private static void AddFilletItem(FilletRecord r, object item, double radius)
+        {
+            switch (item)
+            {
+                case Edge e:
+                    r.Items.Add(new FilletItem(TopologyCapture.Edge(e), null, radius));
+                    break;
+                case Face2 face:
+                    r.Items.Add(new FilletItem(null, TopologyCapture.Face(face), radius));
+                    break;
+                default:
+                    r.Notes.Add("Ein Verrundungselement (Schleife oder Feature) wird nicht übernommen.");
+                    break;
+            }
         }
 
         private ChamferRecord CaptureChamfer(Feature f, string type, ChamferFeatureData2 d)

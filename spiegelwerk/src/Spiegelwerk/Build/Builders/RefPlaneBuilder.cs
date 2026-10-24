@@ -15,7 +15,7 @@ namespace Spiegelwerk.Build.Builders
         {
             var rec = (RefPlaneRecord)record;
             Feature? f = ctx.Planes.CreateNamed(ctx.Mirror.Apply(rec.Plane), ctx.NameFor(rec.Name));
-            if (f == null) return BuildResult.Skipped("Gespiegelte Lage ist eine Standardebene; keine eigene Ebene nötig.");
+            if (f == null) return BuildResult.AlreadyThere("Gespiegelte Lage ist eine Standardebene; keine eigene Ebene nötig.");
             ctx.Register(rec.Name, f);
             return BuildResult.Ok(f, "Ebene an gespiegelter Lage, ohne Bezug zum Original");
         }

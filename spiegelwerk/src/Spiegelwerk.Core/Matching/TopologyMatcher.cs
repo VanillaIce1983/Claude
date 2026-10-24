@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Spiegelwerk.Core.Geometry;
 
 namespace Spiegelwerk.Core.Matching
 {
@@ -32,14 +33,21 @@ namespace Spiegelwerk.Core.Matching
     /// </summary>
     public static class TopologyMatcher
     {
-        public static MatchResult FindEdge(EdgeSignature wanted, IReadOnlyList<EdgeSignature> candidates, Func<int, bool>? preferred = null)
+        /// <param name="distanceToCandidate">Kernel distance from a point to candidate curve i (see <see cref="EdgeSignature.DistanceTo"/>).</param>
+        public static MatchResult FindEdge(
+            EdgeSignature wanted,
+            IReadOnlyList<EdgeSignature> candidates,
+            Func<int, bool>? preferred = null,
+            Func<int, Vec3, double>? distanceToCandidate = null)
         {
             int best = -1, count = 0;
             double bestScore = double.PositiveInfinity;
             bool bestPreferred = false;
             for (int i = 0; i < candidates.Count; i++)
             {
-                double score = wanted.DistanceTo(candidates[i]);
+                int index = i;
+                Func<Vec3, double>? onCurve = distanceToCandidate == null ? null : p => distanceToCandidate(index, p);
+                double score = wanted.DistanceTo(candidates[i], onCurve);
                 if (double.IsPositiveInfinity(score)) continue;
                 count++;
                 bool pref = preferred != null && preferred(i);
@@ -58,7 +66,7 @@ namespace Spiegelwerk.Core.Matching
             FaceSignature wanted,
             IReadOnlyList<FaceSignature> candidates,
             Func<int, double> distanceToCandidate,
-            double tol = Geometry.Tol.Length,
+            double tol = Tol.Length,
             Func<int, bool>? preferred = null)
         {
             int best = -1, count = 0;

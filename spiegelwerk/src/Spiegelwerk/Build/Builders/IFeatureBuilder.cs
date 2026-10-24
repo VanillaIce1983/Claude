@@ -50,6 +50,11 @@ namespace Spiegelwerk.Build.Builders
         public static BuildResult Ok(Feature f, string message) => new BuildResult(f, ReportStatus.Ok, message);
         public static BuildResult Failed(string message) => new BuildResult(null, ReportStatus.Failed, message);
         public static BuildResult Skipped(string message) => new BuildResult(null, ReportStatus.Skipped, message);
+
+        /// <summary>Nothing to build because the target already has the equivalent.</summary>
+        public static BuildResult AlreadyThere(string message) => new BuildResult(null, ReportStatus.Skipped, message) { HasEquivalent = true };
+
+        public bool HasEquivalent { get; private set; }
     }
 
     /// <summary>
@@ -62,31 +67,40 @@ namespace Spiegelwerk.Build.Builders
         public static bool Extrude(ModelDoc2 doc, Feature f, Action<ExtrudeFeatureData2> change)
         {
             var d = (ExtrudeFeatureData2)f.GetDefinition();
-            if (!d.AccessSelections(doc, null)) return false;
-            change(d);
-            return Finish(f.ModifyDefinition(d, doc, null), d.ReleaseSelectionAccess);
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool Revolve(ModelDoc2 doc, Feature f, Action<RevolveFeatureData2> change)
         {
             var d = (RevolveFeatureData2)f.GetDefinition();
-            if (!d.AccessSelections(doc, null)) return false;
-            change(d);
-            return Finish(f.ModifyDefinition(d, doc, null), d.ReleaseSelectionAccess);
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool Chamfer(ModelDoc2 doc, Feature f, Action<ChamferFeatureData2> change)
         {
             var d = (ChamferFeatureData2)f.GetDefinition();
-            if (!d.AccessSelections(doc, null)) return false;
-            change(d);
-            return Finish(f.ModifyDefinition(d, doc, null), d.ReleaseSelectionAccess);
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
-        private static bool Finish(bool ok, Action release)
+        /// <summary>A setter that throws (stale entity, invalid value) must not leave the model rolled back either.</summary>
+        private static bool Edit(ModelDoc2 doc, Feature f, object data, Func<bool> access, Action change, Action release)
         {
-            if (!ok) release();
-            return ok;
+            if (!access()) return false;
+            bool ok = false;
+            try
+            {
+                change();
+                ok = f.ModifyDefinition(data, doc, null);
+                return ok;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+            finally
+            {
+                if (!ok) release();
+            }
         }
     }
 }

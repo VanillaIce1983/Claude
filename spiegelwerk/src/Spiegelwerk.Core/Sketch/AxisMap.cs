@@ -42,14 +42,18 @@ namespace Spiegelwerk.Core.Sketch
             return new AxisMap(Classify(r.ApplyVector(source.XAxis), target), Classify(r.ApplyVector(source.YAxis), target), sigma);
         }
 
+        /// <summary>
+        /// Judged by the off-axis component (sine of the deviation), not by how close the
+        /// on-axis component is to 1: a 0.02° tilt changes the cosine by only 6e-8 but moves
+        /// the end of a 100 mm line by 35 µm, and a horizontal relation would then pull the
+        /// geometry away from the true mirror image.
+        /// </summary>
         public static AxisImage Classify(Vec3 mirroredAxis, Frame3 target)
         {
             Vec3 l = target.VectorToLocal(mirroredAxis);
-            const double tol = 1e-7;
-            if (Math.Abs(l.X - 1) < tol) return AxisImage.PlusX;
-            if (Math.Abs(l.X + 1) < tol) return AxisImage.MinusX;
-            if (Math.Abs(l.Y - 1) < tol) return AxisImage.PlusY;
-            if (Math.Abs(l.Y + 1) < tol) return AxisImage.MinusY;
+            const double tol = Tol.Angle;
+            if (Math.Abs(l.Y) <= tol && Math.Abs(l.Z) <= tol) return l.X > 0 ? AxisImage.PlusX : AxisImage.MinusX;
+            if (Math.Abs(l.X) <= tol && Math.Abs(l.Z) <= tol) return l.Y > 0 ? AxisImage.PlusY : AxisImage.MinusY;
             return AxisImage.Oblique;
         }
 

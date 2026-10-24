@@ -11,10 +11,15 @@ namespace Spiegelwerk.Core.Records
 
     public enum ExternalReferenceHandling
     {
-        /// <summary>Unmappable external relations are replaced by a "fixed" relation, so the sketch stays put.</summary>
+        /// <summary>
+        /// A sketch reference missing in the target (origin off the mirror plane, edge of a
+        /// feature that was not mirrored) is replaced by fixed construction geometry at the
+        /// mirrored location; the relation or dimension attaches to that stand-in, so the
+        /// sketch stays as well defined as the original.
+        /// </summary>
         Fix,
 
-        /// <summary>Unmappable external relations are left out; the sketch may become under-defined.</summary>
+        /// <summary>Such relations and dimensions are left out; the sketch may become under-defined.</summary>
         Drop,
     }
 

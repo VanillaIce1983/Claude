@@ -29,7 +29,12 @@ namespace Spiegelwerk.Capture
             if (sketch.Is3D())
                 throw new NotSupportedException("3D-Skizzen werden nicht gespiegelt.");
 
-            var model = new SketchModel { Name = feature.Name, Frame = _math.SketchFrame(sketch) };
+            var model = new SketchModel
+            {
+                Name = feature.Name,
+                Frame = _math.SketchFrame(sketch),
+                ConstrainedStatus = sketch.GetConstrainedStatus(),
+            };
 
             var userPoints = new HashSet<string>(Objects<SketchPoint>(sketch.GetUserPoints2()).Select(SwDoc.IdOf));
             foreach (SketchPoint p in Objects<SketchPoint>(sketch.GetSketchPoints2()))
@@ -142,6 +147,17 @@ namespace Spiegelwerk.Capture
             foreach (SketchRelation rel in Objects<SketchRelation>(rm.GetRelations((int)swSketchRelationFilterType_e.swAll)))
             {
                 var type = (swConstraintType_e)rel.GetRelationType();
+                if (IsExternalLink(type))
+                {
+                    // Converted/offset entities: the segment(s) of this sketch plus the edge or
+                    // entity they were derived from (definition entities).
+                    var locals = Objects<object>(rel.GetEntities()).Select(e => ToRef(e, self)).Where(r => r.IsLocal);
+                    var sources = Objects<object>(rel.GetDefinitionEntities2()).Concat(Objects<object>(rel.GetEntities()))
+                        .Select(e => ToRef(e, self)).Where(r => !r.IsLocal).Take(1);
+                    var link = locals.Concat(sources).ToList();
+                    if (link.Any(r => r.IsLocal)) model.Relations.Add(new SkRelation(RelationKind.ExternalLink, link));
+                    continue;
+                }
                 RelationKind? kind = MapRelation(type);
                 if (kind == null)
                 {
@@ -267,26 +283,39 @@ namespace Spiegelwerk.Capture
             _ => throw new ArgumentOutOfRangeException(nameof(k)),
         };
 
-        /// <summary>Selection-based fallback (IModelDoc2.SketchAddConstraints) for relations to external entities.</summary>
-        public static string? ToConstraintString(RelationKind k) => k switch
+        /// <summary>
+        /// Selection-based route (IModelDoc2.SketchAddConstraints) for relations to edges, faces
+        /// and planes. Point relations have their own ids, and the documentation and recorded
+        /// macros disagree on some spellings, so several candidates are tried in order; the
+        /// caller stops at the first one that adds a relation.
+        /// </summary>
+        public static string[] ToConstraintStrings(RelationKind k) => k switch
         {
-            RelationKind.Horizontal or RelationKind.HorizontalPoints => "sgHORIZONTAL2D",
-            RelationKind.Vertical or RelationKind.VerticalPoints => "sgVERTICAL2D",
-            RelationKind.Coincident or RelationKind.MergePoints => "sgCOINCIDENT",
-            RelationKind.Tangent => "sgTANGENT",
-            RelationKind.Parallel => "sgPARALLEL",
-            RelationKind.Perpendicular => "sgPERPENDICULAR",
-            RelationKind.Equal => "sgSAMELENGTH",
-            RelationKind.Concentric => "sgCONCENTRIC",
-            RelationKind.Coradial => "sgCORADIAL",
-            RelationKind.Midpoint => "sgATMIDDLE",
-            RelationKind.Collinear => "sgCOLINEAR",
-            RelationKind.Symmetric => "sgSYMMETRIC",
-            RelationKind.Fixed => "sgFIXED",
-            RelationKind.AtIntersection => "sgATINTERSECT",
-            RelationKind.Pierce => "sgATPIERCE",
-            _ => null,
+            RelationKind.Horizontal => new[] { "sgHORIZONTAL2D" },
+            RelationKind.Vertical => new[] { "sgVERTICAL2D" },
+            RelationKind.HorizontalPoints => new[] { "sgHORIZONTALPOINTS2D", "sgHORIZONTAL2D" },
+            RelationKind.VerticalPoints => new[] { "sgVERTICALPOINTS2D", "sgVERTPOINTS2D", "sgVERTICAL2D" },
+            RelationKind.Coincident => new[] { "sgCOINCIDENT" },
+            RelationKind.MergePoints => new[] { "sgMERGEPOINTS", "sgCOINCIDENT" },
+            RelationKind.Tangent => new[] { "sgTANGENT" },
+            RelationKind.Parallel => new[] { "sgPARALLEL" },
+            RelationKind.Perpendicular => new[] { "sgPERPENDICULAR" },
+            RelationKind.Equal => new[] { "sgSAMELENGTH" },
+            RelationKind.Concentric => new[] { "sgCONCENTRIC" },
+            RelationKind.Coradial => new[] { "sgCORADIAL" },
+            RelationKind.Midpoint => new[] { "sgATMIDDLE" },
+            RelationKind.Collinear => new[] { "sgCOLINEAR" },
+            RelationKind.Symmetric => new[] { "sgSYMMETRIC" },
+            RelationKind.Fixed => new[] { "sgFIXED" },
+            RelationKind.AtIntersection => new[] { "sgATINTERSECT" },
+            RelationKind.Pierce => new[] { "sgATPIERCE" },
+            _ => Array.Empty<string>(),
         };
+
+        /// <summary>"On edge" of converted entities, offset entities.</summary>
+        private static bool IsExternalLink(swConstraintType_e t) =>
+            t == swConstraintType_e.swConstraintType_USEEDGE || t == swConstraintType_e.swConstraintType_OFFSETEDGE ||
+            t == swConstraintType_e.swConstraintType_SKETCHOFFSET;
 
         /// <summary>Relations that are only the solver's view of a dimension; dimensions are read separately.</summary>
         private static bool IsDimensionConstraint(swConstraintType_e t) =>

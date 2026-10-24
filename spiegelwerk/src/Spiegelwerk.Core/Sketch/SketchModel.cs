@@ -26,6 +26,9 @@ namespace Spiegelwerk.Core.Sketch
         /// <summary>Things that were read but cannot be reproduced (text, blocks, pictures ...).</summary>
         public List<string> Warnings { get; } = new List<string>();
 
+        /// <summary>How well the original sketch was defined (swConstrainedStatus_e), for comparison with the copy; 0 = unknown.</summary>
+        public int ConstrainedStatus { get; set; }
+
         public SkPoint Point(string id) =>
             Points.FirstOrDefault(p => p.Id == id) ?? throw new KeyNotFoundException($"Skizzenpunkt {id} fehlt.");
 
@@ -152,6 +155,14 @@ namespace Spiegelwerk.Core.Sketch
         AtIntersection,
         EqualCurvature,
         Pierce,
+
+        /// <summary>
+        /// "On edge" / "offset" link of converted or offset entities (swConstraintType USEEDGE,
+        /// OFFSETEDGE, SKETCHOFFSET). Not a relation SOLIDWORKS can add directly: the builder
+        /// re-links the segment to the mirrored edge (collinear/coradial) or applies the
+        /// fallback for missing references.
+        /// </summary>
+        ExternalLink,
     }
 
     public sealed class SkRelation

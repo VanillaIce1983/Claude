@@ -1,3 +1,4 @@
+using SolidWorks.Interop.sldworks;
 using Spiegelwerk.Build.Builders;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Core.Verification;
@@ -19,8 +20,10 @@ namespace Spiegelwerk.Build
                 return "";
 
             MassState expected = record.ExpectedChange.Value.Mirror(ctx.Mirror);
+            Feature feature = result.Feature!;
             MassComparison best = Measure(ctx, expected, before);
-            if (best.Passes) return best.ToString();
+            double bestScore = Score(best, feature);
+            if (best.Passes && !HasError(feature)) return best.ToString();
 
             string chosen = "";
             foreach (Alternative alt in result.Alternatives)
@@ -28,11 +31,13 @@ namespace Spiegelwerk.Build
                 if (!alt.Toggle()) continue;
                 ctx.Doc.EditRebuild3();
                 MassComparison cmp = Measure(ctx, expected, before);
-                if (cmp.Score < best.Score)
+                double score = Score(cmp, feature);
+                if (score < bestScore)
                 {
                     best = cmp;
+                    bestScore = score;
                     chosen = alt.Description;
-                    if (cmp.Passes) break;
+                    if (cmp.Passes && !HasError(feature)) break;
                 }
                 else
                 {
@@ -51,7 +56,19 @@ namespace Spiegelwerk.Build
             return best.ToString();
         }
 
-        private static MassComparison Measure(BuildContext ctx, MassState expected, MassState before) =>
-            MassComparison.Compare(expected, SwDoc.MassOf(ctx.Doc) - before);
+        private static MassComparison Measure(BuildContext ctx, MassState expected, MassState before)
+        {
+            MassState after = SwDoc.MassOf(ctx.Doc);
+            return MassComparison.Compare(expected, after - before, after);
+        }
+
+        /// <summary>A variant that leaves the feature in error never wins, even if it happens to change nothing.</summary>
+        private static double Score(MassComparison cmp, Feature f) => HasError(f) ? double.PositiveInfinity : cmp.Score;
+
+        private static bool HasError(Feature f)
+        {
+            bool isWarning = false;
+            return f.GetErrorCode2(out isWarning) != 0 && !isWarning;
+        }
     }
 }

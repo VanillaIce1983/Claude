@@ -80,7 +80,13 @@ namespace Spiegelwerk.Build
             MirrorOptions opt = req.Options;
 
             // ---- 1. capture
-            List<Feature> features = FeatureCollector.Collect(source, _math, req.Features, req.Bodies);
+            if (SwDoc.TopLevelFeatures(source).Any(f => f.IsRolledBack()))
+                throw new InvalidOperationException("Die Rückrollleiste steht nicht am Ende des Feature-Baums. Bitte ans Ende setzen und erneut spiegeln.");
+
+            var skipped = new List<(Feature feature, string reason)>();
+            List<Feature> features = FeatureCollector.Collect(source, _math, req.Features, req.Bodies, skipped);
+            foreach (var (feature, reason) in skipped)
+                report.Entries.Add(new ReportEntry(feature.Name, feature.GetTypeName2(), ReportStatus.Skipped, reason));
             if (features.Count == 0)
             {
                 report.General.Add("Es wurden keine spiegelbaren Features gefunden.");
@@ -98,31 +104,40 @@ namespace Spiegelwerk.Build
             var ctx = new BuildContext(_sw, target, _math, new Reflection(req.MirrorPlane), opt, report, separateBody);
             report.General.Add($"Spiegelebene: {req.MirrorPlane}");
 
-            using (new SwPreferences(_sw))
-            using (new UpdateFreeze(target))
+            try
             {
-                foreach (FeatureRecord record in records)
+                using (new SwPreferences(_sw))
+                using (new UpdateFreeze(target))
                 {
-                    ReportEntry entry = BuildOne(ctx, record);
-                    if (entry.Status == ReportStatus.Failed && opt.StopOnError)
+                    foreach (FeatureRecord record in records)
                     {
-                        report.Aborted = true;
-                        break;
+                        ReportEntry entry = BuildOne(ctx, record);
+                        if (entry.Status == ReportStatus.Failed && opt.StopOnError)
+                        {
+                            report.Aborted = true;
+                            break;
+                        }
                     }
                 }
-            }
-            target.EditRebuild3();
+                target.EditRebuild3();
 
-            // ---- 3. finish
-            if (opt.Target == MirrorTarget.NewPart)
-            {
-                if (opt.CopyEquations) CopyEquations(source, target, report);
-                target.ShowNamedView2("*Isometric", (int)swStandardViews_e.swIsometricView);
-                target.ViewZoomtofit2();
+                // ---- 3. finish
+                if (opt.Target == MirrorTarget.NewPart)
+                {
+                    if (opt.CopyEquations) CopyEquations(source, target, report);
+                    target.ShowNamedView2("*Isometric", (int)swStandardViews_e.swIsometricView);
+                    target.ViewZoomtofit2();
+                }
+                else if (opt.DeleteOriginal)
+                {
+                    DeleteOriginals(source, features, report);
+                }
             }
-            else if (opt.DeleteOriginal)
+            catch (Exception ex)
             {
-                DeleteOriginals(source, features, report);
+                // Unexpected API failure: keep what was built and the report, so the user sees where it stopped.
+                report.Aborted = true;
+                report.General.Add($"Abbruch wegen eines unerwarteten Fehlers: {ex.Message}");
             }
             return new MirrorJobResult(report, target);
         }
@@ -142,6 +157,7 @@ namespace Spiegelwerk.Build
 
             MassState before = ctx.Options.VerifySteps && record.ChangesSolid ? SwDoc.MassOf(ctx.Doc) : MassState.Empty;
             BuildResult result;
+            string verification = "";
             try
             {
                 result = builder.Build(record, ctx);
@@ -153,12 +169,48 @@ namespace Spiegelwerk.Build
                 if (ctx.Doc.SketchManager.ActiveSketch != null) ctx.Doc.SketchManager.InsertSketch(true);
                 SwSelect.Clear(ctx.Doc);
             }
+            finally
+            {
+                // Also after a failure: a feature may have been created (or removed) before it.
+                ctx.Topology.Invalidate();
+            }
 
-            string verification = StepVerifier.Verify(ctx, record, result, before);
+            try
+            {
+                verification = StepVerifier.Verify(ctx, record, result, before);
+            }
+            catch (Exception ex)
+            {
+                result.Status = ReportStatus.Warning;
+                result.Notes.Add($"Prüfung nicht möglich: {ex.Message}");
+                ctx.Topology.Invalidate();
+            }
+            CheckRebuildError(result);
+
             ReportEntry entry = ctx.Report.Add(record, result.Status, result.Message);
             entry.Verification = verification;
+            entry.HasEquivalent = result.HasEquivalent;
             entry.Details.AddRange(result.Notes);
             return entry;
+        }
+
+        /// <summary>A feature that SOLIDWORKS created but shows with a rebuild error is not a success.</summary>
+        private static void CheckRebuildError(BuildResult result)
+        {
+            if (result.Feature == null || !result.Success) return;
+            bool isWarning = false;
+            int code = result.Feature.GetErrorCode2(out isWarning);
+            if (code == 0) return;
+            if (isWarning)
+            {
+                result.Notes.Add($"SOLIDWORKS meldet eine Warnung beim Neuaufbau (Code {code}).");
+                if (result.Status == ReportStatus.Ok) result.Status = ReportStatus.Warning;
+            }
+            else
+            {
+                result.Status = ReportStatus.Failed;
+                result.Message += $" – Neuaufbaufehler (Code {code}).";
+            }
         }
 
         private ModelDoc2 CreatePart(ModelDoc2 source, MirrorOptions opt, MirrorReport report)
@@ -169,9 +221,13 @@ namespace Spiegelwerk.Build
             var target = (ModelDoc2)_sw.NewDocument(template, 0, 0, 0)
                 ?? throw new InvalidOperationException($"Neues Teil aus Vorlage \"{template}\" konnte nicht angelegt werden.");
 
-            // Same unit system as the original, so the copied dimensions read the same.
-            int units = source.Extension.GetUserPreferenceInteger((int)swUserPreferenceIntegerValue_e.swUnitSystem, 0);
-            target.Extension.SetUserPreferenceInteger((int)swUserPreferenceIntegerValue_e.swUnitSystem, 0, units);
+            // Same units as the original, so the copied dimensions read the same and copied
+            // equations with plain numbers mean the same (custom unit systems included).
+            foreach (swUserPreferenceIntegerValue_e pref in UnitPreferences)
+            {
+                int value = source.Extension.GetUserPreferenceInteger((int)pref, 0);
+                target.Extension.SetUserPreferenceInteger((int)pref, 0, value);
+            }
 
             if (opt.CopyMaterial && source is PartDoc sp && target is PartDoc tp)
             {
@@ -185,6 +241,22 @@ namespace Spiegelwerk.Build
             }
             return target;
         }
+
+        /// <summary>Unit system first: setting it resets the individual units to its defaults.</summary>
+        private static readonly swUserPreferenceIntegerValue_e[] UnitPreferences =
+        {
+            swUserPreferenceIntegerValue_e.swUnitSystem,
+            swUserPreferenceIntegerValue_e.swUnitsLinear,
+            swUserPreferenceIntegerValue_e.swUnitsLinearDecimalDisplay,
+            swUserPreferenceIntegerValue_e.swUnitsLinearDecimalPlaces,
+            swUserPreferenceIntegerValue_e.swUnitsLinearFractionDenominator,
+            swUserPreferenceIntegerValue_e.swUnitsAngular,
+            swUserPreferenceIntegerValue_e.swUnitsAngularDecimalPlaces,
+            swUserPreferenceIntegerValue_e.swUnitsMassPropLength,
+            swUserPreferenceIntegerValue_e.swUnitsMassPropMass,
+            swUserPreferenceIntegerValue_e.swUnitsMassPropVolume,
+            swUserPreferenceIntegerValue_e.swUnitsMassPropDecimalPlaces,
+        };
 
         /// <summary>
         /// Global variables and equations, copied verbatim. They refer to features and
@@ -205,12 +277,19 @@ namespace Spiegelwerk.Build
             foreach (string eq in failed) report.General.Add($"  nicht übernommen: {eq}");
         }
 
-        /// <summary>Same part: removes the original features, but only if nothing else depends on them.</summary>
+        /// <summary>
+        /// Same part: removes the original features – only if every one of them has a
+        /// counterpart (skipped axes, 3D sketches, coordinate systems … would be lost) and
+        /// nothing else depends on them.
+        /// </summary>
         private static void DeleteOriginals(ModelDoc2 doc, List<Feature> originals, MirrorReport report)
         {
-            if (report.HasProblems)
+            if (!report.AllMirrored)
             {
-                report.General.Add("Original nicht gelöscht, weil nicht alle Features fehlerfrei gespiegelt wurden.");
+                var missing = report.NotMirrored.Select(e => e.Feature).ToList();
+                report.General.Add(missing.Count > 0
+                    ? $"Original nicht gelöscht: ohne fehlerfreies Gegenstück sind {string.Join(", ", missing)}."
+                    : "Original nicht gelöscht, weil nicht alle Features fehlerfrei gespiegelt wurden.");
                 return;
             }
             var names = new HashSet<string>(originals.Select(f => f.Name), StringComparer.Ordinal);
@@ -225,7 +304,7 @@ namespace Spiegelwerk.Build
 
             SwSelect.Clear(doc);
             for (int i = originals.Count - 1; i >= 0; i--) SwSelect.Select(doc, originals[i], 0, true);
-            bool deleted = doc.Extension.DeleteSelection2((int)(swDeleteSelectionOptions_e.swDelete_Absorbed | swDeleteSelectionOptions_e.swDelete_Children));
+            bool deleted = doc.Extension.DeleteSelection2((int)swDeleteSelectionOptions_e.swDelete_Absorbed);
             SwSelect.Clear(doc);
             report.General.Add(deleted ? $"{originals.Count} Original-Features gelöscht." : "Original-Features konnten nicht gelöscht werden.");
         }

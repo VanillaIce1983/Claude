@@ -12,15 +12,15 @@ Spiegelwerk ist eine eigenständige Entwicklung und steht in keiner Verbindung z
 | **Teil → selbes Teil** | Die gespiegelten Features werden im selben Teil angelegt. Ganzes Teil oder gewählte Körper: eigener Körper, Schnitte wirken nur auf ihn. Nur gewählte Features (z. B. eine Tasche): sie wirken auf die vorhandenen Körper. Optional wird das Original danach gelöscht. |
 | **Baugruppe** | Gewählte Komponenten werden als Gegenstück neu aufgebaut, neben dem Original gespeichert (`Name_gespiegelt.SLDPRT`) und an der gespiegelten Lage eingefügt. |
 
-Nach jedem Lauf zeigt ein Bericht pro Feature, ob es neu aufgebaut wurde, was angepasst werden musste und ob **Volumen und Schwerpunkt** der Änderung mit dem gespiegelten Original übereinstimmen.
+Nach jedem Lauf zeigt ein Bericht pro Feature, ob es neu aufgebaut wurde, was angepasst werden musste und ob **Volumen und Schwerpunkt** der Änderung mit dem gespiegelten Original übereinstimmen. Unterdrückte und im Original fehlerhafte Features werden übersprungen und genannt.
 
 ## Unterstützte Features
 
 | Feature | Stand |
 | --- | --- |
 | 2D-Skizze | Linien, Mittellinien, Bögen, Kreise, Ellipsen, Ellipsenbögen, Splines (über die Stützpunkte), Parabeln, Punkte, Konstruktionsgeometrie. Beziehungen und Bemaßungen werden umgerechnet (siehe [Skizzen spiegeln](docs/SKIZZEN.md)). |
-| Linear austragen (Aufsatz/Schnitt) | Alle Endbedingungen, beide Richtungen, Formschräge, Startbedingungen, ausgewählte Konturen, dünnwandig. Bezüge (bis Fläche, bis Eckpunkt, Abstand von Fläche) werden im Ziel wiedergefunden. |
-| Rotieren (Aufsatz/Schnitt) | Eine Richtung, Mittelebene, zwei Richtungen, dünnwandig. Achse: Skizzenlinie oder gerade Kante. |
+| Linear austragen (Aufsatz/Schnitt) | Alle Endbedingungen, beide Richtungen, Formschräge, Startbedingungen, eigene Extrusionsrichtung, ausgewählte Konturen, dünnwandig. Bezüge (bis Fläche, bis Eckpunkt, Abstand von Fläche) werden im Ziel wiedergefunden. |
+| Rotieren (Aufsatz/Schnitt) | Eine Richtung, Mittelebene, zwei Richtungen, ausgewählte Konturen, dünnwandig. Achse: Skizzenlinie oder gerade Kante. |
 | Verrundung | Konstanter Radius, auch mit mehreren Radien, Kanten und Flächen. |
 | Fase | Winkel-Abstand, Abstand-Abstand, gleicher Abstand. |
 | Referenzebene | Neu an gespiegelter Lage, nur von den Standardebenen abhängig. |
@@ -33,7 +33,9 @@ Befehl **Unabhängig spiegeln** (Registerkarte *Spiegelwerk*, Menü und Symbolle
 1. **Spiegelebene:** Referenzebene oder ebene Fläche wählen – oder ohne Auswahl eine temporäre Ebene (YZ, XZ, XY mit Abstand), die nicht im Modell angelegt wird.
 2. **Zu spiegelnde Elemente:** Features, Skizzen oder Körper; leer lassen für das ganze Teil. In Baugruppen: Komponenten.
 3. **Ergebnis:** neues Teil oder selbes Teil, Original löschen, Werkstoff und Gleichungen übernehmen, Namenszusatz.
-4. **Prüfung und Bezüge:** jeden Schritt prüfen, fehlende Skizzenbezüge fixieren oder weglassen, beim ersten Fehler abbrechen.
+4. **Prüfung und Bezüge:** jeden Schritt prüfen, fehlende Skizzenbezüge durch fixierte Hilfsgeometrie ersetzen oder weglassen, beim ersten Fehler abbrechen.
+
+Die Rückrollleiste muss am Ende des Feature-Baums stehen.
 
 ## Bauen und installieren
 
@@ -77,4 +79,4 @@ spiegelwerk/
 
 ## Stand
 
-Version 0.1. Die Kernlogik ist durch Tests abgesichert; das Add-In übersetzt fehlerfrei gegen die API von SOLIDWORKS 2019 und 2024 (CI). In einer laufenden SOLIDWORKS-Sitzung ist es noch nicht erprobt. Die Stellen, an denen sich die API je nach Version anders verhalten kann, misst Spiegelwerk nach, statt sich auf eine Annahme zu verlassen; sie sind in den [Stolpersteinen](docs/STOLPERSTEINE.md#was-beim-ersten-test-in-solidworks-zu-prüfen-ist) aufgeführt.
+Version 0.1. Die Kernlogik ist durch Tests abgesichert; das Add-In übersetzt fehlerfrei gegen die API von SOLIDWORKS 2019 und 2024 (CI) und ist durch ein Code-Review gegangen, dessen bestätigte Befunde behoben sind. In einer laufenden SOLIDWORKS-Sitzung ist es noch nicht erprobt. Die Stellen, an denen sich die API je nach Version anders verhalten kann, misst Spiegelwerk nach, statt sich auf eine Annahme zu verlassen; sie sind in den [Stolpersteinen](docs/STOLPERSTEINE.md#was-beim-ersten-test-in-solidworks-zu-prüfen-ist) aufgeführt.

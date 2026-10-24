@@ -16,11 +16,39 @@ namespace Spiegelwerk.Capture
     /// </summary>
     internal static class FeatureCollector
     {
-        public static List<Feature> Collect(ModelDoc2 doc, SwMath math, IReadOnlyCollection<Feature> features, IReadOnlyCollection<Body2> bodies)
+        /// <param name="skipped">
+        /// Features that are left out on purpose: suppressed in the active configuration (also
+        /// their absorbed sketches) and features already failing in the original. Rebuilding a
+        /// suppressed feature unsuppressed would change the part.
+        /// </param>
+        public static List<Feature> Collect(ModelDoc2 doc, SwMath math, IReadOnlyCollection<Feature> features, IReadOnlyCollection<Body2> bodies,
+            List<(Feature feature, string reason)> skipped)
         {
             List<Feature> all = SwDoc.FeaturesInCreationOrder(doc);
             var standard = new HashSet<string>(SwDoc.StandardPlanes(doc, math).Select(f => f.Name), StringComparer.Ordinal);
+            List<Feature> result = Select(all, standard, features, bodies);
 
+            var kept = new List<Feature>();
+            foreach (Feature f in result)
+            {
+                string? reason = SkipReason(f);
+                if (reason == null) kept.Add(f);
+                else skipped.Add((f, reason));
+            }
+            return kept;
+        }
+
+        private static string? SkipReason(Feature f)
+        {
+            if (f.IsSuppressed()) return "Im Original unterdrückt – nicht gespiegelt.";
+            bool isWarning = false;
+            int code = f.GetErrorCode2(out isWarning);
+            if (code != 0 && !isWarning) return $"Im Original fehlerhaft (Code {code}) – nicht gespiegelt.";
+            return null;
+        }
+
+        private static List<Feature> Select(List<Feature> all, HashSet<string> standard, IReadOnlyCollection<Feature> features, IReadOnlyCollection<Body2> bodies)
+        {
             if (features.Count == 0 && bodies.Count == 0)
                 return all.Where(f => !SwDoc.IsSystemFeature(f) && !standard.Contains(f.Name)).ToList();
 

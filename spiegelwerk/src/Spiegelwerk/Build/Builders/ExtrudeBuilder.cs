@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
+using static Spiegelwerk.Build.Builders.BuilderSupport;
 
 namespace Spiegelwerk.Build.Builders
 {
@@ -16,10 +16,14 @@ namespace Spiegelwerk.Build.Builders
     /// Direction: derived from σ of the rebuilt sketch (see DirectionRules); the flags that
     /// depend on the side of an open profile cannot be derived and are offered as
     /// alternatives to the verifier.
-    /// End conditions with a reference (up to surface/vertex, offset from surface): the
-    /// feature is created blind first and then switched to the mirrored reference with
-    /// ModifyDefinition – no guessing which selection mark the creation method wants for
-    /// which direction.
+    ///
+    /// Everything that needs a reference – end conditions up to a face/vertex, the start
+    /// face, the direction of extrusion, the feature scope in "separate body" mode – is set
+    /// in one ModifyDefinition after creation, so no guessing which selection mark the
+    /// creation method wants for what. The feature is first created in a temporary state
+    /// that always succeeds: blind for a boss, through all for a cut (a blind cut from a
+    /// sketch plane away from the part would remove nothing and fail). If the final
+    /// definition cannot be applied, the feature is removed again.
     /// </summary>
     internal sealed class ExtrudeBuilder : IFeatureBuilder
     {
@@ -36,57 +40,109 @@ namespace Spiegelwerk.Build.Builders
             ModelDoc2 doc = ctx.Doc;
             var notes = new List<string>();
 
-            object? end1 = ResolveEnd(r.Side1, ctx, sketch, notes, out EndCondition t1, out double d1);
+            // ---- references, resolved before anything changes the model
+            object? end1 = ResolveEnd(r.Side1, ctx, sketch, notes, out EndCondition final1, out double depth1);
             object? end2 = null;
-            EndCondition t2 = r.Side2.End;
-            double d2 = r.Side2.Depth;
-            if (r.BothDirections) end2 = ResolveEnd(r.Side2, ctx, sketch, notes, out t2, out d2);
-            if ((ExtrudeSide.NeedsReference(r.Side1.End) && end1 == null && t1 != EndCondition.Blind) ||
-                (r.BothDirections && ExtrudeSide.NeedsReference(r.Side2.End) && end2 == null && t2 != EndCondition.Blind))
+            EndCondition final2 = r.Side2.End;
+            double depth2 = r.Side2.Depth;
+            if (r.BothDirections) end2 = ResolveEnd(r.Side2, ctx, sketch, notes, out final2, out depth2);
+            if ((ExtrudeSide.NeedsReference(final1) && end1 == null) || (r.BothDirections && ExtrudeSide.NeedsReference(final2) && end2 == null))
                 return Fail("Bezug der Endbedingung im Ziel nicht gefunden.", notes);
 
             object? startEntity = null;
             if (r.Start == StartCondition.Surface || r.Start == StartCondition.Vertex)
             {
-                startEntity = r.StartReference == null ? null : ctx.Topology.Resolve(r.StartReference.Mirror(ctx.Mirror), notes);
+                startEntity = r.StartReference == null ? null : Safe(ctx.Topology.Resolve(r.StartReference.Mirror(ctx.Mirror), notes));
                 if (startEntity == null) return Fail("Bezug der Startbedingung im Ziel nicht gefunden.", notes);
             }
 
+            object? dir1 = null, dir2 = null;
+            if (r.DirectionReference1 != null)
+            {
+                dir1 = Safe(ctx.Topology.Resolve(r.DirectionReference1.Mirror(ctx.Mirror), notes));
+                if (r.DirectionReference2 != null) dir2 = Safe(ctx.Topology.Resolve(r.DirectionReference2.Mirror(ctx.Mirror), notes));
+                if (dir1 == null || (r.DirectionReference2 != null && dir2 == null))
+                {
+                    dir1 = dir2 = null;
+                    notes.Add("Richtung der Extrusion: Bezug im Ziel nicht gefunden, es wird senkrecht zur Skizze extrudiert.");
+                }
+            }
+
+            // ---- separate body: never let the copy touch the original
+            int ownBefore = ctx.SeparateBody ? ctx.OwnBodies().Count : 0;
+            if (ctx.SeparateBody && r.IsCut && ownBefore == 0)
+                return Fail("Es gibt noch keinen gespiegelten Körper, auf den der Schnitt wirken könnte; das Original bleibt unberührt.", notes);
+            bool scope = ctx.SeparateBody && (r.IsCut || (r.Merge && ownBefore > 0));
+            bool createMerge = !ctx.SeparateBody && r.Merge;
+
+            // ---- temporary creation state
+            EndCondition tmp1 = Temporary(r, end1, startEntity, final1);
+            EndCondition tmp2 = r.BothDirections ? Temporary(r, end2, startEntity, final2) : final2;
+            double tmpDepth1 = depth1 > 0 ? depth1 : PlaceholderDepth;
+            double tmpDepth2 = depth2 > 0 ? depth2 : PlaceholderDepth;
             bool reverse = DirectionRules.ReverseFlag(r.Reverse, sketch.Sigma);
-            bool merge = r.Merge && !(ctx.SeparateBody && !r.IsCut && ctx.OwnBodies().Count == 0);
             int t0 = r.Start == StartCondition.Offset ? (int)StartCondition.Offset : (int)StartCondition.SketchPlane;
             bool flipStart = sketch.Sigma < 0 ? !r.StartOffsetReverse : r.StartOffsetReverse;
 
-            var contours = MapContours(r, sketch, notes);
-            Feature? f = Create(ctx, r, sketch, contours, reverse, merge, t1, d1, t2, d2, t0, flipStart);
+            List<object>? contours = MapContours(r.Contours, sketch, notes);
+            bool singleDir = !r.BothDirections;
+            Feature? f = Create(ctx, r, sketch, contours, singleDir, reverse, createMerge, tmp1, tmpDepth1, tmp2, tmpDepth2, t0, flipStart);
+            bool contoursPending = false;
             if (f == null && contours != null)
             {
-                notes.Add("Mit den ausgewählten Konturen nicht erzeugbar, Versuch mit ganzer Skizze und nachträglicher Konturauswahl.");
-                f = Create(ctx, r, sketch, null, reverse, merge, t1, d1, t2, d2, t0, flipStart);
-                if (f != null && !FeatureEdit.Extrude(doc, f, d => d.Contours = contours.ToArray()))
-                    notes.Add("Konturauswahl konnte nicht übernommen werden; es wird die ganze Skizze verwendet.");
+                f = Create(ctx, r, sketch, null, singleDir, reverse, createMerge, tmp1, tmpDepth1, tmp2, tmpDepth2, t0, flipStart);
+                contoursPending = f != null;
             }
-            if (f == null) return Fail("SOLIDWORKS hat das Feature nicht erzeugt.", notes);
+            bool tempChanged = false;
+            if (f == null && r.IsCut)
+            {
+                // Last resort for cuts: through all in both directions certainly cuts something.
+                f = Create(ctx, r, sketch, null, true, reverse, createMerge, EndCondition.ThroughAllBoth, 0, EndCondition.Blind, 0, (int)StartCondition.SketchPlane, false);
+                contoursPending = f != null && contours != null;
+                tempChanged = f != null;
+            }
+            if (f == null)
+                return Fail("SOLIDWORKS hat das Feature nicht erzeugt" + (r.IsCut ? " (auch „durch alles“ hat keinen Körper geschnitten)." : "."), notes);
 
-            // References and start condition, now that the feature exists.
-            if (end1 != null || end2 != null || startEntity != null)
+            // ---- final definition in one step
+            bool needsEdit = tempChanged || contoursPending || scope || end1 != null || end2 != null || startEntity != null || dir1 != null
+                             || tmp1 != final1 || tmp2 != final2;
+            if (needsEdit)
             {
                 bool ok = FeatureEdit.Extrude(doc, f, d =>
                 {
-                    if (end1 != null) SetEnd(d, true, r.Side1, end1);
-                    if (end2 != null) SetEnd(d, false, r.Side2, end2);
+                    d.BothDirections = r.BothDirections;
+                    if (tempChanged)
+                    {
+                        d.FromType = t0;
+                        d.FromOffsetDistance = r.StartOffset;
+                        d.FromOffsetReverse = flipStart;
+                    }
+                    ApplySide(d, true, r.Side1, final1, depth1, end1);
+                    if (r.BothDirections) ApplySide(d, false, r.Side2, final2, depth2, end2);
                     if (startEntity != null)
                     {
                         d.FromType = (int)r.Start;
                         d.SetFromEntity(startEntity);
                     }
+                    if (dir1 != null) d.SetDirectionReference(dir1, dir2);
+                    if (contoursPending) d.Contours = contours!.ToArray();
+                    if (scope)
+                    {
+                        if (!r.IsCut) d.Merge = true;
+                        d.FeatureScope = true;
+                        d.AutoSelect = false;
+                        d.FeatureScopeBodies = OwnBodiesBeforeFeature(ctx);
+                    }
                 });
-                if (!ok) return Fail("Bezüge der End-/Startbedingung konnten nicht gesetzt werden.", notes, f);
+                if (!ok)
+                {
+                    Delete(ctx, f);
+                    return Fail("Endbedingung, Bezüge oder Feature-Bereich ließen sich nicht setzen; das Feature wurde wieder entfernt.", notes);
+                }
             }
 
-            ApplyScope(ctx, f, r, notes);
             ctx.Register(r.Name, f);
-
             var result = BuildResult.Ok(f, Describe(r, reverse != r.Reverse));
             result.Notes.AddRange(notes);
             if (notes.Count > 0) result.Status = ReportStatus.Warning;
@@ -94,7 +150,27 @@ namespace Spiegelwerk.Build.Builders
             return result;
         }
 
-        private static Feature? Create(BuildContext ctx, ExtrudeRecord r, SketchMap sketch, List<object>? contours,
+        /// <summary>The condition used while creating; references are attached afterwards.</summary>
+        private static EndCondition Temporary(ExtrudeRecord r, object? reference, object? startEntity, EndCondition final)
+        {
+            if (reference == null && !(r.IsCut && startEntity != null)) return final;
+            return r.IsCut ? EndCondition.ThroughAll : EndCondition.Blind;
+        }
+
+        private static void ApplySide(ExtrudeFeatureData2 d, bool forward, ExtrudeSide side, EndCondition cond, double depth, object? reference)
+        {
+            d.SetEndCondition(forward, (int)cond);
+            if (cond == EndCondition.Blind || cond == EndCondition.MidPlane || cond == EndCondition.OffsetFromSurface)
+                d.SetDepth(forward, depth);
+            if (reference != null) d.SetEndConditionReference(forward, reference);
+            if (cond == EndCondition.OffsetFromSurface)
+            {
+                d.SetReverseOffset(forward, side.OffsetReverse);
+                d.SetTranslateSurface(forward, side.TranslateSurface);
+            }
+        }
+
+        private static Feature? Create(BuildContext ctx, ExtrudeRecord r, SketchMap sketch, List<object>? contours, bool sd,
             bool reverse, bool merge, EndCondition t1, double d1, EndCondition t2, double d2, int t0, bool flipStart)
         {
             ModelDoc2 doc = ctx.Doc;
@@ -109,7 +185,6 @@ namespace Spiegelwerk.Build.Builders
                 SwSelect.Select(doc, sketch.Feature, 0, false);
             }
 
-            bool sd = !r.BothDirections;
             ExtrudeSide s1 = r.Side1, s2 = r.Side2;
             Feature? f;
             if (!r.IsCut && !r.IsThin)
@@ -147,31 +222,31 @@ namespace Spiegelwerk.Build.Builders
         }
 
         /// <summary>
-        /// End condition for creation. Conditions with a reference are created blind and set
-        /// later; if the reference cannot be found but it is a plane parallel to the sketch,
-        /// the condition is converted to the equivalent blind depth.
+        /// Finds the mirrored reference of an up-to/offset end condition. If it cannot be found
+        /// but it is a plane parallel to the sketch, the condition becomes the equivalent blind
+        /// depth (<paramref name="cond"/> = Blind); otherwise the caller fails the feature.
         /// </summary>
         private static object? ResolveEnd(ExtrudeSide side, BuildContext ctx, SketchMap sketch, List<string> notes, out EndCondition cond, out double depth)
         {
             cond = side.End;
             depth = side.Depth;
             if (!ExtrudeSide.NeedsReference(side.End)) return null;
+            if (side.Reference == null)
+            {
+                notes.Add($"Endbedingung {side.End}: Bezug im Original nicht lesbar.");
+                return null;
+            }
 
-            cond = EndCondition.Blind;
-            depth = side.Depth > 0 ? side.Depth : PlaceholderDepth;
-            if (side.Reference == null) return null;
-
-            object? target = ctx.Topology.Resolve(side.Reference.Mirror(ctx.Mirror), notes);
+            object? target = Safe(ctx.Topology.Resolve(side.Reference.Mirror(ctx.Mirror), notes));
             if (target != null) return target;
 
             double? blind = BlindEquivalent(side, sketch);
             if (blind.HasValue)
             {
+                cond = EndCondition.Blind;
                 depth = blind.Value;
                 notes.Add($"Endbedingung {side.End} ohne Bezug im Ziel, ersetzt durch Blind {depth * 1000:0.###} mm.");
-                return null;
             }
-            cond = side.End;
             return null;
         }
 
@@ -193,69 +268,15 @@ namespace Spiegelwerk.Build.Builders
             return depth > Tol.Length ? depth : (double?)null;
         }
 
-        private static void SetEnd(ExtrudeFeatureData2 d, bool forward, ExtrudeSide side, object reference)
-        {
-            d.SetEndCondition(forward, (int)side.End);
-            d.SetEndConditionReference(forward, reference);
-            if (side.End == EndCondition.OffsetFromSurface)
-            {
-                d.SetDepth(forward, side.Depth);
-                d.SetReverseOffset(forward, side.OffsetReverse);
-                d.SetTranslateSurface(forward, side.TranslateSurface);
-            }
-        }
-
-        /// <summary>Selected contours of the original → contours of the new sketch with the same segments.</summary>
-        private static List<object>? MapContours(ExtrudeRecord r, SketchMap sketch, List<string> notes)
-        {
-            if (r.Contours.Count == 0) return null;
-            var available = ((object[])sketch.Sketch.GetSketchContours() ?? Array.Empty<object>()).OfType<SketchContour>()
-                .Select(c => (contour: c, ids: new HashSet<string>(((object[])c.GetSketchSegments()).OfType<SketchSegment>().Select(SwDoc.IdOf))))
-                .ToList();
-            var result = new List<object>();
-            foreach (List<string> wanted in r.Contours)
-            {
-                var newIds = new HashSet<string>(wanted.Where(sketch.Segments.ContainsKey).Select(id => SwDoc.IdOf(sketch.Segments[id])));
-                var match = available.FirstOrDefault(a => a.ids.SetEquals(newIds));
-                if (match.contour == null)
-                {
-                    notes.Add("Eine ausgewählte Kontur wurde in der neuen Skizze nicht gefunden; es wird die ganze Skizze verwendet.");
-                    return null;
-                }
-                result.Add(match.contour);
-            }
-            return result;
-        }
-
-        /// <summary>
-        /// Same part, separate body: cuts and merging bosses act only on the bodies this job
-        /// created, so the mirrored features never touch the original body.
-        /// </summary>
-        public static void ApplyScope(BuildContext ctx, Feature f, ExtrudeRecord r, List<string> notes)
-        {
-            if (!ctx.SeparateBody) return;
-            List<Body2> own = ctx.OwnBodies();
-            if (own.Count == 0 || (!r.IsCut && !r.Merge)) return;
-            bool ok = FeatureEdit.Extrude(ctx.Doc, f, d =>
-            {
-                d.FeatureScope = true;
-                d.AutoSelect = false;
-                d.FeatureScopeBodies = own.Cast<object>().ToArray();
-            });
-            if (!ok) notes.Add("Feature-Bereich konnte nicht auf die gespiegelten Körper beschränkt werden.");
-        }
-
         private static void AddAlternatives(BuildResult result, BuildContext ctx, Feature f, ExtrudeRecord r)
         {
             ModelDoc2 doc = ctx.Doc;
             result.Alternatives.Add(new Alternative("Richtung umgekehrt",
                 () => FeatureEdit.Extrude(doc, f, d => d.ReverseDirection = !d.ReverseDirection)));
-            if (r.IsThin && (r.ThinType == (int)swThinWallType_e.swThinWallOneDirection || r.ThinType == (int)swThinWallType_e.swThinWallOppDirection))
+            if (r.IsThin && IsThinOneSided(r.ThinType))
                 result.Alternatives.Add(new Alternative("Wandseite gewechselt",
-                    () => FeatureEdit.Extrude(doc, f, d => d.ThinWallType = d.ThinWallType == (int)swThinWallType_e.swThinWallOneDirection
-                        ? (int)swThinWallType_e.swThinWallOppDirection
-                        : (int)swThinWallType_e.swThinWallOneDirection)));
-            if (r.IsThin && r.ThinType == (int)swThinWallType_e.swThinWallTwoDirection)
+                    () => FeatureEdit.Extrude(doc, f, d => d.ThinWallType = OtherThinSide(d.ThinWallType))));
+            if (r.IsThin && r.ThinType == (int)swThinWallType_e.swThinWallTwoDirection && Math.Abs(r.Side1.WallThickness - r.Side2.WallThickness) > 1e-12)
                 result.Alternatives.Add(new Alternative("Wandstärken getauscht", () => FeatureEdit.Extrude(doc, f, d =>
                 {
                     double a = d.GetWallThickness(true), b = d.GetWallThickness(false);
@@ -275,13 +296,6 @@ namespace Spiegelwerk.Build.Builders
             string what = (r.IsCut ? "Schnitt" : "Aufsatz") + (r.IsThin ? " (dünnwandig)" : "");
             string ends = r.BothDirections ? $"{r.Side1.End} / {r.Side2.End}" : r.Side1.End.ToString();
             return $"{what}, {ends}" + (reversed ? ", Richtungsflag umgekehrt (Skizzennormale entgegengesetzt)" : "");
-        }
-
-        private static BuildResult Fail(string message, List<string> notes, Feature? created = null)
-        {
-            var result = BuildResult.Failed(message + (created != null ? $" (Feature \"{created.Name}\" bleibt zur Prüfung stehen)" : ""));
-            result.Notes.AddRange(notes);
-            return result;
         }
     }
 }

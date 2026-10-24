@@ -5,6 +5,7 @@ using SolidWorks.Interop.swconst;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
+using static Spiegelwerk.Build.Builders.BuilderSupport;
 
 namespace Spiegelwerk.Build.Builders
 {
@@ -30,48 +31,49 @@ namespace Spiegelwerk.Build.Builders
                 return BuildResult.Failed($"Skizze \"{r.SketchName}\" wurde nicht neu aufgebaut.");
 
             var notes = new List<string>();
-            object? axis = r.Axis == null ? null : ctx.Topology.Resolve(r.Axis.Mirror(ctx.Mirror), notes);
+            object? axis = r.Axis == null ? null : Safe(ctx.Topology.Resolve(r.Axis.Mirror(ctx.Mirror), notes));
             if (axis == null)
-            {
-                var failed = BuildResult.Failed("Drehachse im Ziel nicht gefunden (nur Skizzenlinien und gerade Kanten werden zugeordnet).");
-                failed.Notes.AddRange(notes);
-                return failed;
-            }
+                return Fail("Drehachse im Ziel nicht gefunden (nur Skizzenlinien und gerade Kanten werden zugeordnet).", notes);
+
+            // Separate body: as for extrusions, never let the copy touch the original.
+            int ownBefore = ctx.SeparateBody ? ctx.OwnBodies().Count : 0;
+            if (ctx.SeparateBody && r.IsCut && ownBefore == 0)
+                return Fail("Es gibt noch keinen gespiegelten Körper, auf den der Schnitt wirken könnte; das Original bleibt unberührt.", notes);
+            bool scope = ctx.SeparateBody && (r.IsCut || (r.Merge && ownBefore > 0));
+            bool createMerge = !ctx.SeparateBody && r.Merge;
 
             (bool singleDir, EndCondition dir1, double a1, EndCondition dir2, double a2) = Layout(r);
             bool reverse = DirectionRules.ReverseFlag(r.Reverse, sketch.Sigma);
-            bool merge = r.Merge && !(ctx.SeparateBody && !r.IsCut && ctx.OwnBodies().Count == 0);
+            List<object>? contours = MapContours(r.Contours, sketch, notes);
 
             ModelDoc2 doc = ctx.Doc;
-            Feature? f = null;
-            foreach (int mark in AxisMarks)
+            Feature? f = Create(ctx, r, sketch, contours, axis, singleDir, reverse, dir1, a1, dir2, a2, createMerge);
+            bool contoursPending = false;
+            if (f == null && contours != null)
             {
-                SwSelect.Clear(doc);
-                SwSelect.Select(doc, sketch.Feature, 0, false);
-                SwSelect.Select(doc, axis, mark, true);
-                f = doc.FeatureManager.FeatureRevolve2(singleDir, true, r.IsThin, r.IsCut, reverse, false,
-                    (int)dir1, (int)dir2, a1, a2, false, false, 0, 0,
-                    r.ThinType, r.Thickness1, r.Thickness2, merge, false, true);
-                SwSelect.Clear(doc);
-                if (f != null) break;
+                f = Create(ctx, r, sketch, null, axis, singleDir, reverse, dir1, a1, dir2, a2, createMerge);
+                contoursPending = f != null;
             }
-            if (f == null)
-            {
-                var failed = BuildResult.Failed("SOLIDWORKS hat das Feature nicht erzeugt.");
-                failed.Notes.AddRange(notes);
-                return failed;
-            }
+            if (f == null) return Fail("SOLIDWORKS hat das Feature nicht erzeugt.", notes);
 
-            if (ctx.SeparateBody && (r.IsCut || r.Merge))
+            if (scope || contoursPending)
             {
-                var own = ctx.OwnBodies();
-                if (own.Count > 0 && !FeatureEdit.Revolve(doc, f, d =>
+                bool ok = FeatureEdit.Revolve(doc, f, d =>
+                {
+                    if (contoursPending) d.Contours = contours!.ToArray();
+                    if (scope)
                     {
+                        if (!r.IsCut) d.Merge = true;
                         d.FeatureScope = true;
                         d.AutoSelect = false;
-                        d.FeatureScopeBodies = own.ConvertAll(b => (object)b).ToArray();
-                    }))
-                    notes.Add("Feature-Bereich konnte nicht auf die gespiegelten Körper beschränkt werden.");
+                        d.FeatureScopeBodies = OwnBodiesBeforeFeature(ctx);
+                    }
+                });
+                if (!ok)
+                {
+                    Delete(ctx, f);
+                    return Fail("Konturauswahl oder Feature-Bereich ließen sich nicht setzen; das Feature wurde wieder entfernt.", notes);
+                }
             }
 
             ctx.Register(r.Name, f);
@@ -81,12 +83,38 @@ namespace Spiegelwerk.Build.Builders
             if (r.DirectionMatters)
                 result.Alternatives.Add(new Alternative("Drehrichtung umgekehrt",
                     () => FeatureEdit.Revolve(doc, f, d => d.ReverseDirection = !d.ReverseDirection)));
-            if (r.IsThin && (r.ThinType == (int)swThinWallType_e.swThinWallOneDirection || r.ThinType == (int)swThinWallType_e.swThinWallOppDirection))
+            if (r.IsThin && IsThinOneSided(r.ThinType))
                 result.Alternatives.Add(new Alternative("Wandseite gewechselt",
-                    () => FeatureEdit.Revolve(doc, f, d => d.ThinWallType = d.ThinWallType == (int)swThinWallType_e.swThinWallOneDirection
-                        ? (int)swThinWallType_e.swThinWallOppDirection
-                        : (int)swThinWallType_e.swThinWallOneDirection)));
+                    () => FeatureEdit.Revolve(doc, f, d => d.ThinWallType = OtherThinSide(d.ThinWallType))));
+            if (r.IsThin && r.ThinType == (int)swThinWallType_e.swThinWallTwoDirection && Math.Abs(r.Thickness1 - r.Thickness2) > 1e-12)
+                result.Alternatives.Add(new Alternative("Wandstärken getauscht", () => FeatureEdit.Revolve(doc, f, d =>
+                {
+                    double a = d.GetWallThickness(true), b = d.GetWallThickness(false);
+                    d.SetWallThickness(true, b);
+                    d.SetWallThickness(false, a);
+                })));
             return result;
+        }
+
+        private static Feature? Create(BuildContext ctx, RevolveRecord r, SketchMap sketch, List<object>? contours, object axis,
+            bool singleDir, bool reverse, EndCondition dir1, double a1, EndCondition dir2, double a2, bool merge)
+        {
+            ModelDoc2 doc = ctx.Doc;
+            foreach (int mark in AxisMarks)
+            {
+                SwSelect.Clear(doc);
+                if (contours != null)
+                    for (int i = 0; i < contours.Count; i++) SwSelect.Select(doc, contours[i], 0, i > 0);
+                else
+                    SwSelect.Select(doc, sketch.Feature, 0, false);
+                SwSelect.Select(doc, axis, mark, true);
+                Feature? f = doc.FeatureManager.FeatureRevolve2(singleDir, true, r.IsThin, r.IsCut, reverse, false,
+                    (int)dir1, (int)dir2, a1, a2, false, false, 0, 0,
+                    r.ThinType, r.Thickness1, r.Thickness2, merge, false, true);
+                SwSelect.Clear(doc);
+                if (f != null) return f;
+            }
+            return null;
         }
 
         /// <summary>swRevolveType_e → parameters of FeatureRevolve2.</summary>

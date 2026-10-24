@@ -62,7 +62,7 @@ Das Vorzeichen **σ = sign(z′ · R(z))** (Zielnormale gegen gespiegelte Quelln
 
 **Warum der Bogensinn kippt:** Ein Bogen läuft mit wachsendem Parameter um die Skizzennormale z. Gespiegelt läuft er um R(x) × R(y) = −R(z). Liegt die Zielnormale bei R(z) (σ = +1), läuft er also im Uhrzeigersinn, wenn er vorher gegen ihn lief; bei σ = −1 bleibt der Sinn. Prüft der Test `Front_sketch_mirrored_at_right_plane_negates_x_and_flips_arcs`: Der gespiegelte Halbkreis wölbt sich weiterhin nach oben.
 
-**Gemeinsame Endpunkte:** Im Original teilen sich zwei verbundene Segmente einen `SketchPoint`. Mit `SketchManager.AddToDB = true` (nötig, damit SOLIDWORKS nicht an Bildschirm-Fangpunkte springt und eigene Beziehungen hinzufügt) entstehen getrennte Punkte an derselben Stelle. Spiegelwerk merkt sich pro Original-Punkt-ID den ersten neuen Punkt und verbindet weitere mit einer Deckungsgleich-Beziehung – sonst wären Konturen offen.
+**Gemeinsame Endpunkte:** Im Original teilen sich zwei verbundene Segmente einen `SketchPoint`. Neu erzeugt wird mit `SketchManager.AddToDB = true` (nötig, damit SOLIDWORKS nicht an Bildschirm-Fangpunkte springt und eigene Beziehungen hinzufügt). Endpunkte mit bitgleichen Koordinaten legt SOLIDWORKS dabei unter Umständen schon selbst zusammen – das erkennt Spiegelwerk an der gleichen Punkt-ID und tut dann nichts. Sind es zwei Punkte, werden sie zusammengeführt (`MERGEPOINTS`), notfalls deckungsgleich gemacht; danach werden die überlebenden Punkte neu eingelesen, weil das Zusammenführen einen der beiden entfernt. Nur wenn beides scheitert, steht „Kontur eventuell offen“ im Bericht.
 
 **Zuordnung der neuen Punkte:** Welcher neue `SketchPoint` zu welcher Original-ID gehört, wird über die Lage bestimmt (Abstand < 1 µm), nicht über Start/Ende – SOLIDWORKS darf einen Bogen intern umdrehen.
 
@@ -82,7 +82,7 @@ Horizontal und vertikal beziehen sich auf die Skizzenachsen. `AxisMap` bestimmt,
 
 Für die Standardebenen und alle dazu parallelen Spiegelebenen landen die Achsen immer auf Achsen; schräg wird es nur bei schräger Spiegelebene.
 
-Erzeugt werden Beziehungen mit `ISketchRelationManager.AddRelation`. Für Beziehungen zu externen Elementen (Ursprung, Kanten, andere Skizzen) wird wie in der Oberfläche ausgewählt und `SketchAddConstraints("sgCOINCIDENT")` usw. aufgerufen; ob es geklappt hat, zeigt die Zahl der Beziehungen vorher/nachher.
+Erzeugt werden Beziehungen mit `ISketchRelationManager.AddRelation`, sobald alle Beteiligten Skizzenpunkte oder -segmente sind – auch der Ursprungspunkt und Elemente anderer Skizzen. Für Kanten, Flächen und Ebenen wird wie in der Oberfläche ausgewählt und `SketchAddConstraints` aufgerufen. Punktbeziehungen haben dort eigene Kennungen, und Hilfe und Makroaufzeichnung schreiben sie unterschiedlich; Spiegelwerk probiert die Kandidaten der Reihe nach (horizontal zwischen Punkten: `sgHORIZONTALPOINTS2D`, dann `sgHORIZONTAL2D`; vertikal: `sgVERTICALPOINTS2D`, `sgVERTPOINTS2D`, `sgVERTICAL2D`; zusammengeführt: `sgMERGEPOINTS`, `sgCOINCIDENT`). Ob es geklappt hat, zeigt die Zahl der Beziehungen vorher und nachher.
 
 ### Externe Bezüge
 
@@ -93,7 +93,11 @@ Erzeugt werden Beziehungen mit `ISketchRelationManager.AddRelation`. Für Bezieh
 | Modellkante, Eckpunkt | über den gespiegelten Fingerabdruck im bisher aufgebauten Ziel |
 | Ebene | eine vorhandene Ebene an gespiegelter Lage |
 
-Gibt es den Bezug im Ziel nicht, gilt die Option *Fehlende Skizzenbezüge fixieren*: Die betroffenen Skizzenelemente bekommen „fixiert“ (die Skizze bleibt voll bestimmt, liegt richtig, hängt aber nicht mehr am Bezug) – oder die Beziehung entfällt. Beides steht im Bericht.
+Gibt es den Bezug im Ziel nicht – der Ursprung, wenn die Spiegelebene nicht durch ihn geht, oder eine Kante eines Features, das nicht mitgespiegelt wurde –, gilt die Option *Fehlende Skizzenbezüge ersetzen*: An die gespiegelte Stelle kommt **fixierte Hilfsgeometrie** (Konstruktionspunkt, -linie oder -kreis, in die Skizze projiziert), und die ursprüngliche Beziehung oder Bemaßung hängt sich daran. Die Skizze behält so genau die Freiheitsgrade des Originals – anders als ein „Fixiert“ auf den eigenen Elementen, das die Skizze überbestimmen kann. Ohne die Option entfällt die Beziehung. Beides steht im Bericht.
+
+**Übernommene und versetzte Elemente** („Elemente übernehmen“, „Elemente versetzen“) hängen im Original über eine „Auf Kante“-Beziehung an einer Modellkante. Im Ziel wird die gespiegelte Kante gesucht und das Element wieder daran gebunden – kollinear bei Linien, koradial bei Bögen und Kreisen; fehlt die Kante, an fixierter Hilfsgeometrie. Splines und Ähnliches werden an Ort und Stelle fixiert. Die Endpunkte übernommener Linien bleiben dabei frei.
+
+Nach dem Aufbau vergleicht Spiegelwerk den Bestimmtheitsgrad der Skizze (`GetConstrainedStatus`) mit dem Original und meldet, wenn die Kopie überbestimmt oder – bei voll bestimmtem Original – unterbestimmt ist.
 
 ## 5. Bemaßungen
 
@@ -115,7 +119,7 @@ if (Matches(dim, measured)) return dd;                      // misst dasselbe wi
 DeleteDimension(dd);                                        // sonst: weg, nächster Versuch
 ```
 
-Die API-Hilfe sagt nicht eindeutig, ob die Position in Modell- oder Skizzenkoordinaten gelesen wird; Spiegelwerk versucht beides und behält die Bemaßung, die stimmt. Erst dann wird der exakte Wert gesetzt (`SetSystemValue3`, alle Konfigurationen), getriebene Bemaßungen werden wieder getrieben, und der Name (`D1`) wird übernommen, damit Gleichungen wie `"D1@Skizze1" = …` weiter passen.
+Die API-Hilfe sagt nicht eindeutig, ob die Position in Modell- oder Skizzenkoordinaten gelesen wird; Spiegelwerk versucht beides und behält die Bemaßung, die stimmt. Erst dann wird der exakte Wert gesetzt (`SetSystemValue3`, alle Konfigurationen; ein Fehlercode wird gemeldet), getriebene Bemaßungen werden wieder getrieben, und der Name (`D1`) wird übernommen, damit Gleichungen wie `"D1@Skizze1" = …` weiter passen. Hat SOLIDWORKS eine im Original treibende Bemaßung als getrieben angelegt, weil sie die Kopie überbestimmen würde, steht das im Bericht – Gleichungen darauf wirken dann nicht.
 
 Damit `AddDimension2` nicht blockiert und nichts überbestimmt wird, schaltet `SwPreferences` für die Dauer des Laufs ab: *Bemaßungswert eingeben*, automatische Beziehungen, Skizzenfang, Rückfrage bei überbestimmenden Bemaßungen.
 

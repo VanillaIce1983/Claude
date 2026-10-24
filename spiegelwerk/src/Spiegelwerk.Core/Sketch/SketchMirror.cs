@@ -39,16 +39,19 @@ namespace Spiegelwerk.Core.Sketch
         public static SketchMirrorResult Mirror(SketchModel source, Reflection r, Frame3 target)
         {
             Plane3 expected = r.Apply(source.Frame.Plane);
-            if (!expected.IsCoplanarWith(target.Plane, 1e-6))
+            if (!expected.IsCoplanarWith(target.Plane))
                 throw new ArgumentException($"Zielskizze liegt nicht in der gespiegelten Skizzenebene ({expected}).");
 
             AxisMap map = AxisMap.Compute(source.Frame, r, target);
-            var result = new SketchMirrorResult(new SketchModel { Name = source.Name, Frame = target }, map);
+            var result = new SketchMirrorResult(new SketchModel { Name = source.Name, Frame = target, ConstrainedStatus = source.ConstrainedStatus }, map);
             SketchModel dst = result.Sketch;
 
             foreach (SkPoint p in source.Points)
             {
                 Vec3 local = target.ToLocal(r.Apply(source.ToModel(p)));
+                // Checked per point: a slightly tilted plane passes the origin check but lifts distant points off it.
+                if (Math.Abs(local.Z) > Tol.Length)
+                    throw new ArgumentException($"Punkt {p.Id} liegt {local.Z * 1000:0.####} mm neben der Zielskizze; die Ebenen sind nicht deckungsgleich.");
                 dst.Points.Add(new SkPoint(p.Id, local.X, local.Y) { Standalone = p.Standalone });
             }
 

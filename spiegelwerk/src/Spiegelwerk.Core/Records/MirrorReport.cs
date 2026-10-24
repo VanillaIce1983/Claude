@@ -30,7 +30,16 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Result of the volume/centroid comparison, if one was made.</summary>
         public string Verification { get; set; } = "";
 
+        /// <summary>
+        /// Skipped, but the target already has an equivalent (e.g. a plane whose mirrored
+        /// location is a standard plane). Such an original may be deleted; other skipped ones may not.
+        /// </summary>
+        public bool HasEquivalent { get; set; }
+
         public List<string> Details { get; } = new List<string>();
+
+        /// <summary>The original has a counterpart in the target.</summary>
+        public bool IsMirrored => Status == ReportStatus.Ok || Status == ReportStatus.Warning || (Status == ReportStatus.Skipped && HasEquivalent);
     }
 
     public sealed class MirrorReport
@@ -58,7 +67,7 @@ namespace Spiegelwerk.Core.Records
             General.AddRange(other.General.Select(g => "   " + g));
             foreach (ReportEntry e in other.Entries)
             {
-                var copy = new ReportEntry($"{heading} › {e.Feature}", e.Type, e.Status, e.Message) { Verification = e.Verification };
+                var copy = new ReportEntry($"{heading} › {e.Feature}", e.Type, e.Status, e.Message) { Verification = e.Verification, HasEquivalent = e.HasEquivalent };
                 copy.Details.AddRange(e.Details);
                 Entries.Add(copy);
             }
@@ -69,6 +78,16 @@ namespace Spiegelwerk.Core.Records
         public int Count(ReportStatus s) => Entries.Count(e => e.Status == s);
 
         public bool HasProblems => Aborted || Entries.Any(e => e.Status == ReportStatus.Failed || e.Status == ReportStatus.Warning);
+
+        /// <summary>
+        /// Every feature has a counterpart and nothing needs checking: the condition for deleting
+        /// the original. A skipped feature (3D sketch, axis, coordinate system ...) has no
+        /// copy, so deleting its original would lose it.
+        /// </summary>
+        public bool AllMirrored => !Aborted && Entries.All(e => e.Status == ReportStatus.Ok || (e.Status == ReportStatus.Skipped && e.HasEquivalent));
+
+        /// <summary>Entries without a counterpart in the target.</summary>
+        public IEnumerable<ReportEntry> NotMirrored => Entries.Where(e => !e.IsMirrored);
 
         public string Summary =>
             $"{Count(ReportStatus.Ok)} in Ordnung, {Count(ReportStatus.Warning)} mit Hinweis, " +

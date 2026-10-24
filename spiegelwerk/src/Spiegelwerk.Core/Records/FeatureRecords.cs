@@ -138,6 +138,11 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>Selected contours, each as the set of segment ids it consists of. Empty: whole sketch.</summary>
         public List<List<string>> Contours { get; } = new List<List<string>>();
+
+        /// <summary>"Direction of extrusion" (instead of the sketch normal): a line, edge or plane; a second entity for two-point directions.</summary>
+        public GeometryRef? DirectionReference1 { get; set; }
+
+        public GeometryRef? DirectionReference2 { get; set; }
     }
 
     /// <summary>Revolve, Revolve-Cut, thin variants.</summary>
@@ -165,6 +170,9 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>Sketch line, reference axis or linear edge.</summary>
         public GeometryRef? Axis { get; set; }
+
+        /// <summary>Selected contours (segment id sets). Empty: whole sketch.</summary>
+        public List<List<string>> Contours { get; } = new List<List<string>>();
 
         /// <summary>Only a one-direction revolve below 360° has a direction that matters.</summary>
         public bool DirectionMatters => (RevolveType == 0 && Angle1 < 2 * System.Math.PI - 1e-9) || RevolveType == 2;
