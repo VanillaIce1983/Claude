@@ -41,6 +41,7 @@ namespace Spiegelwerk.Capture
                     r.Notes.Add("„Bis Referenz“ wird als feste Anzahl und fester Abstand übernommen (Werte des Originals).");
 
                 ReadSeeds(r, d.BodyPattern, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, d.SkippedItemArray);
+                NoteScope(d, r);
                 r.GeometryPattern = d.GeometryPattern;
                 r.VarySketch = d.VarySketch;
                 int n = r.Count1 * (r.HasDirection2 ? Math.Max(1, r.Count2) : 1);
@@ -75,6 +76,7 @@ namespace Spiegelwerk.Capture
                 }
 
                 ReadSeeds(r, d.BodyPattern, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, d.SkippedItemArray);
+                NoteScope(d, r);
                 r.GeometryPattern = d.GeometryPattern;
                 r.VarySketch = d.VarySketch;
                 ReadInstances(r, r.Count + (r.Direction2 ? r.Count2 : 0), d.GetTransform);
@@ -132,6 +134,13 @@ namespace Spiegelwerk.Capture
         {
             if (count <= 0 || count > MaxInstancesRead) return;
             foreach (Affine a in SwPattern.Instances(_math, count, transform)) r.Instances.Add(a);
+        }
+
+        /// <summary>A pattern limited to chosen bodies (newer API versions only) is rebuilt without that limit.</summary>
+        private static void NoteScope(object d, PatternRecord r)
+        {
+            if (SwLate.Get(d, "FeatureScope") is bool scope && scope && SwLate.Get(d, "AutoSelect") is bool auto && !auto)
+                r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
         }
 
         /// <summary>Pattern direction or axis: edge, axis, sketch line, plane or face – not a dimension.</summary>

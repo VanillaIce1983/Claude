@@ -41,9 +41,8 @@ namespace Spiegelwerk.Build.Builders
             var r = (PatternRecord)record;
             var notes = new List<string>();
 
-            Seeds? seeds = FindSeeds(ctx, r, notes);
-            if (seeds == null) return Fail("Keines der Saat-Elemente des Musters wurde im Ziel gefunden.", notes);
-
+            // Directions first: they may add a helper plane or axis, after which faces and
+            // bodies found earlier would be stale.
             object? dir1, dir2 = null;
             if (r is LinearPatternRecord lin)
             {
@@ -56,6 +55,11 @@ namespace Spiegelwerk.Build.Builders
                 dir1 = Find(ctx, ((CircularPatternRecord)r).Axis, notes);
                 if (dir1 == null) return Fail("Musterachse im Ziel nicht gefunden.", notes);
             }
+
+            Seeds? seeds = FindSeeds(ctx, r, notes);
+            if (seeds == null)
+                return Fail("Keines der Saat-Elemente des Musters wurde im Ziel gefunden" +
+                            (r.SeedFeatures.Count == 0 ? " (bei Flächen- und Körpermustern müssen die Features, aus denen die Saat stammt, mitgespiegelt werden)." : "."), notes);
 
             // First guess, corrected below by the reported placements: a linear pattern keeps
             // its flag, a circular one turns the other way.
@@ -77,10 +81,14 @@ namespace Spiegelwerk.Build.Builders
             if (r.SkippedItems.Count > 0 && !Edit(ctx.Doc, f, lp => lp.SkippedItemArray = r.SkippedItems.ToArray(), cp => cp.SkippedItemArray = r.SkippedItems.ToArray()))
                 notes.Add($"Die {r.SkippedItems.Count} übersprungenen Instanzen ließen sich nicht übernehmen.");
 
-            string directions = MatchPlacements(ctx, f, r, notes);
+            if (ctx.SeparateBody) LimitToOwnBodies(ctx, f, notes);
+
+            string directions = MatchPlacements(ctx, f, r, notes, out bool confirmed);
             ctx.Register(r.Name, f);
             BuildResult result = Ok(f, Describe(r) + directions, notes);
-            AddAlternatives(result, ctx.Doc, f, r);
+            // Measured placements are better evidence than volume and centroid; the verifier
+            // gets direction variants only where they could not settle the question.
+            if (!confirmed) AddAlternatives(result, ctx.Doc, f, r);
             return result;
         }
 
@@ -105,7 +113,7 @@ namespace Spiegelwerk.Build.Builders
             foreach (var face in r.SeedFaces)
             {
                 Face2? found = ctx.Topology.FindFace(face.Mirror(ctx.Mirror), notes);
-                if (found != null) seeds.Faces.Add(found);
+                if (found != null) seeds.Faces.Add(Safe(found) as Face2 ?? found);
                 else missing.Add("eine Fläche");
             }
             foreach (MassState body in r.SeedBodies)
@@ -240,15 +248,25 @@ namespace Spiegelwerk.Build.Builders
         /// <summary>
         /// Compares the placements of the new pattern with the mirrored ones of the original and
         /// tries the other flag combinations if they differ. Returns a remark for the report.
+        /// <paramref name="confirmed"/>: the placements settle the direction flags – all match,
+        /// at least one instance is not the seed itself, and no instance is skipped (whether
+        /// skipped instances report a placement is not documented, so with skips the sets
+        /// might agree although the wrong instance is left out).
         /// </summary>
-        private static string MatchPlacements(BuildContext ctx, Feature f, PatternRecord r, List<string> notes)
+        private static string MatchPlacements(BuildContext ctx, Feature f, PatternRecord r, List<string> notes, out bool confirmed)
         {
+            confirmed = false;
             if (r.Instances.Count == 0) return "";
             List<Affine> wanted = PatternInstances.Mirror(r.Instances, ctx.Mirror);
             List<Affine>? actual = ReadInstances(ctx, f, r);
             if (actual == null || actual.Count == 0) return "";
+            bool conclusive = r.SkippedItems.Count == 0 && wanted.Any(t => !t.AlmostEquals(Affine.Identity));
             int best = PatternInstances.Unmatched(wanted, actual);
-            if (best == 0) return ", Lage der Instanzen geprüft";
+            if (best == 0)
+            {
+                confirmed = conclusive;
+                return ", Lage der Instanzen geprüft";
+            }
 
             // Toggles applied on top of each other: (1), (1+2), (2) for two directions.
             var toggles = new List<Func<bool>> { () => ToggleFirst(ctx.Doc, f) };
@@ -275,9 +293,28 @@ namespace Spiegelwerk.Build.Builders
             for (int i = applied - 1; i >= bestAt; i--) toggles[i]();
             ctx.Topology.Invalidate();
 
-            if (best == 0) return bestAt > 0 ? ", Richtung nach Lage der Instanzen korrigiert" : ", Lage der Instanzen geprüft";
-            notes.Add($"{best} von {wanted.Count} Instanzen liegen nicht an der gespiegelten Stelle.");
+            if (best == 0)
+            {
+                confirmed = conclusive;
+                return bestAt > 0 ? ", Richtung nach Lage der Instanzen korrigiert" : ", Lage der Instanzen geprüft";
+            }
+            notes.Add($"{Math.Min(best, wanted.Count)} von {wanted.Count} Instanzen liegen nicht an der gespiegelten Stelle.");
             return "";
+        }
+
+        /// <summary>
+        /// Separate body: limits the instances to the mirrored bodies. Pattern data has a
+        /// feature scope only in newer API versions (2024 interop yes, 2019 no); without it the
+        /// check of the original bodies in MirrorJob is what keeps the original untouched.
+        /// </summary>
+        private static void LimitToOwnBodies(BuildContext ctx, Feature f, List<string> notes)
+        {
+            if (!(SwLate.Get(f.GetDefinition(), "FeatureScope") is bool)) return;
+            bool set = false;
+            bool ok = Edit(ctx.Doc, f,
+                d => set = SwLate.Call(d, "SetFeatureScope", true, false, OwnBodiesBeforeFeature(ctx)),
+                d => set = SwLate.Call(d, "SetFeatureScope", true, false, OwnBodiesBeforeFeature(ctx)));
+            if (!ok || !set) notes.Add("Der Feature-Bereich des Musters ließ sich nicht auf den gespiegelten Körper beschränken.");
         }
 
         private static bool ToggleFirst(ModelDoc2 doc, Feature f) =>

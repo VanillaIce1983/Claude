@@ -4,6 +4,7 @@ using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Verification;
 
 namespace Spiegelwerk.Sw
@@ -44,21 +45,19 @@ namespace Spiegelwerk.Sw
         }
 
         /// <summary>
-        /// All features in creation order: absorbed sketches come before the feature that
-        /// absorbed them, as they were created before it.
+        /// All features in dependency order (Core.Planning.CreationOrder): absorbed sketches
+        /// before the feature that absorbed them, every feature after its parents – also a
+        /// guide-curve sketch at the top level after the profile sketches a later loft absorbed.
         /// </summary>
         public static List<Feature> FeaturesInCreationOrder(ModelDoc2 doc)
         {
-            var result = new List<Feature>();
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            void Visit(Feature f)
-            {
-                foreach (Feature sub in SubFeatures(f))
-                    if (IsSketch(sub)) Visit(sub);
-                if (seen.Add(f.Name)) result.Add(f);
-            }
-            foreach (Feature f in TopLevelFeatures(doc)) Visit(f);
-            return result;
+            List<Feature> top = TopLevelFeatures(doc).ToList();
+            // Only what the tree walk lists anyway (top level and absorbed sketches) is reordered, nothing is added.
+            var listed = new HashSet<string>(top.Select(f => f.Name).Concat(top.SelectMany(f => SubFeatures(f).Where(IsSketch)).Select(f => f.Name)),
+                StringComparer.Ordinal);
+            IEnumerable<Feature> Parents(Feature f) =>
+                f.GetParents() is object[] parents ? parents.OfType<Feature>().Where(p => listed.Contains(p.Name)) : Enumerable.Empty<Feature>();
+            return CreationOrder.Sort(top, f => SubFeatures(f).Where(IsSketch), Parents, f => f.Name);
         }
 
         public static bool IsSketch(Feature f) => f.GetTypeName2() == "ProfileFeature" || f.GetTypeName2() == "3DProfileFeature";

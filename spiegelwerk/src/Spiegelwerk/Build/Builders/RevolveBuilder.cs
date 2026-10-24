@@ -31,13 +31,15 @@ namespace Spiegelwerk.Build.Builders
                 return BuildResult.Failed($"Skizze \"{r.SketchName}\" wurde nicht neu aufgebaut.");
 
             var notes = new List<string>();
-            object? axis = r.Axis == null ? null : Safe(ctx.Topology.Resolve(r.Axis.Mirror(ctx.Mirror), notes));
-            if (axis == null)
-                return Fail("Drehachse im Ziel nicht gefunden.", notes);
 
-            // Separate body: as for extrusions, never let the copy touch the original.
+            // Separate body: as for extrusions, never let the copy touch the original. Checked
+            // first, so a refused revolve leaves no helper axis behind.
             string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
             if (refused != null) return Fail(refused, notes);
+
+            object? axis = Find(ctx, r.Axis, notes);
+            if (axis == null)
+                return Fail("Drehachse im Ziel nicht gefunden.", notes);
 
             (bool singleDir, EndCondition dir1, double a1, EndCondition dir2, double a2) = Layout(r);
             bool reverse = DirectionRules.ReverseFlag(r.Reverse, sketch.Sigma);

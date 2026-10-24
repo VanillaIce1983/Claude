@@ -91,10 +91,17 @@ namespace Spiegelwerk.Capture
                     for (int i = 0; i < guides.Length; i++)
                     {
                         r.Guides.Add(RequireCurve(guides[i], "Führungskurve"));
-                        r.GuideTangency.Add(d.GetGuideTangencyType((short)i));
+                        int tangency = d.GetGuideTangencyType((short)i);
+                        if (tangency == (int)Tangency.DirectionVector)
+                        {
+                            // The API has no access to the vector of a guide curve.
+                            r.Notes.Add($"Führungskurve {i + 1}: Richtungsvektor der Tangentenbedingung nicht übertragbar, „keine“ verwendet.");
+                            tangency = (int)Tangency.None;
+                        }
+                        r.GuideTangency.Add(tangency);
                     }
                 if (d.Centerline != null) r.Centerline = RequireCurve(d.Centerline, "Mittellinie");
-                ReadPickPoints(d.PickPoints, r);
+                ReadPickPoints(d, r);
 
                 r.Closed = d.Close;
                 r.MaintainTangency = d.MaintainTangency;
@@ -135,20 +142,20 @@ namespace Spiegelwerk.Capture
         /// Pick points: one array per profile chain, each holding math points (model space).
         /// They decide which vertices the loft connects; unreadable ones are reported, not fatal.
         /// </summary>
-        private static void ReadPickPoints(object pickPoints, LoftRecord r)
+        private static void ReadPickPoints(LoftFeatureData d, LoftRecord r)
         {
-            if (!(pickPoints is object[] chains)) return;
             try
             {
-                foreach (object chain in chains)
-                {
-                    var points = new List<Vec3>();
-                    if (chain is object[] items)
-                        foreach (object item in items)
-                            if (item is MathPoint mp && mp.ArrayData is double[] xyz && xyz.Length >= 3)
-                                points.Add(Vec3.FromArray(xyz));
-                    r.PickPoints.Add(points);
-                }
+                if (d.PickPoints is object[] chains)
+                    foreach (object chain in chains)
+                    {
+                        var points = new List<Vec3>();
+                        if (chain is object[] items)
+                            foreach (object item in items)
+                                if (item is MathPoint mp && mp.ArrayData is double[] xyz && xyz.Length >= 3)
+                                    points.Add(Vec3.FromArray(xyz));
+                        r.PickPoints.Add(points);
+                    }
             }
             catch (Exception)
             {

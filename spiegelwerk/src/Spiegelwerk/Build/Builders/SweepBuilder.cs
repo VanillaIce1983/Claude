@@ -36,6 +36,10 @@ namespace Spiegelwerk.Build.Builders
             var r = (SweepRecord)record;
             var notes = new List<string>();
 
+            // Before resolving anything: a refused feature must not leave helper planes or axes behind.
+            string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
+            if (refused != null) return Fail(refused, notes);
+
             object? profile = null;
             if (!r.CircularProfile)
             {
@@ -56,9 +60,6 @@ namespace Spiegelwerk.Build.Builders
             object? startDir = DirectionOrNone(ctx, r.StartDirection, ref start, "Starttangente", notes);
             object? endDir = DirectionOrNone(ctx, r.EndDirection, ref end, "Endtangente", notes);
             object? alignDir = DirectionOrNone(ctx, r.PathAlignmentDirection, ref align, "Pfadausrichtung", notes);
-
-            string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
-            if (refused != null) return Fail(refused, notes);
 
             // Direction vectors are attached afterwards; until then the condition is "none".
             Feature? f = Create(ctx, r, profile, path, guides, createMerge,

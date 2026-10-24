@@ -33,10 +33,17 @@ namespace Spiegelwerk.Build.Builders
             var r = (LoftRecord)record;
             var notes = new List<string>();
 
+            // Before resolving anything: a refused feature must not leave helper planes or axes behind.
+            string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
+            if (refused != null) return Fail(refused, notes);
+
             var profiles = new List<object>();
             foreach (GeometryRef p in r.Profiles)
             {
-                object? profile = Find(ctx, p, notes);
+                // A face profile must be that face – the plane through it that Find falls back to is no profile.
+                object? profile = p.Kind == GeometryRefKind.Face
+                    ? Safe(ctx.Topology.FindFace(p.Face!.Mirror(ctx.Mirror), notes))
+                    : Find(ctx, p, notes);
                 if (profile == null) return Fail($"Profil {p} wurde im Ziel nicht gefunden.", notes);
                 profiles.Add(profile);
             }
@@ -60,9 +67,6 @@ namespace Spiegelwerk.Build.Builders
             bool reverseStart = FirstGuess(ctx, r.Profiles[0], start, r.ReverseStartTangent);
             bool reverseEnd = FirstGuess(ctx, r.Profiles[r.Profiles.Count - 1], end, r.ReverseEndTangent);
 
-            string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
-            if (refused != null) return Fail(refused, notes);
-
             List<List<Vec3>> wantedPicks = r.PickPoints.Select(c => c.Select(ctx.Mirror.Apply).ToList()).ToList();
             Feature? f = Create(ctx, r, profiles, guides, centerline, wantedPicks, createMerge,
                 start == Tangency.DirectionVector ? Tangency.None : start,
@@ -70,14 +74,17 @@ namespace Spiegelwerk.Build.Builders
                 reverseStart, reverseEnd);
             if (f == null) return Fail("SOLIDWORKS hat die Ausformung nicht erzeugt.", notes);
 
-            // The cut method has no tangent lengths and directions; set them with the rest.
-            bool needsEdit = r.IsCut || scope || startDir != null || endDir != null || r.GuideTangency.Any(t => t != 0);
+            // The cut method has no tangent lengths and directions, neither method the guide-curve
+            // influence (cut) or "apply to all"; set them with the rest.
+            bool needsEdit = r.IsCut || scope || startDir != null || endDir != null || r.GuideTangency.Any(t => t != 0) ||
+                             (start != Tangency.None && !r.StartApplyToAll) || (end != Tangency.None && !r.EndApplyToAll);
             if (needsEdit)
             {
                 bool ok = FeatureEdit.Loft(ctx.Doc, f, d =>
                 {
                     ApplyEnd(d, true, start, startDir, r.StartTangentLength, reverseStart, r.StartApplyToAll, r.StartDraftAngle, r.ReverseStartDraft);
                     ApplyEnd(d, false, end, endDir, r.EndTangentLength, reverseEnd, r.EndApplyToAll, r.EndDraftAngle, r.ReverseEndDraft);
+                    if (r.Guides.Count > 0) d.GuideCurveInfluence = r.GuideCurveInfluence;
                     for (int i = 0; i < r.GuideTangency.Count; i++)
                         if (r.GuideTangency[i] != 0) d.SetGuideTangencyType((short)i, (short)r.GuideTangency[i]);
                     if (scope)

@@ -207,7 +207,7 @@ namespace Spiegelwerk.Build
 
         /// <summary>
         /// Same part, separate body: the original bodies must come out of every step unchanged.
-        /// Patterns have no feature scope, and a cut acts on all bodies until its scope is set;
+        /// Patterns have no feature scope before newer API versions, and a cut acts on all bodies until its scope is set;
         /// a feature that changed the original anyway is removed again.
         /// </summary>
         private static bool OriginalUntouched(BuildContext ctx, MassState before)

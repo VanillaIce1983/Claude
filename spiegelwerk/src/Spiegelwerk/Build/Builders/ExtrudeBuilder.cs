@@ -40,7 +40,12 @@ namespace Spiegelwerk.Build.Builders
             ModelDoc2 doc = ctx.Doc;
             var notes = new List<string>();
 
-            // ---- references, resolved before anything changes the model
+            // ---- separate body: never let the copy touch the original (checked before
+            //      references are resolved, which may add helper planes and axes)
+            string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
+            if (refused != null) return Fail(refused, notes);
+
+            // ---- references, resolved before the feature is created
             object? end1 = ResolveEnd(r.Side1, ctx, sketch, notes, out EndCondition final1, out double depth1);
             object? end2 = null;
             EndCondition final2 = r.Side2.End;
@@ -67,10 +72,6 @@ namespace Spiegelwerk.Build.Builders
                     notes.Add("Richtung der Extrusion: Bezug im Ziel nicht gefunden, es wird senkrecht zur Skizze extrudiert.");
                 }
             }
-
-            // ---- separate body: never let the copy touch the original
-            string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
-            if (refused != null) return Fail(refused, notes);
 
             // ---- temporary creation state
             EndCondition tmp1 = Temporary(r, end1, startEntity, final1);

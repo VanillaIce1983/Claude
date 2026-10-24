@@ -81,6 +81,8 @@ namespace Spiegelwerk.Build
             SwDoc.Rename(_ctx.Doc, f, name);
             _ctx.RegisterHelper(f);
             _known.Add((f, wanted));
+            // A new feature means a rebuild: cached faces and edges are stale now.
+            _ctx.Topology.Invalidate();
             return f;
         }
 
@@ -191,6 +193,7 @@ namespace Spiegelwerk.Build
             SwDoc.Rename(doc, axis, name);
             _ctx.RegisterHelper(axis);
             _axes.Add((axis, wanted));
+            _ctx.Topology.Invalidate();
             return axis;
         }
 

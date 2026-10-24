@@ -23,7 +23,7 @@ Nach jedem Lauf zeigt ein Bericht pro Feature, ob es neu aufgebaut wurde, was an
 | Rotieren (Aufsatz/Schnitt) | Eine Richtung, Mittelebene, zwei Richtungen, ausgewählte Konturen, dünnwandig. Achse: Skizzenlinie, gerade Kante oder Achse (sonst eine fixierte Hilfsachse). |
 | Austragung (Aufsatz/Schnitt) | Profil-, Pfad- und Führungskurven-Skizzen, Kreisprofil, Verdrehung (Richtung wird gegensinnig, gemessen bestätigt), Pfadausrichtung, Start-/Endtangente, Richtungsvektoren, dünnwandig. Nicht: 3D-Skizzen oder Helix als Pfad, Werkzeugkörper-Schnitt. |
 | Ausformung (Aufsatz/Schnitt) | Profile (Skizzen, Punkte, Flächen) in Originalreihenfolge, Führungskurven, Mittellinie, Verbinder über die gespiegelten Auswahlpunkte, Start-/Endbedingungen, geschlossen, dünnwandig. |
-| Lineares und kreisförmiges Muster | Features, Flächen oder Körper; zwei Richtungen, gleicher Abstand, symmetrisch, übersprungene Instanzen. Die Richtungen werden über die Lage der Instanzen des Originals bestimmt, nicht geraten. Die Saat-Features werden automatisch mit gespiegelt. |
+| Lineares und kreisförmiges Muster | Features, Flächen oder Körper; zwei Richtungen, gleicher Abstand, symmetrisch, übersprungene Instanzen. Die Richtungen werden über die Lage der Instanzen des Originals bestimmt, nicht geraten. Die Saat (Saat-Features, die Features der Saatflächen oder -körper) wird automatisch mitgespiegelt. |
 | Verrundung | Konstanter Radius, auch mit mehreren Radien, Kanten und Flächen. |
 | Fase | Winkel-Abstand, Abstand-Abstand, gleicher Abstand. |
 | Referenzebene, Referenzachse | Neu an gespiegelter Lage, nur von den Standardebenen bzw. einer fixierten Hilfslinie abhängig. |

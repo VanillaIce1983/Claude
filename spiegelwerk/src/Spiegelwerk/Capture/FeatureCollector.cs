@@ -98,16 +98,19 @@ namespace Spiegelwerk.Capture
             return all.Where(f => wanted.Contains(f.Name) && !SwDoc.IsSystemFeature(f) && !standard.Contains(f.Name)).ToList();
         }
 
-        /// <summary>The features a linear or circular pattern repeats (none for face and body patterns).</summary>
-        private static IEnumerable<Feature> SeedsOf(ModelDoc2 doc, Feature f)
+        /// <summary>
+        /// What a linear or circular pattern repeats: its seed features, the features the seed
+        /// faces belong to, the features that made the seed bodies (as when bodies are selected).
+        /// </summary>
+        private static List<Feature> SeedsOf(ModelDoc2 doc, Feature f)
         {
-            object? seeds = null;
+            var result = new List<Feature>();
             switch (f.GetDefinition())
             {
                 case LinearPatternFeatureData lp when lp.AccessSelections(doc, null):
                     try
                     {
-                        seeds = lp.PatternFeatureArray;
+                        AddSeeds(result, lp.BodyPattern, lp.PatternFeatureArray, lp.PatternFaceArray, lp.PatternBodyArray);
                     }
                     finally
                     {
@@ -117,7 +120,7 @@ namespace Spiegelwerk.Capture
                 case CircularPatternFeatureData cp when cp.AccessSelections(doc, null):
                     try
                     {
-                        seeds = cp.PatternFeatureArray;
+                        AddSeeds(result, cp.BodyPattern, cp.PatternFeatureArray, cp.PatternFaceArray, cp.PatternBodyArray);
                     }
                     finally
                     {
@@ -125,7 +128,22 @@ namespace Spiegelwerk.Capture
                     }
                     break;
             }
-            return seeds is object[] list ? list.OfType<Feature>().ToList() : Enumerable.Empty<Feature>();
+            return result;
+        }
+
+        private static void AddSeeds(List<Feature> into, bool bodyPattern, object features, object faces, object bodies)
+        {
+            if (bodyPattern)
+            {
+                if (bodies is object[] bs)
+                    foreach (Body2 b in bs.OfType<Body2>())
+                        if (b.GetFeatures() is object[] made) into.AddRange(made.OfType<Feature>());
+                return;
+            }
+            if (features is object[] fs) into.AddRange(fs.OfType<Feature>());
+            if (faces is object[] fcs)
+                foreach (Face2 face in fcs.OfType<Face2>())
+                    if (face.GetFeature() is Feature owner) into.Add(owner);
         }
     }
 }
