@@ -99,6 +99,13 @@ namespace Spiegelwerk.Build
             return name;
         }
 
+        /// <summary>A registered feature that was removed again: later features must not use it.</summary>
+        public void Unregister(string originalName)
+        {
+            Created.Remove(originalName);
+            Topology.Invalidate();
+        }
+
         /// <summary>Helper features (planes, anchor sketches) also count as "ours".</summary>
         public void RegisterHelper(Feature f) => _createdNames.Add(f.Name);
 
@@ -106,5 +113,8 @@ namespace Spiegelwerk.Build
             b.GetFeatures() is object[] fs && fs.OfType<Feature>().Any(f => _createdNames.Contains(f.Name));
 
         public List<Body2> OwnBodies() => SwDoc.SolidBodies(Doc).Where(IsOwnBody).ToList();
+
+        /// <summary>Bodies no feature of this job has touched – in the same part, the original.</summary>
+        public List<Body2> OriginalBodies() => SwDoc.SolidBodies(Doc).Where(b => !IsOwnBody(b)).ToList();
     }
 }

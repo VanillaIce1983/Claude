@@ -42,9 +42,10 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | `Planning` | `DirectionRules` | σ und die Regeln für Richtungsflags und Bogensinn |
 | | `PlaneClassifier` | Welche Ebene trägt die gespiegelte Skizze: vorhandene, versetzte Standardebene oder Drei-Punkte-Ebene |
 | | `ComponentPlacement` | Platzierung des gespiegelten Teils in der Baugruppe |
+| | `PatternInstances` | Lage der Musterinstanzen spiegeln (R ∘ T ∘ R) und als Mengen vergleichen |
 | `Matching` | `EdgeSignature`, `FaceSignature`, `TopologyMatcher` | Fingerabdrücke und deren Zuordnung im neu aufgebauten Teil |
 | `Verification` | `MassState`, `MassComparison` | Volumen und erstes Moment, gespiegelt und verglichen |
-| `Records` | `FeatureRecord` und Ableitungen, `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features, Optionen, Bericht |
+| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
 
 ### Spiegelwerk (Add-In)
 
@@ -56,19 +57,20 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `ReportForm` | Ergebnisliste |
 | `Sw/` | `SwMath` | `MathTransform` ↔ `Frame3`/`Affine`, Skizzen- und Ebenenkoordinaten |
 | | `SwDoc`, `SwSelect` | Feature-Baum, Standardebenen, Körper, Massen; Auswahl mit Markierung |
+| | `SwPattern` | Lage der Instanzen eines Musters lesen (`GetTransform`) |
 | | `SwPreferences`, `SketchInputScope`, `UpdateFreeze` | Benutzereinstellungen und Anzeige während des Laufs abschalten und wiederherstellen |
 | `Capture/` | `FeatureCollector` | Welche Features, in Erstellungsreihenfolge |
 | | `SketchCapture` | `ISketch` → `SketchModel` |
-| | `FeatureCapture` | Feature-Definitionen → `FeatureRecord` (mit `AccessSelections`) |
+| | `FeatureCapture` (+ `.SweepLoft`, `.Patterns`) | Feature-Definitionen → `FeatureRecord` (mit `AccessSelections`) |
 | | `TopologyCapture` | Kante/Fläche/Eckpunkt → Fingerabdruck |
-| | `MassCapture` | Volumenänderung jedes Features über die Rückrollleiste |
+| | `MassCapture` | Volumenänderung und Flächenproben jedes Features über die Rückrollleiste |
 | `Build/` | `MirrorJob` | Der ganze Lauf; neues Teil anlegen, Gleichungen kopieren, Original löschen |
 | | `BuildContext`, `SketchMap` | Zustand des Laufs; Zuordnung alter → neuer Skizzenelemente |
-| | `PlaneResolver` | Liefert für eine Ebene ein Ebenen-Feature im Ziel |
-| | `TopologyFinder` | Findet Kanten, Flächen, Eckpunkte und Achsen im Ziel |
+| | `PlaneResolver` | Liefert für eine Ebene ein Ebenen-Feature im Ziel, für eine Gerade eine Achse |
+| | `TopologyFinder` | Findet Kanten, Flächen, Eckpunkte, Achsen und Skizzen im Ziel |
 | | `SketchBuilder` | Schreibt eine gespiegelte Skizze |
-| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Extrusion, Rotation, Verrundung, Fase |
-| | `StepVerifier` | Messen, Varianten probieren |
+| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, Fase, Muster |
+| | `StepVerifier` | Messen (Volumen, Moment, Flächenproben), Varianten probieren |
 | `AssemblyContext/` | `AssemblyMirror` | Komponente spiegeln, speichern, platzieren |
 
 ## Ablauf im Detail
@@ -83,13 +85,14 @@ sequenceDiagram
     UI->>Job: Ebene, Auswahl, Optionen (AfterClose)
     Job->>Cap: FeatureCollector.Collect
     Job->>Cap: FeatureCapture.Capture (je Feature)
-    Job->>Cap: MassCapture.Measure (Rückrollleiste vor/nach jedem Feature)
+    Job->>Cap: MassCapture.Measure (Rückrollleiste vor/nach jedem Feature, Flächenproben)
     Job->>Job: Ziel anlegen (neues Teil) oder selbes Teil
     loop je Datensatz
         Job->>B: Build(record, ctx)
         B-->>Job: Feature + Varianten
         Job->>V: Verify(record, result, vorher)
         V-->>Job: passt / korrigiert / Abweichung
+        Job->>Job: selbes Teil: Originalkörper unverändert? sonst Feature entfernen
     end
     Job->>Job: Gleichungen, Ansicht, ggf. Original löschen
     Job-->>UI: MirrorReport
@@ -97,7 +100,7 @@ sequenceDiagram
 
 **Reihenfolge:** `SwDoc.FeaturesInCreationOrder` liefert absorbierte Skizzen vor dem Feature, das sie verbraucht – in dieser Reihenfolge wurden sie auch erzeugt. Ein Feature findet beim Neuaufbau deshalb immer schon die Skizzen, Ebenen und Kanten vor, die es braucht.
 
-**Auswahl:** Ohne Auswahl wird das ganze Teil gespiegelt. Gewählte Features nehmen nur die Skizzen mit, aus denen sie gebaut sind – eine gespiegelte Tasche soll den vorhandenen Körper schneiden, nicht den Körper, aus dem sie geschnitten wurde, noch einmal aufbauen. Gewählte Körper nehmen alle Features mit, die zu ihnen beigetragen haben (`IBody2.GetFeatures`).
+**Auswahl:** Ohne Auswahl wird das ganze Teil gespiegelt. Gewählte Features nehmen nur die Skizzen mit, aus denen sie gebaut sind – eine gespiegelte Tasche soll den vorhandenen Körper schneiden, nicht den Körper, aus dem sie geschnitten wurde, noch einmal aufbauen. Gewählte Körper nehmen alle Features mit, die zu ihnen beigetragen haben (`IBody2.GetFeatures`). Ein gewähltes Muster nimmt seine Saat-Features mit – ohne sie hätte es nichts zu wiederholen.
 
 ## Die Mathematik
 
@@ -129,6 +132,18 @@ Volumen V und erstes Moment M = Σ Vᵢ·cᵢ aller Volumenkörper sind additiv;
 
 `MassComparison` vergleicht Volumen und Moment getrennt – relativ zur Größe der Änderung (1e-4 beim Volumen, 10 µm beim Schwerpunkt), aber nie feiner als das Rauschen, das aus dem ganzen Teil folgt. Getrennt deshalb, weil eine Änderung mit dem Nettovolumen null (eine Verrundung, die innen ansetzt und außen wegnimmt) trotzdem ein klares Moment hat. Damit wird aus „in welche Richtung legt SOLIDWORKS das standardmäßig?“ eine Messung; eine Variante, die das Feature in einen Fehlerzustand bringt, gewinnt dabei nie.
 
+### Prüfung über Flächenproben
+
+Manche Varianten haben dasselbe Volumen und denselben Schwerpunkt: eine Austragung, die mit symmetrischem Profil in die falsche Richtung verdreht ist, eine Ausformung mit gleich großen, aber anders verbundenen Profilen. Deshalb nimmt `MassCapture` im selben zurückgerollten Zustand bis zu acht Punkte auf den Flächen, die das Feature erzeugt hat (`IFeature.GetFaces`). Gespiegelt muss jeder dieser Punkte auf einer Fläche der Kopie liegen (Abstand ≤ 10 µm, gemessen vom Kern). Gesucht wird zuerst auf den Flächen des neuen Features, dann auf allen Flächen der infrage kommenden Körper – eine koplanare Fläche, die mit einer älteren verschmolzen ist, gehört zu jener. `StepVerifier` wertet zuerst die Zahl der verfehlten Prüfungen (Fehlerzustand, Masse, Form), dann die verfehlten Proben, dann die Massenabweichung.
+
+### Muster: Lage der Instanzen
+
+Ein Muster meldet für jede Instanz die Platzierung Tᵢ: Saat → Instanz (`GetTransform`). Im gespiegelten Teil liegt die Instanz bei R(Tᵢ(x)), die Saat bei R(x); das neue Muster muss also
+
+    Tᵢ′ = R ∘ Tᵢ ∘ R
+
+melden. Eine Verschiebung um d wird zur Verschiebung um R(d), eine Drehung um φ um die Achse a zur Drehung um −φ um R(a) – der Drehsinn kehrt sich um. `PatternBuilder` liest die Platzierungen des neuen Musters, vergleicht sie als **Menge** mit den gespiegelten (`PatternInstances.Unmatched`; die Nummerierung bei zwei Richtungen ist nicht dokumentiert, und bei gleichem Abstand über 360° sind beide Drehsinne richtig) und probiert die Richtungsflags durch, bis die Mengen gleich sind. Damit hängt nichts an der inneren Richtung einer Kante oder Achse im neuen Teil (Tests in `PatternTests`).
+
 ### Baugruppe
 
 Original-Komponente: Teilgeometrie x, Platzierung T. Gewünscht ist R_asm(T(x)). Das neue Teil wird als R_part(x) gebaut. Die Platzierung T′ muss T′(R_part(x)) = R_asm(T(x)) erfüllen:
@@ -137,7 +152,7 @@ Original-Komponente: Teilgeometrie x, Platzierung T. Gewünscht ist R_asm(T(x)).
 
 Zwei Spiegelungen und eine starre Bewegung ergeben Determinante +1 – eine gültige Komponententransformation. Weil R_part frei wählbar ist, spiegelt Spiegelwerk das Teil an **seiner eigenen** Standardebene durch den Ursprung, deren Normale der Baugruppen-Spiegelebene am nächsten liegt. Das neue Teil sieht dann aus wie ein konstruiertes Gegenstück (Skizzen auf vorne/oben/rechts) und nicht wie eine irgendwo im Raum verschobene Kopie (`ComponentPlacement`, Test `Component_placement_puts_the_mirrored_part_where_the_mirror_image_is`).
 
-## Ebenen im Ziel
+## Ebenen und Achsen im Ziel
 
 `PlaneResolver` liefert für jede gespiegelte Skizzenebene ein Ebenen-Feature, das **nicht** vom Original abhängt:
 
@@ -146,6 +161,8 @@ Zwei Spiegelungen und eine starre Bewegung ergeben Determinante +1 – eine gül
 3. Sonst entsteht eine Ebene durch drei fixierte Punkte einer Hilfs-3D-Skizze („Spiegelwerk-Anker“).
 
 Die Standardebenen werden über ihre Geometrie gefunden, nicht über den Namen („Ebene vorne“, „Front Plane“ …).
+
+Achsen (Drehachse, Musterrichtung, Extrusionsrichtung) sucht `TopologyFinder.FindLineObject` in dieser Reihenfolge: eine Achse des Laufs, eine neu aufgebaute Skizzenlinie, eine gerade Kante – im selben Teil nur auf den gespiegelten Körpern. Liegt nichts auf der gespiegelten Geraden, legt `PlaneResolver` eine Hilfsachse an: Bezugsachse auf einer fixierten Linie einer Hilfs-3D-Skizze. Referenzachsen des Originals werden auf dieselbe Weise unter ihrem Namen neu angelegt.
 
 ## Kanten und Flächen wiederfinden
 
@@ -157,7 +174,7 @@ Findet sich eine ebene Bezugsfläche nicht, wird eine Ebene durch die gespiegelt
 
 ## Selbes Teil
 
-Wird das ganze Teil oder ein Körper im selben Teil gespiegelt, entsteht ein eigener Körper. Aufsätze werden zunächst ohne Verschmelzen erzeugt; Verschmelzen und Feature-Bereich setzt dann ein einziges `ModifyDefinition`, und zwar mit den Körpern aus dem zurückgerollten Zustand vor dem Feature – dort gibt es den gespiegelten Körper noch für sich, nie schon mit dem Original verschmolzen. Schnitte wirken nur auf die vom Lauf erzeugten Körper; gibt es noch keinen, wird der Schnitt gar nicht angelegt. Lässt sich der Feature-Bereich nicht setzen, wird das Feature wieder entfernt. So schneidet oder verschmilzt ein gespiegeltes Feature nie mit dem Original, auch wenn sich beide berühren – ein Fall, den der Volumenvergleich nicht sehen könnte. Feature-Namen bekommen den Namenszusatz.
+Wird das ganze Teil oder ein Körper im selben Teil gespiegelt, entsteht ein eigener Körper. Aufsätze werden zunächst ohne Verschmelzen erzeugt; Verschmelzen und Feature-Bereich setzt dann ein einziges `ModifyDefinition`, und zwar mit den Körpern aus dem zurückgerollten Zustand vor dem Feature – dort gibt es den gespiegelten Körper noch für sich, nie schon mit dem Original verschmolzen. Schnitte wirken nur auf die vom Lauf erzeugten Körper; gibt es noch keinen, wird der Schnitt gar nicht angelegt. Lässt sich der Feature-Bereich nicht setzen, wird das Feature wieder entfernt. So schneidet oder verschmilzt ein gespiegeltes Feature nie mit dem Original, auch wenn sich beide berühren – ein Fall, den der Volumenvergleich nicht sehen könnte. Austragungen und Ausformungen folgen demselben Muster. Muster haben keinen Feature-Bereich; deshalb misst `MirrorJob` nach jedem Feature Volumen und Moment der Originalkörper: Hat sich daran etwas geändert, wird das Feature wieder entfernt und als fehlgeschlagen gemeldet. Feature-Namen bekommen den Namenszusatz.
 
 Ebenen des Originals verwendet der `PlaneResolver` im selben Teil nicht: Er kennt nur die Standardebenen und die Ebenen, die der Lauf selbst anlegt.
 
@@ -171,29 +188,25 @@ Ein neuer Typ braucht drei Teile:
 2. **Erfassen** in `FeatureCapture.Capture`: Definition lesen, Bezüge zwischen `AccessSelections` und `ReleaseSelectionAccess` in Fingerabdrücke übersetzen.
 3. **Builder** in `Build/Builders/` und Eintrag in `MirrorJob.Builders`.
 
-Skizze eines linearen Musters:
+Die Builder für Austragung, Ausformung und Muster zeigen die üblichen Bausteine: Bezüge mit `BuilderSupport.Find` gespiegelt im Ziel auflösen, `PlanSeparateBody` für das selbe Teil, Feature mit den dokumentierten Markierungen anlegen, alles Weitere in einem `FeatureEdit`, Unsicheres als `Alternative` anbieten. Skizze einer Wandung:
 
 ```csharp
-internal sealed class LinearPatternBuilder : IFeatureBuilder
+internal sealed class ShellBuilder : IFeatureBuilder
 {
-    public bool Handles(FeatureRecord r) => r is LinearPatternRecord;
+    public bool Handles(FeatureRecord r) => r is ShellRecord;
 
     public BuildResult Build(FeatureRecord record, BuildContext ctx)
     {
-        var r = (LinearPatternRecord)record;
-        // Saat-Features: über den Namen des Originals das neu erzeugte Feature holen.
-        var seeds = r.SeedFeatures.Select(n => ctx.Created.TryGetValue(n, out var f) ? f : null).ToList();
-        if (seeds.Any(s => s == null)) return BuildResult.Failed("Saat-Feature nicht neu aufgebaut.");
-        // Richtung: gespiegelte Gerade, im Ziel als Skizzenlinie oder gerade Kante gesucht.
-        object? dir1 = ctx.Topology.FindLineObject(ctx.Mirror.Apply(r.Direction1));
-        // ... Richtung (Markierung 1) und Saat-Features (Markierung 4) wählen – so die
-        //     Beispiele der API-Hilfe; im Zweifel nach dem Erzeugen per ModifyDefinition setzen,
-        //     FeatureManager.FeatureLinearPattern5(...) aufrufen,
-        //     "Richtung umkehren" als Alternative anbieten (die gespiegelte Richtung kann
-        //     auf der Gegenseite der Kante liegen).
+        var r = (ShellRecord)record;
+        var notes = new List<string>();
+        // Entfernte Flächen: gespiegelte Fingerabdrücke im Ziel suchen.
+        var faces = r.RemovedFaces.Select(f => ctx.Topology.FindFace(f.Mirror(ctx.Mirror), notes)).ToList();
+        if (faces.Any(f => f == null)) return BuilderSupport.Fail("Entfernte Fläche im Ziel nicht gefunden.", notes);
+        // ... Flächen wählen (Markierung laut Hilfe prüfen), FeatureManager.InsertFeatureShell(...),
+        //     „nach außen“ ist eine Seite – als Alternative anbieten, die Prüfung entscheidet.
         ...
     }
 }
 ```
 
-Eine Spiegelung kehrt jede Drehrichtung um: Bei Kreismustern muss die Winkelrichtung umgedreht werden, bei Austragungen mit Verdrehung der Drehsinn, beim Bohrungsassistenten bleibt das Bohrbild (Positionsskizze) eine gewöhnliche Skizze und läuft durch `SketchBuilder`.
+Eine Spiegelung kehrt jede Drehrichtung um: Kreismuster und Verdrehungen von Austragungen laufen in der Kopie gegensinnig (das erledigen `PatternBuilder` und `SweepBuilder`). Beim Bohrungsassistenten bliebe das Bohrbild (Positionsskizze) eine gewöhnliche Skizze und liefe durch `SketchBuilder`.

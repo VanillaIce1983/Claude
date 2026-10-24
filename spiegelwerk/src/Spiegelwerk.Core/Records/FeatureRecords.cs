@@ -27,6 +27,14 @@ namespace Spiegelwerk.Core.Records
         /// <summary>What the original feature did to the solid bodies (unmirrored), if measured.</summary>
         public MassState? ExpectedChange { get; set; }
 
+        /// <summary>
+        /// Points on the faces the original feature produced (unmirrored), taken in the state
+        /// right after the feature. The rebuilt feature has to have a face through each mirrored
+        /// point: this tells apart variants with the same volume and centroid (twist direction
+        /// of a sweep, connectors of a loft).
+        /// </summary>
+        public List<Vec3> FaceSamples { get; } = new List<Vec3>();
+
         /// <summary>Does this feature add or remove material? Sketches and planes do not.</summary>
         public virtual bool ChangesSolid => true;
 
@@ -55,6 +63,17 @@ namespace Spiegelwerk.Core.Records
         }
 
         public Plane3 Plane { get; }
+        public override bool ChangesSolid => false;
+    }
+
+    public sealed class RefAxisRecord : FeatureRecord
+    {
+        public RefAxisRecord(string name, Line3 axis) : base(name, "RefAxis")
+        {
+            Axis = axis;
+        }
+
+        public Line3 Axis { get; }
         public override bool ChangesSolid => false;
     }
 

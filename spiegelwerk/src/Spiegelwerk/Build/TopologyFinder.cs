@@ -94,7 +94,7 @@ namespace Spiegelwerk.Build
         }
 
         /// <summary>A linear edge of the target lying on the given line, preferring bodies this job created.</summary>
-        public Edge? FindLinearEdgeOn(Line3 line)
+        public Edge? FindLinearEdgeOn(Line3 line, bool ownOnly = false)
         {
             Load();
             Edge? fallback = null;
@@ -102,7 +102,7 @@ namespace Spiegelwerk.Build
                 if (sig.Kind == CurveKind.Line && line.DistanceTo(sig.Start) <= Tol.Length && line.DistanceTo(sig.End) <= Tol.Length)
                 {
                     if (own) return edge;
-                    fallback ??= edge;
+                    if (!ownOnly) fallback ??= edge;
                 }
             return fallback;
         }
@@ -138,15 +138,36 @@ namespace Spiegelwerk.Build
                 case GeometryRefKind.SketchSegment:
                     return _ctx.Sketches.TryGetValue(mirrored.SketchName, out SketchMap ss) && ss.Segments.TryGetValue(mirrored.EntityId, out SketchSegment s) ? s : null;
                 case GeometryRefKind.Axis:
-                    return FindLineObject(mirrored.Axis);
+                    return FindLineObject(mirrored.Axis) ?? HelperAxis(mirrored.Axis, notes);
+                case GeometryRefKind.Sketch:
+                    return _ctx.Sketches.TryGetValue(mirrored.SketchName, out SketchMap sk) ? sk.Feature : null;
                 default:
                     return null;
             }
         }
 
-        /// <summary>Something selectable that lies on a line: a rebuilt sketch line first, then a model edge.</summary>
+        /// <summary>Nothing lies on the line: a helper axis, so the feature depends on nothing of the original.</summary>
+        private object? HelperAxis(Line3 line, List<string> notes)
+        {
+            try
+            {
+                return _ctx.Planes.Axis(line);
+            }
+            catch (System.InvalidOperationException ex)
+            {
+                notes.Add(ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Something selectable that lies on a line: an axis of this job, a rebuilt sketch line,
+        /// a model edge. In the same part only edges of the mirrored bodies count – an edge of the
+        /// original would tie the copy to it again.
+        /// </summary>
         public object? FindLineObject(Line3 line)
         {
+            if (_ctx.Planes.FindAxis(line) is Feature axis) return axis;
             foreach (SketchMap map in _ctx.Sketches.Values)
                 foreach (var seg in map.Mirrored.Sketch.Segments)
                 {
@@ -155,7 +176,7 @@ namespace Spiegelwerk.Build
                     if (line.DistanceTo(a) <= Tol.Length && line.DistanceTo(b) <= Tol.Length && map.Segments.TryGetValue(seg.Id, out SketchSegment s))
                         return s;
                 }
-            return FindLinearEdgeOn(line);
+            return FindLinearEdgeOn(line, _ctx.SamePart);
         }
     }
 }

@@ -69,11 +69,8 @@ namespace Spiegelwerk.Build.Builders
             }
 
             // ---- separate body: never let the copy touch the original
-            int ownBefore = ctx.SeparateBody ? ctx.OwnBodies().Count : 0;
-            if (ctx.SeparateBody && r.IsCut && ownBefore == 0)
-                return Fail("Es gibt noch keinen gespiegelten Körper, auf den der Schnitt wirken könnte; das Original bleibt unberührt.", notes);
-            bool scope = ctx.SeparateBody && (r.IsCut || (r.Merge && ownBefore > 0));
-            bool createMerge = !ctx.SeparateBody && r.Merge;
+            string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
+            if (refused != null) return Fail(refused, notes);
 
             // ---- temporary creation state
             EndCondition tmp1 = Temporary(r, end1, startEntity, final1);

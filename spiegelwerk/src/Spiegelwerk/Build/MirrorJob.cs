@@ -61,10 +61,14 @@ namespace Spiegelwerk.Build
         {
             new SketchFeatureBuilder(),
             new RefPlaneBuilder(),
+            new AxisBuilder(),
             new ExtrudeBuilder(),
             new RevolveBuilder(),
+            new SweepBuilder(),
+            new LoftBuilder(),
             new FilletBuilder(),
             new ChamferBuilder(),
+            new PatternBuilder(),
         };
 
         public MirrorJob(SldWorks sw)
@@ -156,6 +160,8 @@ namespace Spiegelwerk.Build
             if (builder == null) return ctx.Report.Add(record, ReportStatus.Skipped, "Kein Builder für diesen Typ.");
 
             MassState before = ctx.Options.VerifySteps && record.ChangesSolid ? SwDoc.MassOf(ctx.Doc) : MassState.Empty;
+            bool guardOriginal = ctx.SeparateBody && record.ChangesSolid;
+            MassState originalBefore = guardOriginal ? SwDoc.MassOf(ctx.OriginalBodies()) : MassState.Empty;
             BuildResult result;
             string verification = "";
             try
@@ -185,6 +191,11 @@ namespace Spiegelwerk.Build
                 result.Notes.Add($"Prüfung nicht möglich: {ex.Message}");
                 ctx.Topology.Invalidate();
             }
+            if (guardOriginal && result.Success && !OriginalUntouched(ctx, originalBefore))
+            {
+                result = RemoveAgain(ctx, record, result);
+                verification = "";
+            }
             CheckRebuildError(result);
 
             ReportEntry entry = ctx.Report.Add(record, result.Status, result.Message);
@@ -192,6 +203,26 @@ namespace Spiegelwerk.Build
             entry.HasEquivalent = result.HasEquivalent;
             entry.Details.AddRange(result.Notes);
             return entry;
+        }
+
+        /// <summary>
+        /// Same part, separate body: the original bodies must come out of every step unchanged.
+        /// Patterns have no feature scope, and a cut acts on all bodies until its scope is set;
+        /// a feature that changed the original anyway is removed again.
+        /// </summary>
+        private static bool OriginalUntouched(BuildContext ctx, MassState before)
+        {
+            MassState after = SwDoc.MassOf(ctx.OriginalBodies());
+            return MassComparison.Compare(MassState.Empty, after - before, before).Passes;
+        }
+
+        private static BuildResult RemoveAgain(BuildContext ctx, FeatureRecord record, BuildResult result)
+        {
+            BuilderSupport.Delete(ctx, result.Feature!);
+            ctx.Unregister(record.Name);
+            var failed = BuildResult.Failed("Das Feature hätte die Originalkörper verändert und wurde wieder entfernt.");
+            failed.Notes.AddRange(result.Notes);
+            return failed;
         }
 
         /// <summary>A feature that SOLIDWORKS created but shows with a rebuild error is not a success.</summary>

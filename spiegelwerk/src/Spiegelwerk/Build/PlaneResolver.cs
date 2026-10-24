@@ -13,13 +13,17 @@ namespace Spiegelwerk.Build
     /// Provides a reference plane in the target for a given geometric plane, without ever
     /// referencing the original: an existing plane if one coincides, otherwise an offset of a
     /// standard plane, otherwise a plane through three fixed points of a helper 3D sketch.
+    /// Reference axes the same way: on a fixed line of a helper 3D sketch.
     /// </summary>
     internal sealed class PlaneResolver
     {
         private readonly BuildContext _ctx;
         private readonly List<(Feature feature, Plane3 plane)> _known = new List<(Feature, Plane3)>();
+        private readonly List<(Feature feature, Line3 line)> _axes = new List<(Feature, Line3)>();
         private Feature[]? _standard;
         private int _counter;
+        private int _axisCounter;
+        private int _anchorCounter;
 
         public PlaneResolver(BuildContext ctx)
         {
@@ -118,7 +122,7 @@ namespace Spiegelwerk.Build
             }
             sm.Insert3DSketch(true);
             Feature anchor = doc.Extension.GetLastFeatureAdded();
-            SwDoc.Rename(doc, anchor, $"Spiegelwerk-Anker {_counter}");
+            SwDoc.Rename(doc, anchor, $"Spiegelwerk-Anker {++_anchorCounter}");
             _ctx.RegisterHelper(anchor);
 
             Feature? f = InsertPlane(() =>
@@ -134,6 +138,60 @@ namespace Spiegelwerk.Build
             if (f == null || !PlaneOf(f).IsCoplanarWith(wanted))
                 throw new InvalidOperationException($"Ebene durch drei Punkte für {wanted} konnte nicht erzeugt werden.");
             return f;
+        }
+
+        // ---------------------------------------------------------------- axes
+
+        /// <summary>An axis of this job on the given line (either direction), if there is one.</summary>
+        public Feature? FindAxis(Line3 wanted) => _axes.FirstOrDefault(a => a.line.IsSameLine(wanted)).feature;
+
+        /// <summary>An axis on the line: one of this job, otherwise a new helper axis.</summary>
+        public Feature Axis(Line3 wanted) => FindAxis(wanted) ?? CreateAxis(wanted, $"Spiegelwerk-Achse {++_axisCounter}");
+
+        /// <summary>Rebuilds a reference axis of the original as an independent axis with the given name.</summary>
+        public Feature CreateNamedAxis(Line3 wanted, string name) => CreateAxis(wanted, name);
+
+        /// <summary>
+        /// Reference axis on a line of a helper 3D sketch, the line and its ends fixed: like the
+        /// three-point planes it depends on nothing else, least of all on the original.
+        /// </summary>
+        private Feature CreateAxis(Line3 wanted, string name)
+        {
+            ModelDoc2 doc = _ctx.Doc;
+            SketchManager sm = doc.SketchManager;
+            // A short piece around the point of the line closest to the origin.
+            Vec3 mid = wanted.Point - wanted.Direction * wanted.Point.Dot(wanted.Direction);
+            Vec3 a = mid - wanted.Direction * 0.05, b = mid + wanted.Direction * 0.05;
+
+            SwSelect.Clear(doc);
+            sm.Insert3DSketch(true);
+            SketchSegment? line;
+            using (new SketchInputScope(sm))
+            {
+                line = sm.CreateLine(a.X, a.Y, a.Z, b.X, b.Y, b.Z);
+                if (line is SketchLine l)
+                {
+                    SketchRelationManager rm = sm.ActiveSketch.RelationManager;
+                    rm.AddRelation(new object[] { line }, (int)swConstraintType_e.swConstraintType_FIXED);
+                    rm.AddRelation(new object[] { l.GetStartPoint2() }, (int)swConstraintType_e.swConstraintType_FIXED);
+                    rm.AddRelation(new object[] { l.GetEndPoint2() }, (int)swConstraintType_e.swConstraintType_FIXED);
+                }
+            }
+            sm.Insert3DSketch(true);
+            Feature anchor = doc.Extension.GetLastFeatureAdded();
+            SwDoc.Rename(doc, anchor, $"Spiegelwerk-Anker {++_anchorCounter}");
+            _ctx.RegisterHelper(anchor);
+
+            SwSelect.Clear(doc);
+            bool ok = line != null && SwSelect.Select(doc, line, 0, false) && doc.InsertAxis2(true);
+            SwSelect.Clear(doc);
+            Feature? axis = ok ? doc.Extension.GetLastFeatureAdded() : null;
+            if (axis == null || !(axis.GetSpecificFeature2() is RefAxis refAxis) || !SwDoc.AxisLine(refAxis).IsSameLine(wanted))
+                throw new InvalidOperationException($"Achse auf {wanted} konnte nicht erzeugt werden.");
+            SwDoc.Rename(doc, axis, name);
+            _ctx.RegisterHelper(axis);
+            _axes.Add((axis, wanted));
+            return axis;
         }
 
         private Feature? InsertPlane(Func<bool> select, int c1, double v1, int c2, int c3)

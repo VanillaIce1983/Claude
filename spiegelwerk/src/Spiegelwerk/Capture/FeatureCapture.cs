@@ -15,7 +15,7 @@ namespace Spiegelwerk.Capture
     /// model is rolled back to the feature, so faces and edges are read in the state the
     /// feature saw them, not in the final state (later fillets have not split them yet).
     /// </summary>
-    internal sealed class FeatureCapture
+    internal sealed partial class FeatureCapture
     {
         private readonly ModelDoc2 _doc;
         private readonly SwMath _math;
@@ -36,6 +36,7 @@ namespace Spiegelwerk.Capture
                 if (type == "ProfileFeature") return new SketchRecord(f.Name, ReadSketch(f));
                 if (type == "3DProfileFeature") return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);
                 if (type == "RefPlane") return new RefPlaneRecord(f.Name, _math.PlaneOf((RefPlane)f.GetSpecificFeature2()));
+                if (type == "RefAxis") return new RefAxisRecord(f.Name, SwDoc.AxisLine((RefAxis)f.GetSpecificFeature2()));
 
                 object def = f.GetDefinition();
                 switch (def)
@@ -48,6 +49,14 @@ namespace Spiegelwerk.Capture
                         return CaptureFillet(f, type, fil);
                     case ChamferFeatureData2 ch:
                         return CaptureChamfer(f, type, ch);
+                    case SweepFeatureData sw:
+                        return CaptureSweep(f, type, sw);
+                    case LoftFeatureData lo:
+                        return CaptureLoft(f, type, lo);
+                    case LinearPatternFeatureData lp:
+                        return CaptureLinearPattern(f, type, lp);
+                    case CircularPatternFeatureData cp:
+                        return CaptureCircularPattern(f, type, cp);
                 }
                 return new UnsupportedRecord(f.Name, type, UnsupportedReason(type), ChangesSolid(type));
             }
@@ -337,21 +346,29 @@ namespace Spiegelwerk.Capture
                 }
                 case SketchSegment s:
                     return GeometryRef.ToSketchSegment(SwDoc.SketchNameOf(s.GetSketch()), SwDoc.IdOf(s));
+                // A sketch object is also a feature (and the other way round): ask for it before Feature.
+                case Sketch sk:
+                    return SketchRef(sk);
                 case RefPlane rp:
                     return GeometryRef.ToPlane(_math.PlaneOf(rp), "Ebene");
                 case RefAxis ax:
-                {
-                    // start point x,y,z, end point x,y,z
-                    var p = (double[])ax.GetRefAxisParams();
-                    Vec3 a = Vec3.FromArray(p, 0), b = Vec3.FromArray(p, 3);
-                    return GeometryRef.ToAxis(new Line3(a, b - a), "Achse");
-                }
+                    return GeometryRef.ToAxis(SwDoc.AxisLine(ax), "Achse");
                 case Feature feat:
-                    return ToGeometryRef(feat.GetSpecificFeature2());
+                    // Only the specific objects handled above; anything else would recurse.
+                    return feat.GetSpecificFeature2() switch
+                    {
+                        RefPlane rp => GeometryRef.ToPlane(_math.PlaneOf(rp), "Ebene"),
+                        RefAxis ax => GeometryRef.ToAxis(SwDoc.AxisLine(ax), "Achse"),
+                        Sketch sk => SketchRef(sk),
+                        _ => GeometryRef.Unknown(feat.GetTypeName2()),
+                    };
                 default:
                     return GeometryRef.Unknown(o.GetType().Name);
             }
         }
+
+        private static GeometryRef SketchRef(Sketch sk) =>
+            sk.Is3D() ? GeometryRef.Unknown("3D-Skizze") : GeometryRef.ToSketch(SwDoc.SketchNameOf(sk));
 
         private static bool ChangesSolid(string type) => !NonSolidTypes.Contains(type);
 
@@ -363,14 +380,14 @@ namespace Spiegelwerk.Capture
 
         private static string UnsupportedReason(string type) => type switch
         {
-            "Sweep" or "SweepCut" => "Austragung: noch nicht umgesetzt (Weg + Profil spiegeln, Ausrichtung prüfen).",
-            "Blend" or "BlendCut" => "Ausformung: noch nicht umgesetzt (Profile + Führungskurven spiegeln, Zuordnung prüfen).",
             "HoleWzd" => "Bohrungsassistent: noch nicht umgesetzt (Positionsskizze spiegeln, Bohrungsdaten übernehmen).",
-            "LPattern" or "CirPattern" or "MirrorPattern" => "Muster: noch nicht umgesetzt (Saat-Features zuordnen, Richtung spiegeln).",
+            "MirrorPattern" => "Spiegel-Feature im Original: wird bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. " +
+                               "Abhilfe: im Original durch die gespiegelten Einzel-Features ersetzen oder nach dem Lauf von Hand spiegeln.",
+            "CurvePattern" or "SketchPattern" or "TablePattern" or "FillPattern" or "DimPattern" or "VarPattern" =>
+                "Dieses Muster wird nicht unterstützt (nur lineare und kreisförmige Muster).",
             "VarFillet" => "Variable Verrundung wird nicht unterstützt.",
             "Shell" => "Wandung: noch nicht umgesetzt.",
             "Draft" => "Formschräge: noch nicht umgesetzt.",
-            "RefAxis" => "Achsen werden bei Bedarf über ihre Geometrie aufgelöst, nicht als eigenes Feature kopiert.",
             _ => $"Feature-Typ {type} wird nicht unterstützt.",
         };
     }

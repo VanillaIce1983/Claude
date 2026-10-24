@@ -58,6 +58,11 @@ namespace Spiegelwerk.Core.Geometry
             Math.Abs(Col0.Dot(Col1)) < tol && Math.Abs(Col1.Dot(Col2)) < tol && Math.Abs(Col0.Dot(Col2)) < tol &&
             Determinant > 0;
 
+        /// <summary>Same map: columns within <paramref name="angleTol"/>, translation within <paramref name="lengthTol"/>.</summary>
+        public bool AlmostEquals(Affine o, double lengthTol = Tol.Length, double angleTol = 1e-6) =>
+            Col0.DistanceTo(o.Col0) <= angleTol && Col1.DistanceTo(o.Col1) <= angleTol && Col2.DistanceTo(o.Col2) <= angleTol &&
+            Translation.DistanceTo(o.Translation) <= lengthTol;
+
         /// <summary>16-element array in IMathTransform.ArrayData layout (scale 1).</summary>
         public double[] ToSwArray() => new[]
         {

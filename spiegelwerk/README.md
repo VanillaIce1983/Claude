@@ -1,6 +1,6 @@
 # Spiegelwerk
 
-SOLIDWORKS-Add-In, das Bauteile **unabhängig** spiegelt. Statt eines Spiegel-Features (Körper oder Features spiegeln) baut Spiegelwerk jedes Feature des Originals gespiegelt neu auf: neue Skizzen mit umgerechneten Beziehungen und Bemaßungen, neue Extrusionen, Schnitte, Rotationen, Verrundungen und Fasen. Das Ergebnis ist ein eigener, vollständig bearbeitbarer Feature-Baum ohne Verknüpfung zum Original.
+SOLIDWORKS-Add-In, das Bauteile **unabhängig** spiegelt. Statt eines Spiegel-Features (Körper oder Features spiegeln) baut Spiegelwerk jedes Feature des Originals gespiegelt neu auf: neue Skizzen mit umgerechneten Beziehungen und Bemaßungen, neue Extrusionen, Schnitte, Rotationen, Austragungen, Ausformungen, Muster, Verrundungen und Fasen. Das Ergebnis ist ein eigener, vollständig bearbeitbarer Feature-Baum ohne Verknüpfung zum Original.
 
 Spiegelwerk ist eine eigenständige Entwicklung und steht in keiner Verbindung zu Dassault Systèmes; SOLIDWORKS ist eine Marke von Dassault Systèmes.
 
@@ -12,7 +12,7 @@ Spiegelwerk ist eine eigenständige Entwicklung und steht in keiner Verbindung z
 | **Teil → selbes Teil** | Die gespiegelten Features werden im selben Teil angelegt. Ganzes Teil oder gewählte Körper: eigener Körper, Schnitte wirken nur auf ihn. Nur gewählte Features (z. B. eine Tasche): sie wirken auf die vorhandenen Körper. Optional wird das Original danach gelöscht. |
 | **Baugruppe** | Gewählte Komponenten werden als Gegenstück neu aufgebaut, neben dem Original gespeichert (`Name_gespiegelt.SLDPRT`) und an der gespiegelten Lage eingefügt. |
 
-Nach jedem Lauf zeigt ein Bericht pro Feature, ob es neu aufgebaut wurde, was angepasst werden musste und ob **Volumen und Schwerpunkt** der Änderung mit dem gespiegelten Original übereinstimmen. Unterdrückte und im Original fehlerhafte Features werden übersprungen und genannt.
+Nach jedem Lauf zeigt ein Bericht pro Feature, ob es neu aufgebaut wurde, was angepasst werden musste, ob **Volumen und Schwerpunkt** der Änderung mit dem gespiegelten Original übereinstimmen und ob die gespiegelten **Flächenproben** des Originals auf der Kopie liegen. Unterdrückte und im Original fehlerhafte Features werden übersprungen und genannt.
 
 ## Unterstützte Features
 
@@ -20,11 +20,14 @@ Nach jedem Lauf zeigt ein Bericht pro Feature, ob es neu aufgebaut wurde, was an
 | --- | --- |
 | 2D-Skizze | Linien, Mittellinien, Bögen, Kreise, Ellipsen, Ellipsenbögen, Splines (über die Stützpunkte), Parabeln, Punkte, Konstruktionsgeometrie. Beziehungen und Bemaßungen werden umgerechnet (siehe [Skizzen spiegeln](docs/SKIZZEN.md)). |
 | Linear austragen (Aufsatz/Schnitt) | Alle Endbedingungen, beide Richtungen, Formschräge, Startbedingungen, eigene Extrusionsrichtung, ausgewählte Konturen, dünnwandig. Bezüge (bis Fläche, bis Eckpunkt, Abstand von Fläche) werden im Ziel wiedergefunden. |
-| Rotieren (Aufsatz/Schnitt) | Eine Richtung, Mittelebene, zwei Richtungen, ausgewählte Konturen, dünnwandig. Achse: Skizzenlinie oder gerade Kante. |
+| Rotieren (Aufsatz/Schnitt) | Eine Richtung, Mittelebene, zwei Richtungen, ausgewählte Konturen, dünnwandig. Achse: Skizzenlinie, gerade Kante oder Achse (sonst eine fixierte Hilfsachse). |
+| Austragung (Aufsatz/Schnitt) | Profil-, Pfad- und Führungskurven-Skizzen, Kreisprofil, Verdrehung (Richtung wird gegensinnig, gemessen bestätigt), Pfadausrichtung, Start-/Endtangente, Richtungsvektoren, dünnwandig. Nicht: 3D-Skizzen oder Helix als Pfad, Werkzeugkörper-Schnitt. |
+| Ausformung (Aufsatz/Schnitt) | Profile (Skizzen, Punkte, Flächen) in Originalreihenfolge, Führungskurven, Mittellinie, Verbinder über die gespiegelten Auswahlpunkte, Start-/Endbedingungen, geschlossen, dünnwandig. |
+| Lineares und kreisförmiges Muster | Features, Flächen oder Körper; zwei Richtungen, gleicher Abstand, symmetrisch, übersprungene Instanzen. Die Richtungen werden über die Lage der Instanzen des Originals bestimmt, nicht geraten. Die Saat-Features werden automatisch mit gespiegelt. |
 | Verrundung | Konstanter Radius, auch mit mehreren Radien, Kanten und Flächen. |
 | Fase | Winkel-Abstand, Abstand-Abstand, gleicher Abstand. |
-| Referenzebene | Neu an gespiegelter Lage, nur von den Standardebenen abhängig. |
-| Noch nicht | Austragung (Sweep), Ausformung (Loft), Bohrungsassistent, Muster, Wandung, Formschräge, variable Verrundung, 3D-Skizzen, Skizzentext. Sie erscheinen im Bericht; Features, die darauf aufbauen, können dann ebenfalls scheitern. Wie ein weiterer Typ dazukommt, steht in der [Architektur](docs/ARCHITEKTUR.md#einen-feature-typ-ergänzen). |
+| Referenzebene, Referenzachse | Neu an gespiegelter Lage, nur von den Standardebenen bzw. einer fixierten Hilfslinie abhängig. |
+| Noch nicht | Bohrungsassistent, Wandung, Formschräge, variable Verrundung, Kurven-/Skizzen-/Tabellenmuster, 3D-Skizzen, Skizzentext. Spiegel-Features im Original werden bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. Sie erscheinen im Bericht; Features, die darauf aufbauen, können dann ebenfalls scheitern. Wie ein weiterer Typ dazukommt, steht in der [Architektur](docs/ARCHITEKTUR.md#einen-feature-typ-ergänzen). |
 
 ## Bedienung
 
@@ -79,4 +82,4 @@ spiegelwerk/
 
 ## Stand
 
-Version 0.1. Die Kernlogik ist durch Tests abgesichert; das Add-In übersetzt fehlerfrei gegen die API von SOLIDWORKS 2019 und 2024 (CI) und ist durch ein Code-Review gegangen, dessen bestätigte Befunde behoben sind. In einer laufenden SOLIDWORKS-Sitzung ist es noch nicht erprobt. Die Stellen, an denen sich die API je nach Version anders verhalten kann, misst Spiegelwerk nach, statt sich auf eine Annahme zu verlassen; sie sind in den [Stolpersteinen](docs/STOLPERSTEINE.md#was-beim-ersten-test-in-solidworks-zu-prüfen-ist) aufgeführt.
+Version 0.2 (Austragung, Ausformung, Muster, Achsen, Flächenprüfung). Die Kernlogik ist durch Tests abgesichert; das Add-In übersetzt fehlerfrei gegen die API von SOLIDWORKS 2019 und 2024 (CI) und ist durch ein Code-Review gegangen, dessen bestätigte Befunde behoben sind. In einer laufenden SOLIDWORKS-Sitzung ist es noch nicht erprobt. Die Stellen, an denen sich die API je nach Version anders verhalten kann, misst Spiegelwerk nach, statt sich auf eine Annahme zu verlassen; sie sind in den [Stolpersteinen](docs/STOLPERSTEINE.md#was-beim-ersten-test-in-solidworks-zu-prüfen-ist) aufgeführt.

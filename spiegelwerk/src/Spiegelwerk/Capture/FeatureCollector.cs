@@ -12,7 +12,8 @@ namespace Spiegelwerk.Capture
     ///  - features selected: those features plus the sketches they consume
     ///  - bodies selected: every feature that contributed to those bodies, plus their sketches
     /// Parents other than sketches are deliberately not pulled in: a mirrored cut is meant to
-    /// cut the existing body, not to rebuild the body it was cut from.
+    /// cut the existing body, not to rebuild the body it was cut from. The one exception are
+    /// the seeds of a pattern: a pattern without its seed has nothing to repeat.
     /// </summary>
     internal static class FeatureCollector
     {
@@ -26,7 +27,7 @@ namespace Spiegelwerk.Capture
         {
             List<Feature> all = SwDoc.FeaturesInCreationOrder(doc);
             var standard = new HashSet<string>(SwDoc.StandardPlanes(doc, math).Select(f => f.Name), StringComparer.Ordinal);
-            List<Feature> result = Select(all, standard, features, bodies);
+            List<Feature> result = Select(doc, all, standard, features, bodies);
 
             var kept = new List<Feature>();
             var skippedNames = new HashSet<string>(StringComparer.Ordinal);
@@ -69,7 +70,7 @@ namespace Spiegelwerk.Capture
             return missing == null ? null : $"Skizze \"{missing.Name}\" wurde übersprungen – nicht gespiegelt.";
         }
 
-        private static List<Feature> Select(List<Feature> all, HashSet<string> standard, IReadOnlyCollection<Feature> features, IReadOnlyCollection<Body2> bodies)
+        private static List<Feature> Select(ModelDoc2 doc, List<Feature> all, HashSet<string> standard, IReadOnlyCollection<Feature> features, IReadOnlyCollection<Body2> bodies)
         {
             if (features.Count == 0 && bodies.Count == 0)
                 return all.Where(f => !SwDoc.IsSystemFeature(f) && !standard.Contains(f.Name)).ToList();
@@ -80,6 +81,12 @@ namespace Spiegelwerk.Capture
                 if (b.GetFeatures() is object[] bodyFeatures)
                     foreach (Feature f in bodyFeatures.OfType<Feature>()) wanted.Add(f.Name);
 
+            // Seeds of wanted patterns (also of patterns of patterns).
+            var queue = new Queue<Feature>(all.Where(x => wanted.Contains(x.Name)));
+            while (queue.Count > 0)
+                foreach (Feature seed in SeedsOf(doc, queue.Dequeue()))
+                    if (wanted.Add(seed.Name)) queue.Enqueue(seed);
+
             // Sketches the wanted features are built from (absorbed or shared).
             foreach (Feature f in all.Where(x => wanted.Contains(x.Name)).ToList())
             {
@@ -89,6 +96,36 @@ namespace Spiegelwerk.Capture
             }
 
             return all.Where(f => wanted.Contains(f.Name) && !SwDoc.IsSystemFeature(f) && !standard.Contains(f.Name)).ToList();
+        }
+
+        /// <summary>The features a linear or circular pattern repeats (none for face and body patterns).</summary>
+        private static IEnumerable<Feature> SeedsOf(ModelDoc2 doc, Feature f)
+        {
+            object? seeds = null;
+            switch (f.GetDefinition())
+            {
+                case LinearPatternFeatureData lp when lp.AccessSelections(doc, null):
+                    try
+                    {
+                        seeds = lp.PatternFeatureArray;
+                    }
+                    finally
+                    {
+                        lp.ReleaseSelectionAccess();
+                    }
+                    break;
+                case CircularPatternFeatureData cp when cp.AccessSelections(doc, null):
+                    try
+                    {
+                        seeds = cp.PatternFeatureArray;
+                    }
+                    finally
+                    {
+                        cp.ReleaseSelectionAccess();
+                    }
+                    break;
+            }
+            return seeds is object[] list ? list.OfType<Feature>().ToList() : Enumerable.Empty<Feature>();
         }
     }
 }

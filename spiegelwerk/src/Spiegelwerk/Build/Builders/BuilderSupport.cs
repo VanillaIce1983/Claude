@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
+using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
 
 namespace Spiegelwerk.Build.Builders
@@ -57,6 +58,25 @@ namespace Spiegelwerk.Build.Builders
         /// </summary>
         public static object[] OwnBodiesBeforeFeature(BuildContext ctx) => ctx.OwnBodies().Cast<object>().ToArray();
 
+        /// <summary>The target object for a reference of the original, mirrored; null if the original had none or it is not found.</summary>
+        public static object? Find(BuildContext ctx, GeometryRef? original, List<string> notes) =>
+            original == null ? null : Safe(ctx.Topology.Resolve(original.Mirror(ctx.Mirror), notes));
+
+        /// <summary>
+        /// "Separate body": a boss is created without merging and limited to the bodies of
+        /// this job afterwards (<paramref name="scope"/>); a cut needs such a body to act on.
+        /// Returns why the feature must not be built, or null.
+        /// </summary>
+        public static string? PlanSeparateBody(BuildContext ctx, bool isCut, bool merge, out bool scope, out bool createMerge)
+        {
+            int ownBefore = ctx.SeparateBody ? ctx.OwnBodies().Count : 0;
+            scope = ctx.SeparateBody && (isCut || (merge && ownBefore > 0));
+            createMerge = !ctx.SeparateBody && merge;
+            return ctx.SeparateBody && isCut && ownBefore == 0
+                ? "Es gibt noch keinen gespiegelten Körper, auf den der Schnitt wirken könnte; das Original bleibt unberührt."
+                : null;
+        }
+
         public static BuildResult Fail(string message, List<string> notes)
         {
             var result = BuildResult.Failed(message);
@@ -69,5 +89,17 @@ namespace Spiegelwerk.Build.Builders
 
         public static int OtherThinSide(int thinType) =>
             thinType == (int)swThinWallType_e.swThinWallOneDirection ? (int)swThinWallType_e.swThinWallOppDirection : (int)swThinWallType_e.swThinWallOneDirection;
+
+        public static bool HasUnequalWalls(int thinType, double t1, double t2) =>
+            thinType == (int)swThinWallType_e.swThinWallTwoDirection && Math.Abs(t1 - t2) > 1e-12;
+
+        /// <summary>Ok, or Warning if there is anything to tell.</summary>
+        public static BuildResult Ok(Feature f, string message, List<string> notes)
+        {
+            var result = BuildResult.Ok(f, message);
+            result.Notes.AddRange(notes);
+            if (notes.Count > 0) result.Status = ReportStatus.Warning;
+            return result;
+        }
     }
 }

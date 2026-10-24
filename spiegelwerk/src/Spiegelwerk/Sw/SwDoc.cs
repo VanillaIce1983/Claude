@@ -110,10 +110,12 @@ namespace Spiegelwerk.Sw
         }
 
         /// <summary>Volume and first moment of all solid bodies (density irrelevant, we use volume).</summary>
-        public static MassState MassOf(ModelDoc2 doc)
+        public static MassState MassOf(ModelDoc2 doc) => MassOf(SolidBodies(doc));
+
+        public static MassState MassOf(IEnumerable<Body2> bodies)
         {
             var items = new List<(double, Vec3)>();
-            foreach (Body2 b in SolidBodies(doc))
+            foreach (Body2 b in bodies)
             {
                 // CenterOfMassX, Y, Z, Volume, Area, Mass, moments ...
                 var mp = (double[])b.GetMassProperties(1.0);
@@ -121,6 +123,15 @@ namespace Spiegelwerk.Sw
                 items.Add((mp[3], new Vec3(mp[0], mp[1], mp[2])));
             }
             return MassState.FromBodies(items);
+        }
+
+        /// <summary>The line of a reference axis.</summary>
+        public static Line3 AxisLine(RefAxis ax)
+        {
+            // start point x,y,z, end point x,y,z
+            var p = (double[])ax.GetRefAxisParams();
+            Vec3 a = Vec3.FromArray(p, 0), b = Vec3.FromArray(p, 3);
+            return new Line3(a, b - a);
         }
 
         public static Feature? FeatureByName(ModelDoc2 doc, string name) =>

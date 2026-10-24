@@ -91,6 +91,21 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 55. **Jeder API-Aufruf kann einen Neuaufbau und eine Bildschirmaktualisierung auslösen.** → `FeatureManager.EnableFeatureTree = false`, `ModelView.EnableGraphicsUpdate = false`, `SketchManager.DisplayWhenAdded = false` während des Laufs.
 56. **Die Prüfung kostet zwei Rückroll-Neuaufbauten pro Feature des Originals**, Skizzen mit Modellbezügen einen weiteren. Bei großen Teilen spürbar; „Jeden Schritt prüfen“ lässt sich abschalten.
 
+## Austragung, Ausformung, Muster
+
+57. **Profil, Pfad und Führungskurven sind eigene Skizzen.** Sie werden vorher als gewöhnliche Skizzen gespiegelt und dann mit den Markierungen der Hilfe gewählt: Profil 1, Führungskurve 2, Pfad 4 (Austragung); Profile 1 in Originalreihenfolge, Führungskurven 2, Mittellinie 4 (Ausformung). Ein Pfad aus einer 3D-Skizze, einer Helix oder aus Modellkanten wird nicht unterstützt und im Bericht genannt.
+58. **Richtungsvektoren per Markierung (128 …) werden laut Anwenderberichten beim Erzeugen ignoriert.** → Start-/Endtangente, Pfadausrichtung und Richtungsvektoren entstehen zunächst als „keine“ und werden per `ModifyDefinition` gesetzt.
+59. **Die Verdrehung einer Austragung läuft im Spiegelbild andersherum.** Ob SOLIDWORKS den Drehsinn um den Pfad oder um die Profilnormale misst, ist nicht dokumentiert. → Erste Variante gegensinnig, die andere als Alternative. Mit symmetrischem Profil haben beide Varianten dasselbe Volumen und denselben Schwerpunkt – erst die Flächenproben unterscheiden sie.
+60. **Verbinder einer Ausformung** ergeben sich aus der Stelle, an der jedes Profil gewählt wurde. Mit `Select2` ohne Punkt verbindet SOLIDWORKS irgendwo, die Ausformung ist verdreht. → Skizzenprofile per `SelectByID2` am gespiegelten Auswahlpunkt wählen; danach `ILoftFeatureData.PickPoints` mit den gespiegelten Punkten vergleichen und bei Abweichung setzen. Die Struktur (je Kette ein Feld von `MathPoint`) stammt aus dem Beispiel der Hilfe; passt sie nicht, steht es im Bericht.
+61. **„Normal zum Profil“ zeigt entlang der Skizzennormale,** die in der Kopie umgekehrt sein kann (σ < 0). → Umkehrflag nach σ, Gegenrichtung als Alternative.
+62. **Ausformungsschnitte kennen beim Erzeugen weder Tangentenlänge noch -richtung** (`InsertCutBlend`). → Nachträglich per `ModifyDefinition`.
+63. **Die Richtung einer Kante im neuen Teil ist beliebig,** der Drehsinn eines Kreismusters kehrt sich im Spiegelbild um. Ein kopiertes „Richtung umkehren“ ist deshalb Glückssache. → Die Lage der Instanzen (`GetTransform`) des Originals wird gespiegelt (R ∘ T ∘ R) und mit der des neuen Musters als Menge verglichen; die Flags werden durchprobiert, bis beide übereinstimmen. Erst wenn die Lage nicht lesbar ist, entscheidet die Massenprüfung.
+64. **Muster ohne Saat.** Wer nur das Muster wählt, bekäme ein Muster ohne etwas zu wiederholen. → Die Saat-Features eines gewählten Musters werden automatisch mitgespiegelt. Ist eine Saat nicht spiegelbar (z. B. eine Bohrung des Bohrungsassistenten), steht das beim Muster im Bericht.
+65. **`FeatureLinearPattern5`/`FeatureCircularPattern5` gelten ab 2024 als veraltet,** der Weg über `CreateDefinition` + `CreateFeature` ist in 2019 nicht für jeden Typ belegt. → Beide Wege; bei reinen Feature-Mustern zuerst die Auswahl (Richtung 1/2, Features 4), bei Flächen- und Körpermustern zuerst das Datenobjekt (die Markierungen 128/256 sind nicht belegt).
+66. **Muster haben keinen Feature-Bereich.** Im selben Teil kann eine Instanz eines Schnitts das Original treffen. → Nach jedem Feature werden Volumen und Moment der Originalkörper verglichen; hat sich etwas geändert, wird das Feature entfernt.
+67. **Achsen ohne Gegenstück.** Eine Referenzachse des Originals hat im neuen Teil oft keine Kante, auf der sie liegt; eine Kante des Originals im selben Teil wäre wieder eine Abhängigkeit. → Hilfsachse auf einer fixierten Linie einer 3D-Skizze; Achsen des Originals werden so unter ihrem Namen neu angelegt.
+68. **Bis zu 400 Instanzen** werden einzeln gelesen (ein Aufruf je Instanz); größere Muster prüft nur die Massenprüfung. Die Flächenprüfung kostet je Feature bis zu acht Abstandsmessungen gegen die Flächen des Features, im Zweifel gegen alle Flächen.
+
 ## Was beim ersten Test in SOLIDWORKS zu prüfen ist
 
 Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in einer laufenden Sitzung erprobt. Diese Stellen beruhen auf der API-Hilfe und offiziellen Beispielen, wo diese uneindeutig sind; Spiegelwerk fängt sie ab, der Bericht zeigt, welcher Weg genommen wurde:
@@ -105,8 +120,16 @@ Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in eine
 | Zusammenführen von Endpunkten | `AddRelation(MERGEPOINTS)` | deckungsgleich als zweiter Versuch, Punkte werden neu eingelesen |
 | Versatzebene | Abstand entlang der Normale der Standardebene | Lage wird gemessen, sonst gespiegelt neu angelegt |
 | Rotationsrichtung, Wandseite, Fasenseite, Startversatz | Annahme nach σ | Volumen-/Momentvergleich mit Varianten |
+| Austragung: Profil 1, Führung 2, Pfad 4 | laut Hilfe zu `InsertProtrusionSwept3`/`InsertCutSwept4` | — |
+| Verdrehrichtung der Austragung | gegensinnig zum Original | Alternative, Flächenproben |
+| Ausformung: Profile 1, Führung 2, Mittellinie 4 | laut Hilfe zu `InsertProtrusionBlend` | — |
+| Verbinder der Ausformung | `SelectByID2` mit Punkt, `PickPoints` als Ketten von `MathPoint` | Vergleich nach dem Erzeugen, sonst Hinweis |
+| Muster: Richtung 1/2, Features 4, `DName` „NULL“ | laut Beispielen der Hilfe | `CreateDefinition`/`CreateFeature` als zweiter Weg |
+| `GetTransform` eines Musters | Platzierung Saat → Instanz in Teilkoordinaten, unter `AccessSelections` lesbar | nicht lesbar: Massenprüfung mit Varianten |
+| Hilfsachse | `InsertAxis2` auf einer gewählten 3D-Skizzenlinie | Lage wird nachgemessen, sonst Fehler mit Hinweis |
+| Flächenproben | `IFeature.GetFaces` liefert im zurückgerollten Zustand die Flächen des Features | ohne Flächen keine Proben, nur Massenprüfung |
 | `Body2.GetMassProperties` | Index 0–2 Schwerpunkt, 3 Volumen | bei falscher Annahme schlägt jede Prüfung an – sofort sichtbar |
 | Genauigkeit der Masseneigenschaften | relativ 1e-7 | sonst Untergrenze in `MassComparison.NoiseRelative` anpassen |
 | Schließen des Teilfensters in der Baugruppe | `CloseDoc` schließt nur das Fenster, die Baugruppe hält das Teil geladen | — |
 
-Ein guter erster Test: einfache Platte mit Tasche und Verrundung auf *vorne*, an *rechts* gespiegelt, in ein neues Teil – dann dasselbe mit einer Skizze auf *rechts* (σ = −1), mit einer schrägen Hilfsebene und mit einer Tasche, deren Skizze oberhalb des Teils liegt („bis Fläche“).
+Ein guter erster Test: einfache Platte mit Tasche und Verrundung auf *vorne*, an *rechts* gespiegelt, in ein neues Teil – dann dasselbe mit einer Skizze auf *rechts* (σ = −1), mit einer schrägen Hilfsebene und mit einer Tasche, deren Skizze oberhalb des Teils liegt („bis Fläche“). Danach: ein lineares Muster entlang einer Kante und ein Kreismuster mit 3 × 40° um eine Referenzachse (Richtung muss im Bericht „geprüft“ oder „korrigiert“ heißen), eine Austragung eines Quadrats mit 90° Verdrehung entlang einer Geraden und eine Ausformung zwischen einem Quadrat und einem um 45° gedrehten Quadrat (Verbinder).

@@ -33,14 +33,11 @@ namespace Spiegelwerk.Build.Builders
             var notes = new List<string>();
             object? axis = r.Axis == null ? null : Safe(ctx.Topology.Resolve(r.Axis.Mirror(ctx.Mirror), notes));
             if (axis == null)
-                return Fail("Drehachse im Ziel nicht gefunden (nur Skizzenlinien und gerade Kanten werden zugeordnet).", notes);
+                return Fail("Drehachse im Ziel nicht gefunden.", notes);
 
             // Separate body: as for extrusions, never let the copy touch the original.
-            int ownBefore = ctx.SeparateBody ? ctx.OwnBodies().Count : 0;
-            if (ctx.SeparateBody && r.IsCut && ownBefore == 0)
-                return Fail("Es gibt noch keinen gespiegelten Körper, auf den der Schnitt wirken könnte; das Original bleibt unberührt.", notes);
-            bool scope = ctx.SeparateBody && (r.IsCut || (r.Merge && ownBefore > 0));
-            bool createMerge = !ctx.SeparateBody && r.Merge;
+            string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
+            if (refused != null) return Fail(refused, notes);
 
             (bool singleDir, EndCondition dir1, double a1, EndCondition dir2, double a2) = Layout(r);
             bool reverse = DirectionRules.ReverseFlag(r.Reverse, sketch.Sigma);

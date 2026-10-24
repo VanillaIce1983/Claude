@@ -82,6 +82,30 @@ namespace Spiegelwerk.Build.Builders
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
+        public static bool Sweep(ModelDoc2 doc, Feature f, Action<SweepFeatureData> change)
+        {
+            var d = (SweepFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool Loft(ModelDoc2 doc, Feature f, Action<LoftFeatureData> change)
+        {
+            var d = (LoftFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool LinearPattern(ModelDoc2 doc, Feature f, Action<LinearPatternFeatureData> change)
+        {
+            var d = (LinearPatternFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool CircularPattern(ModelDoc2 doc, Feature f, Action<CircularPatternFeatureData> change)
+        {
+            var d = (CircularPatternFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
         /// <summary>A setter that throws (stale entity, invalid value) must not leave the model rolled back either.</summary>
         private static bool Edit(ModelDoc2 doc, Feature f, object data, Func<bool> access, Action change, Action release)
         {
