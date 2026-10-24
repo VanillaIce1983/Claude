@@ -1,0 +1,233 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolidWorks.Interop.sldworks;
+using SolidWorks.Interop.swconst;
+using Spiegelwerk.Build.Builders;
+using Spiegelwerk.Capture;
+using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Records;
+using Spiegelwerk.Core.Verification;
+using Spiegelwerk.Sw;
+
+namespace Spiegelwerk.Build
+{
+    internal sealed class MirrorRequest
+    {
+        public MirrorRequest(ModelDoc2 source, Plane3 mirrorPlane, MirrorOptions options)
+        {
+            Source = source;
+            MirrorPlane = mirrorPlane;
+            Options = options;
+        }
+
+        /// <summary>The part whose features are mirrored.</summary>
+        public ModelDoc2 Source { get; }
+
+        /// <summary>Mirror plane in the coordinates of <see cref="Source"/>.</summary>
+        public Plane3 MirrorPlane { get; }
+
+        public MirrorOptions Options { get; }
+        public List<Feature> Features { get; } = new List<Feature>();
+        public List<Body2> Bodies { get; } = new List<Body2>();
+    }
+
+    internal sealed class MirrorJobResult
+    {
+        public MirrorJobResult(MirrorReport report, ModelDoc2? target)
+        {
+            Report = report;
+            Target = target;
+        }
+
+        public MirrorReport Report { get; }
+        public ModelDoc2? Target { get; }
+    }
+
+    /// <summary>
+    /// The whole run, in three strictly separated phases:
+    ///  1. Capture – read the original into neutral records (and, for checking, what every
+    ///     feature did to the volume). After this the original is not used any more.
+    ///  2. Build – create every record mirrored in the target with plain FeatureManager /
+    ///     SketchManager calls. No Mirror feature, no derived part, no external reference.
+    ///  3. Verify – per feature, compare with the mirrored original and pick the right variant.
+    /// </summary>
+    internal sealed class MirrorJob
+    {
+        private readonly SldWorks _sw;
+        private readonly SwMath _math;
+
+        private static readonly IFeatureBuilder[] Builders =
+        {
+            new SketchFeatureBuilder(),
+            new RefPlaneBuilder(),
+            new ExtrudeBuilder(),
+            new RevolveBuilder(),
+            new FilletBuilder(),
+            new ChamferBuilder(),
+        };
+
+        public MirrorJob(SldWorks sw)
+        {
+            _sw = sw;
+            _math = new SwMath(sw);
+        }
+
+        public MirrorJobResult Run(MirrorRequest req)
+        {
+            var report = new MirrorReport();
+            ModelDoc2 source = req.Source;
+            MirrorOptions opt = req.Options;
+
+            // ---- 1. capture
+            List<Feature> features = FeatureCollector.Collect(source, _math, req.Features, req.Bodies);
+            if (features.Count == 0)
+            {
+                report.General.Add("Es wurden keine spiegelbaren Features gefunden.");
+                report.Aborted = true;
+                return new MirrorJobResult(report, null);
+            }
+            var capture = new FeatureCapture(source, _math);
+            List<FeatureRecord> records = features.Select(capture.Capture).ToList();
+            if (opt.VerifySteps) MassCapture.Measure(source, records);
+
+            // ---- 2. target
+            ModelDoc2 target = opt.Target == MirrorTarget.SamePart ? source : CreatePart(source, opt, report);
+            report.TargetName = target.GetTitle();
+            bool separateBody = opt.Target == MirrorTarget.SamePart && (req.Features.Count == 0 || req.Bodies.Count > 0);
+            var ctx = new BuildContext(_sw, target, _math, new Reflection(req.MirrorPlane), opt, report, separateBody);
+            report.General.Add($"Spiegelebene: {req.MirrorPlane}");
+
+            using (new SwPreferences(_sw))
+            using (new UpdateFreeze(target))
+            {
+                foreach (FeatureRecord record in records)
+                {
+                    ReportEntry entry = BuildOne(ctx, record);
+                    if (entry.Status == ReportStatus.Failed && opt.StopOnError)
+                    {
+                        report.Aborted = true;
+                        break;
+                    }
+                }
+            }
+            target.EditRebuild3();
+
+            // ---- 3. finish
+            if (opt.Target == MirrorTarget.NewPart)
+            {
+                if (opt.CopyEquations) CopyEquations(source, target, report);
+                target.ShowNamedView2("*Isometric", (int)swStandardViews_e.swIsometricView);
+                target.ViewZoomtofit2();
+            }
+            else if (opt.DeleteOriginal)
+            {
+                DeleteOriginals(source, features, report);
+            }
+            return new MirrorJobResult(report, target);
+        }
+
+        private ReportEntry BuildOne(BuildContext ctx, FeatureRecord record)
+        {
+            if (record is UnsupportedRecord u)
+            {
+                var status = u.ChangesSolid ? ReportStatus.Failed : ReportStatus.Skipped;
+                ReportEntry skipped = ctx.Report.Add(record, status, u.Reason);
+                if (u.ChangesSolid) skipped.Details.Add("Folgende Features, die sich auf dieses beziehen, können ebenfalls scheitern.");
+                return skipped;
+            }
+
+            IFeatureBuilder? builder = Builders.FirstOrDefault(b => b.Handles(record));
+            if (builder == null) return ctx.Report.Add(record, ReportStatus.Skipped, "Kein Builder für diesen Typ.");
+
+            MassState before = ctx.Options.VerifySteps && record.ChangesSolid ? SwDoc.MassOf(ctx.Doc) : MassState.Empty;
+            BuildResult result;
+            try
+            {
+                result = builder.Build(record, ctx);
+            }
+            catch (Exception ex)
+            {
+                result = BuildResult.Failed(ex.Message);
+                // Never leave a half-built sketch open.
+                if (ctx.Doc.SketchManager.ActiveSketch != null) ctx.Doc.SketchManager.InsertSketch(true);
+                SwSelect.Clear(ctx.Doc);
+            }
+
+            string verification = StepVerifier.Verify(ctx, record, result, before);
+            ReportEntry entry = ctx.Report.Add(record, result.Status, result.Message);
+            entry.Verification = verification;
+            entry.Details.AddRange(result.Notes);
+            return entry;
+        }
+
+        private ModelDoc2 CreatePart(ModelDoc2 source, MirrorOptions opt, MirrorReport report)
+        {
+            string template = _sw.GetUserPreferenceStringValue((int)swUserPreferenceStringValue_e.swDefaultTemplatePart);
+            if (string.IsNullOrEmpty(template))
+                throw new InvalidOperationException("Keine Standardvorlage für Teile eingestellt (Optionen › Standardvorlagen).");
+            var target = (ModelDoc2)_sw.NewDocument(template, 0, 0, 0)
+                ?? throw new InvalidOperationException($"Neues Teil aus Vorlage \"{template}\" konnte nicht angelegt werden.");
+
+            // Same unit system as the original, so the copied dimensions read the same.
+            int units = source.Extension.GetUserPreferenceInteger((int)swUserPreferenceIntegerValue_e.swUnitSystem, 0);
+            target.Extension.SetUserPreferenceInteger((int)swUserPreferenceIntegerValue_e.swUnitSystem, 0, units);
+
+            if (opt.CopyMaterial && source is PartDoc sp && target is PartDoc tp)
+            {
+                string db = "";
+                string material = sp.GetMaterialPropertyName2("", out db);
+                if (!string.IsNullOrEmpty(material))
+                {
+                    tp.SetMaterialPropertyName2("", db, material);
+                    report.General.Add($"Werkstoff übernommen: {material}");
+                }
+            }
+            return target;
+        }
+
+        /// <summary>
+        /// Global variables and equations, copied verbatim. They refer to features and
+        /// dimensions by name ("D1@Skizze1"), which is why the rebuild keeps the original names.
+        /// </summary>
+        private static void CopyEquations(ModelDoc2 source, ModelDoc2 target, MirrorReport report)
+        {
+            EquationMgr src = source.GetEquationMgr(), dst = target.GetEquationMgr();
+            int n = src.GetCount(), ok = 0;
+            var failed = new List<string>();
+            for (int i = 0; i < n; i++)
+            {
+                string eq = src.get_Equation(i);
+                if (dst.Add2(-1, eq, true) >= 0) ok++;
+                else failed.Add(eq);
+            }
+            if (n > 0) report.General.Add($"Gleichungen: {ok} von {n} übernommen.");
+            foreach (string eq in failed) report.General.Add($"  nicht übernommen: {eq}");
+        }
+
+        /// <summary>Same part: removes the original features, but only if nothing else depends on them.</summary>
+        private static void DeleteOriginals(ModelDoc2 doc, List<Feature> originals, MirrorReport report)
+        {
+            if (report.HasProblems)
+            {
+                report.General.Add("Original nicht gelöscht, weil nicht alle Features fehlerfrei gespiegelt wurden.");
+                return;
+            }
+            var names = new HashSet<string>(originals.Select(f => f.Name), StringComparer.Ordinal);
+            foreach (Feature f in originals)
+                if (f.GetChildren() is object[] children)
+                    foreach (Feature c in children.OfType<Feature>())
+                        if (!names.Contains(c.Name) && !SwDoc.IsSystemFeature(c))
+                        {
+                            report.General.Add($"Original nicht gelöscht: \"{c.Name}\" hängt von \"{f.Name}\" ab.");
+                            return;
+                        }
+
+            SwSelect.Clear(doc);
+            for (int i = originals.Count - 1; i >= 0; i--) SwSelect.Select(doc, originals[i], 0, true);
+            bool deleted = doc.Extension.DeleteSelection2((int)(swDeleteSelectionOptions_e.swDelete_Absorbed | swDeleteSelectionOptions_e.swDelete_Children));
+            SwSelect.Clear(doc);
+            report.General.Add(deleted ? $"{originals.Count} Original-Features gelöscht." : "Original-Features konnten nicht gelöscht werden.");
+        }
+    }
+}

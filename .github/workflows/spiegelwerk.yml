@@ -1,0 +1,62 @@
+# Spiegelwerk (SOLIDWORKS-Add-In): Tests der Spiegelmathematik und Skizzen-Umrechnung, dazu die
+# Übersetzungsprüfung des Add-Ins gegen die SOLIDWORKS-API 2019 (älteste unterstützte Stufe) und 2024.
+# Die Interop-Assemblys kommen dafür aus den öffentlichen NuGet-Paketen und werden nicht ausgeliefert;
+# zur Laufzeit verwendet das Add-In die Assemblys der installierten SOLIDWORKS-Version.
+name: spiegelwerk
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'spiegelwerk/**'
+      - '.github/workflows/spiegelwerk.yml'
+  pull_request:
+    paths:
+      - 'spiegelwerk/**'
+      - '.github/workflows/spiegelwerk.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: spiegelwerk
+
+jobs:
+  core:
+    name: Core-Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+      - name: Tests (Spiegelung, Skizzen, Ebenen, Baugruppen-Platzierung, Zuordnung)
+        run: dotnet test tests/Spiegelwerk.Core.Tests/Spiegelwerk.Core.Tests.csproj -c Release
+
+  addin:
+    name: Add-In gegen SOLIDWORKS-API ${{ matrix.label }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: '2019'
+            interop: 27.3.0
+          - label: '2024'
+            interop: 32.1.0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+      - name: Übersetzen (Warnungen gelten als Fehler)
+        run: dotnet build src/Spiegelwerk/Spiegelwerk.csproj -c Release -p:SwInteropFromNuGet=true -p:SwInteropVersion=${{ matrix.interop }}

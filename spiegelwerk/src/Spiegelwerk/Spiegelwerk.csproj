@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- SOLIDWORKS add-ins run in-process in SLDWORKS.exe and therefore need .NET Framework
+       and x64. Registration: scripts\install.cmd (RegAsm /codebase). -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <!-- Annotations only: COM returns object everywhere, flow analysis would be noise. -->
+    <Nullable>annotations</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>Spiegelwerk</RootNamespace>
+    <AssemblyName>Spiegelwerk</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>0.1.0</Version>
+    <Product>Spiegelwerk</Product>
+    <Description>Unabhängiges Spiegeln von Bauteilen für SOLIDWORKS</Description>
+
+    <!-- Interop assemblies from the local SOLIDWORKS installation. Override with
+         -p:SolidWorksApiDir=... or use the public NuGet packages with -p:SwInteropFromNuGet=true
+         (that is what CI does to check that the code compiles against API 2019 and 2024). -->
+    <SwInteropVersion Condition="'$(SwInteropVersion)' == ''">27.3.0</SwInteropVersion>
+    <SolidWorksApiDir Condition="'$(SolidWorksApiDir)' == ''">C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Spiegelwerk.Core\Spiegelwerk.Core.csproj" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <!-- Not copied to the output: at run time the interop assemblies of the installed
+       SOLIDWORKS version are used (global assembly cache), like every other add-in does. -->
+  <ItemGroup Condition="'$(SwInteropFromNuGet)' != 'true'">
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.swconst.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swpublished">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.swpublished.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Compile check only (CI): 27.3.0 = SOLIDWORKS 2019, the oldest API level the code uses. -->
+  <ItemGroup Condition="'$(SwInteropFromNuGet)' == 'true'">
+    <PackageReference Include="SolidWorks.Interop.sldworks" Version="$(SwInteropVersion)" ExcludeAssets="runtime" />
+    <PackageReference Include="SolidWorks.Interop.swconst" Version="$(SwInteropVersion)" ExcludeAssets="runtime" />
+    <PackageReference Include="SolidWorks.Interop.swpublished" Version="$(SwInteropVersion)" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+</Project>

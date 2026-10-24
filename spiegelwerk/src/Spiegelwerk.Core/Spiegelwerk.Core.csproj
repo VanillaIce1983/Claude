@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Everything that can be computed without SOLIDWORKS: mirror math, the neutral
+       sketch model, relation/dimension conversion, topology matching. Kept free of
+       COM references so it builds and tests on any OS. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Spiegelwerk.Core</RootNamespace>
+    <AssemblyName>Spiegelwerk.Core</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>
