@@ -22,6 +22,20 @@ namespace Spiegelwerk.Sw
             }
         }
 
+        /// <summary>Sets a property; true if it exists and took the value.</summary>
+        public static bool Set(object com, string property, object value)
+        {
+            try
+            {
+                com.GetType().InvokeMember(property, BindingFlags.SetProperty, null, com, new[] { value });
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
         /// <summary>Calls a method; true if it exists and did not return false.</summary>
         public static bool Call(object com, string method, params object[] args)
         {

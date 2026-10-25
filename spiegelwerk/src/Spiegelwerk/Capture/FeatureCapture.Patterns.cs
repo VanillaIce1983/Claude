@@ -10,7 +10,7 @@ using Spiegelwerk.Sw;
 
 namespace Spiegelwerk.Capture
 {
-    /// <summary>Linear and circular patterns: seeds, directions and the placements of the instances.</summary>
+    /// <summary>Linear, circular, curve and sketch driven patterns: seeds, directions and the placements of the instances.</summary>
     internal sealed partial class FeatureCapture
     {
         /// <summary>Beyond this many instances the placements are not read (one call each); the mass check remains.</summary>
@@ -88,11 +88,94 @@ namespace Spiegelwerk.Capture
             return r;
         }
 
+        private CurvePatternRecord CaptureCurvePattern(Feature f, string type, CurveDrivenPatternFeatureData d)
+        {
+            var r = new CurvePatternRecord(f.Name, type);
+            if (!d.AccessSelections(_doc, null))
+                throw new NotSupportedException("Feature-Definition konnte nicht gelesen werden (AccessSelections).");
+            try
+            {
+                r.Curve1 = RequirePatternCurve(d.D1Direction, "Kurve");
+                r.Reverse1 = d.D1ReverseDirection;
+                r.Count1 = d.D1InstanceCount;
+                r.EqualSpacing1 = d.D1IsEqualSpaced;
+                r.Spacing1 = d.D1Spacing;
+                r.CurveMethod = d.D1CurveMethod;
+                r.Alignment = d.D1AlignmentMethod;
+                // Newer API versions only: the face whose normal orients the instances along a 3D curve.
+                if (SwLate.Get(d, "D1FaceNormal") is object normal)
+                {
+                    r.FaceNormal = ToGeometryRef(normal);
+                    if (r.FaceNormal == null || r.FaceNormal.Kind != GeometryRefKind.Face)
+                    {
+                        r.FaceNormal = null;
+                        r.Notes.Add("Die Fläche für die Normalenrichtung ist nicht lesbar und wird nicht übernommen.");
+                    }
+                }
+                r.HasDirection2 = d.Dir2Specified;
+                if (r.HasDirection2)
+                {
+                    r.Curve2 = RequirePatternCurve(d.D2Direction, "Richtung 2");
+                    r.Reverse2 = d.D2ReverseDirection;
+                    r.Count2 = d.D2InstanceCount;
+                    r.EqualSpacing2 = d.D2IsEqualSpaced;
+                    r.Spacing2 = d.D2Spacing;
+                    r.SeedOnly2 = d.D2PatternSeedOnly;
+                }
+
+                ReadSeeds(r, d.BodyPattern, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, d.SkippedItemArray);
+                NoteScope(d, r);
+                r.GeometryPattern = d.GeometryPattern;
+                r.VarySketch = d.VarySketch;
+                ReadInstances(r, r.InstanceCount, d.GetTransform);
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+            return r;
+        }
+
+        private SketchPatternRecord CaptureSketchPattern(Feature f, string type, SketchPatternFeatureData d)
+        {
+            if (!d.AccessSelections(_doc, null))
+                throw new NotSupportedException("Feature-Definition konnte nicht gelesen werden (AccessSelections).");
+            try
+            {
+                object reference = d.Sketch;
+                Sketch sketch = reference as Sketch ?? (reference as Feature)?.GetSpecificFeature2() as Sketch
+                                ?? throw new NotSupportedException("Referenzskizze des Musters nicht lesbar.");
+                if (sketch.Is3D()) throw new NotSupportedException("Skizzenmuster über eine 3D-Skizze werden nicht unterstützt.");
+                var r = new SketchPatternRecord(f.Name, type, SwDoc.SketchNameOf(sketch))
+                {
+                    UseCentroid = d.UseCentroid,
+                    SketchPointCount = (sketch.GetSketchPoints2() as object[])?.Length ?? 0,
+                };
+                if (!r.UseCentroid)
+                {
+                    r.ReferencePoint = ToGeometryRef(d.ReferencePoint);
+                    if (r.ReferencePoint == null || r.ReferencePoint.Kind == GeometryRefKind.Unknown)
+                        throw new NotSupportedException("Referenzpunkt des Musters nicht lesbar (erwartet: Skizzenpunkt oder Eckpunkt).");
+                }
+
+                ReadSeeds(r, d.BodyPattern, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, null);
+                NoteScope(d, r);
+                r.GeometryPattern = d.GeometryPattern;
+                // Seed plus one instance per sketch point at most; indices without an instance give nothing.
+                ReadInstances(r, r.SketchPointCount + 1, d.GetTransform);
+                return r;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+        }
+
         /// <summary>
         /// Seeds are read in the state before the pattern (selection access rolls the model
         /// back): features by name, faces by fingerprint, bodies by volume and first moment.
         /// </summary>
-        private static void ReadSeeds(PatternRecord r, bool bodyPattern, object features, object faces, object bodies, object skipped)
+        private static void ReadSeeds(PatternRecord r, bool bodyPattern, object features, object faces, object bodies, object? skipped)
         {
             r.BodyPattern = bodyPattern;
             if (bodyPattern)
@@ -141,6 +224,20 @@ namespace Spiegelwerk.Capture
         {
             if (SwLate.Get(d, "FeatureScope") is bool scope && scope && SwLate.Get(d, "AutoSelect") is bool auto && !auto)
                 r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
+        }
+
+        /// <summary>
+        /// Curve of a curve driven pattern: sketch segment, whole sketch or model edge – a
+        /// straight edge too stays an edge (the pattern runs along it, it is no axis). Curves
+        /// of 3D sketches and curve features (composite curve, helix) are not rebuilt.
+        /// </summary>
+        private GeometryRef RequirePatternCurve(object o, string what)
+        {
+            if (o is SketchSegment s && s.GetSketch() is Sketch sk && sk.Is3D())
+                throw new NotSupportedException($"{what}: Kurven aus 3D-Skizzen werden nicht unterstützt.");
+            GeometryRef? g = o is Edge e ? GeometryRef.ToEdge(TopologyCapture.Edge(e)) : ToGeometryRef(o);
+            if (g != null && g.Kind != GeometryRefKind.Unknown) return g;
+            throw new NotSupportedException($"{what}: Bezug {(g == null ? "fehlt" : g.ToString())} – erwartet Skizzenkurve, Skizze oder Modellkante (Verbund- und Helixkurven werden nicht unterstützt).");
         }
 
         /// <summary>Pattern direction or axis: edge, axis, sketch line, plane or face – not a dimension.</summary>

@@ -35,10 +35,11 @@ namespace Spiegelwerk.Build
         private readonly Dictionary<string, object> _substitutes = new Dictionary<string, object>(StringComparer.Ordinal);
 
         /// <summary>
-        /// Writing into the position sketch of a hole: every sketch point there is a hole, so
-        /// a stand-in point must not be a sketch point of its own.
+        /// Writing a sketch in which every sketch point is a hole or a pattern instance (the
+        /// position sketch of a hole, the reference sketch of a sketch driven pattern): a
+        /// stand-in point must not be a sketch point of its own.
         /// </summary>
-        private bool _pointsAreHoles;
+        private bool _everyPointCounts;
 
         public SketchBuilder(BuildContext ctx)
         {
@@ -58,6 +59,7 @@ namespace Spiegelwerk.Build
             Sketch sketch = _sm.ActiveSketch ?? throw new InvalidOperationException("Skizze konnte nicht geöffnet werden.");
 
             SketchMap map;
+            _everyPointCounts = _ctx.PointSketches.Contains(src.Name);
             try
             {
                 map = Write(src, sketch, notes);
@@ -74,6 +76,10 @@ namespace Spiegelwerk.Build
                     _doc.Extension.DeleteSelection2((int)swDeleteSelectionOptions_e.swDelete_Absorbed);
                 }
                 throw;
+            }
+            finally
+            {
+                _everyPointCounts = false;
             }
 
             SwSelect.Clear(_doc);
@@ -98,7 +104,7 @@ namespace Spiegelwerk.Build
             Sketch sketch = _sm.ActiveSketch ?? throw new InvalidOperationException($"Skizze \"{existing.Name}\" konnte nicht bearbeitet werden.");
 
             SketchMap map;
-            _pointsAreHoles = true;
+            _everyPointCounts = true;
             try
             {
                 if (sketch.Is3D()) throw new NotSupportedException($"Skizze \"{existing.Name}\" ist eine 3D-Skizze; erwartet war eine 2D-Positionsskizze.");
@@ -113,7 +119,7 @@ namespace Spiegelwerk.Build
             }
             finally
             {
-                _pointsAreHoles = false;
+                _everyPointCounts = false;
                 SwSelect.Clear(_doc);
                 if (_sm.ActiveSketch != null) _sm.InsertSketch(true);
             }
@@ -450,7 +456,7 @@ namespace Spiegelwerk.Build
                     case SkRefKind.OtherSketchPoint:
                     {
                         Vec3 l = Local(r.Position);
-                        if (_pointsAreHoles)
+                        if (_everyPointCounts)
                         {
                             // End point of a short fixed construction line: no hole of its own.
                             created = (Construction(_sm.CreateLine(l.X, l.Y, 0, l.X + 0.001, l.Y, 0), rm) as SketchLine)?.GetStartPoint2();

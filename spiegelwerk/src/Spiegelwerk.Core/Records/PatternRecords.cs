@@ -78,4 +78,74 @@ namespace Spiegelwerk.Core.Records
         public int Count2 { get; set; }
         public bool EqualSpacing2 { get; set; }
     }
+
+    /// <summary>
+    /// Curve driven pattern: instances along a curve (sketch segment, whole sketch or model
+    /// edge), optionally a second direction. Like the linear pattern, the reverse flags refer
+    /// to the curve's own run, which in the mirrored part may be the other way – the
+    /// placements decide.
+    /// </summary>
+    public sealed class CurvePatternRecord : PatternRecord
+    {
+        public CurvePatternRecord(string name, string typeName) : base(name, typeName)
+        {
+        }
+
+        /// <summary>The curve of direction 1: sketch segment, sketch or edge (never an axis).</summary>
+        public GeometryRef? Curve1 { get; set; }
+
+        public bool Reverse1 { get; set; }
+        public int Count1 { get; set; }
+        public bool EqualSpacing1 { get; set; }
+
+        /// <summary>Distance between instances, or the length covered with <see cref="EqualSpacing1"/>.</summary>
+        public double Spacing1 { get; set; }
+
+        /// <summary>swCurveDrivenPatternCurveMethod_e: transform curve 0, offset curve 1.</summary>
+        public int CurveMethod { get; set; }
+
+        /// <summary>swCurveDrivenPatternAlignment_e: tangent to curve 0, align to seed 1.</summary>
+        public int Alignment { get; set; }
+
+        /// <summary>Face whose normal orients the instances along a 3D curve (newer API versions only).</summary>
+        public GeometryRef? FaceNormal { get; set; }
+
+        public bool HasDirection2 { get; set; }
+        public GeometryRef? Curve2 { get; set; }
+        public bool Reverse2 { get; set; }
+        public int Count2 { get; set; } = 1;
+        public bool EqualSpacing2 { get; set; }
+        public double Spacing2 { get; set; }
+
+        /// <summary>Direction 2 patterns the seed only, not the instances of direction 1.</summary>
+        public bool SeedOnly2 { get; set; }
+
+        /// <summary>Instance indices to read the placements for (seed included).</summary>
+        public int InstanceCount => Count1 * (HasDirection2 ? System.Math.Max(1, Count2) : 1);
+    }
+
+    /// <summary>
+    /// Sketch driven pattern: one instance at each point of a reference sketch, placed by
+    /// moving the reference point (the seed's centroid or a chosen point) there. Pure
+    /// translations, so a mirror changes nothing but the places – the reference sketch and
+    /// the reference point are rebuilt mirrored, and the pattern follows.
+    /// </summary>
+    public sealed class SketchPatternRecord : PatternRecord
+    {
+        public SketchPatternRecord(string name, string typeName, string sketchName) : base(name, typeName)
+        {
+            SketchName = sketchName;
+        }
+
+        /// <summary>The reference sketch, by original name.</summary>
+        public string SketchName { get; }
+
+        public bool UseCentroid { get; set; }
+
+        /// <summary>Chosen reference point (sketch point or vertex) without <see cref="UseCentroid"/>.</summary>
+        public GeometryRef? ReferencePoint { get; set; }
+
+        /// <summary>Points of the reference sketch: an upper bound for the instance indices to read.</summary>
+        public int SketchPointCount { get; set; }
+    }
 }

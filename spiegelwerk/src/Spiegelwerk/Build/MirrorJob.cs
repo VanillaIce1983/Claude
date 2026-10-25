@@ -76,6 +76,8 @@ namespace Spiegelwerk.Build
             new HoleBuilder(),
             new AdvancedHoleBuilder(),
             new PatternBuilder(),
+            new CurvePatternBuilder(),
+            new SketchPatternBuilder(),
         };
 
         public MirrorJob(SldWorks sw)
@@ -120,6 +122,7 @@ namespace Spiegelwerk.Build
             bool separateBody = opt.Target == MirrorTarget.SamePart && (req.Features.Count == 0 || req.Bodies.Count > 0 || seedBodies);
             var ctx = new BuildContext(_sw, target, _math, new Reflection(req.MirrorPlane), opt, report, separateBody);
             foreach (PartOfFeatureRecord part in records.OfType<PartOfFeatureRecord>()) ctx.PartOwners[part.Name] = part.Owner;
+            foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) ctx.PointSketches.Add(pattern.SketchName);
             report.General.Add($"Spiegelebene: {req.MirrorPlane}");
 
             try

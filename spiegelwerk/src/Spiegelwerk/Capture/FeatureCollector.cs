@@ -105,8 +105,9 @@ namespace Spiegelwerk.Capture
         }
 
         /// <summary>
-        /// What a linear or circular pattern repeats: its seed features, the features the seed
-        /// faces belong to, the features that made the seed bodies (as when bodies are selected).
+        /// What a pattern (linear, circular, curve or sketch driven) repeats: its seed features,
+        /// the features the seed faces belong to, the features that made the seed bodies (as
+        /// when bodies are selected).
         /// </summary>
         private static List<Feature> SeedsOf(ModelDoc2 doc, Feature f, ref bool seedBodies)
         {
@@ -131,6 +132,26 @@ namespace Spiegelwerk.Capture
                     finally
                     {
                         cp.ReleaseSelectionAccess();
+                    }
+                    break;
+                case CurveDrivenPatternFeatureData cdp when cdp.AccessSelections(doc, null):
+                    try
+                    {
+                        seedBodies |= AddSeeds(result, cdp.BodyPattern, cdp.PatternFeatureArray, cdp.PatternFaceArray, cdp.PatternBodyArray);
+                    }
+                    finally
+                    {
+                        cdp.ReleaseSelectionAccess();
+                    }
+                    break;
+                case SketchPatternFeatureData sp when sp.AccessSelections(doc, null):
+                    try
+                    {
+                        seedBodies |= AddSeeds(result, sp.BodyPattern, sp.PatternFeatureArray, sp.PatternFaceArray, sp.PatternBodyArray);
+                    }
+                    finally
+                    {
+                        sp.ReleaseSelectionAccess();
                     }
                     break;
             }

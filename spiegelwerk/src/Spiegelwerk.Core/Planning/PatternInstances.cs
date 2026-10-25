@@ -32,6 +32,18 @@ namespace Spiegelwerk.Core.Planning
         }
 
         /// <summary>
+        /// Placements of a sketch driven pattern: the translations that move the reference
+        /// point onto each sketch point. Mirrored (<see cref="Mirror(Affine, Reflection)"/>),
+        /// they are the translations from the mirrored reference point to the mirrored points.
+        /// </summary>
+        public static List<Affine> Translations(Vec3 reference, IEnumerable<Vec3> points)
+        {
+            var result = new List<Affine>();
+            foreach (Vec3 p in points) result.Add(new Affine(Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ, p - reference));
+            return result;
+        }
+
+        /// <summary>
         /// Number of wanted placements that have no counterpart among the actual ones, each
         /// actual placement used at most once. Different counts always leave something unmatched.
         /// </summary>

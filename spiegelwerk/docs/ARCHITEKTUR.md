@@ -42,11 +42,11 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | `Planning` | `DirectionRules` | σ und die Regeln für Richtungsflags und Bogensinn |
 | | `PlaneClassifier` | Welche Ebene trägt die gespiegelte Skizze: vorhandene, versetzte Standardebene oder Drei-Punkte-Ebene |
 | | `ComponentPlacement` | Platzierung des gespiegelten Teils in der Baugruppe |
-| | `PatternInstances` | Lage der Musterinstanzen spiegeln (R ∘ T ∘ R) und als Mengen vergleichen |
+| | `PatternInstances` | Lage der Musterinstanzen spiegeln (R ∘ T ∘ R) und als Mengen vergleichen; Verschiebungen eines Skizzenmusters |
 | | `HoleAxis` | Wo eine Bohrungsachse den Körper verlässt (fernseitige Fläche der erweiterten Bohrung) |
 | `Matching` | `EdgeSignature`, `FaceSignature`, `TopologyMatcher` | Fingerabdrücke und deren Zuordnung im neu aufgebauten Teil |
 | `Verification` | `MassState`, `MassComparison` | Volumen und erstes Moment, gespiegelt und verglichen |
-| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs`, `HoleRecords.cs` mit der gemeinsamen Basis `PositionedHoleRecord` und der Typzuordnung `HoleTypes`, `AdvancedHoleRecords.cs`, `ShellDraftRecords.cs`, `VariableFilletRecords.cs` mit `EdgeLocation`, `FaceFilletRecords.cs`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
+| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs` (linear, kreisförmig, Kurve, Skizze), `HoleRecords.cs` mit der gemeinsamen Basis `PositionedHoleRecord` und der Typzuordnung `HoleTypes`, `AdvancedHoleRecords.cs`, `ShellDraftRecords.cs`, `VariableFilletRecords.cs` mit `EdgeLocation`, `FaceFilletRecords.cs`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
 
 ### Spiegelwerk (Add-In)
 
@@ -73,7 +73,7 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `PlaneResolver` | Liefert für eine Ebene ein Ebenen-Feature im Ziel, für eine Gerade eine Achse |
 | | `TopologyFinder` | Findet Kanten, Flächen, Eckpunkte, Achsen und Skizzen im Ziel |
 | | `SketchBuilder` | Schreibt eine gespiegelte Skizze – neu oder in eine vorhandene (Positionsskizze einer Bohrung) |
-| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, variable Verrundung, Flächen- und vollständige Verrundung, Fase, Wandung, Formschräge, Bohrung, erweiterte Bohrung, Muster |
+| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, variable Verrundung, Flächen- und vollständige Verrundung, Fase, Wandung, Formschräge, Bohrung, erweiterte Bohrung, Muster (linear/kreisförmig, Kurve, Skizze; gemeinsame Bausteine in `PatternSupport`) |
 | | `StepVerifier` | Messen (Volumen, Moment, Flächenproben), Varianten probieren |
 | `AssemblyContext/` | `AssemblyMirror` | Komponente spiegeln, speichern, platzieren |
 
@@ -147,6 +147,10 @@ Ein Muster meldet für jede Instanz die Platzierung Tᵢ: Saat → Instanz (`Get
     Tᵢ′ = R ∘ Tᵢ ∘ R
 
 melden. Eine Verschiebung um d wird zur Verschiebung um R(d), eine Drehung um φ um die Achse a zur Drehung um −φ um R(a) – der Drehsinn kehrt sich um. `PatternBuilder` liest die Platzierungen des neuen Musters, vergleicht sie als **Menge** mit den gespiegelten (`PatternInstances.Unmatched`; die Nummerierung bei zwei Richtungen ist nicht dokumentiert, und bei gleichem Abstand über 360° sind beide Drehsinne richtig) und probiert die Richtungsflags durch, bis die Mengen gleich sind. Damit hängt nichts an der inneren Richtung einer Kante oder Achse im neuen Teil (Tests in `PatternTests`).
+
+Das **Kurvenmuster** (`CurvePatternBuilder`) folgt demselben Prinzip: Die Kurve – Skizzensegment, ganze Skizze oder Modellkante; eine gerade Kante bleibt dabei Kante und wird nicht zur Achse – ist im Ziel gespiegelt neu entstanden, läuft aber womöglich andersherum. Tangentiale Ausrichtung, Kurvenmethode und Abstände ändert die Spiegelung nicht; die Umkehr-Flags entscheidet die Lage der Instanzen (Test `Curve_pattern_tangent_to_an_arc_runs_the_other_way_along_the_mirrored_arc`). Angelegt wird wie im Beispiel der API-Hilfe mit Auswahl (Kurve 1, Richtung 2 Markierung 2, Saat 4/128/256) und `IModelDoc2.FeatureCurvePattern`, das nichts zurückgibt – das neue Feature ist das zuletzt hinzugefügte. `CreateDefinition(swFmCurvePattern)` + `CreateFeature` ist nur Ersatzweg (in manchen Versionen fehlerhaft). Was der Aufruf nur als Flag oder gar nicht nimmt – Kurvenmethode, Ausrichtung, übersprungene Instanzen, die Fläche für die Normalenrichtung (nur neuere API, spät gebunden) –, setzt danach eine einzige Bearbeitung.
+
+Das **Skizzenmuster** (`SketchPatternBuilder`) besteht nur aus Verschiebungen vom Referenzpunkt (Schwerpunkt der Saat oder gewählter Punkt) zu den Punkten der Referenzskizze. Referenzskizze und Referenzpunkt werden gespiegelt neu aufgebaut, das Muster folgt ihnen; es gibt kein Flag umzuschalten, die gespiegelte Lage der Instanzen dient nur der Prüfung (`PatternInstances.Translations`, Tests in `DrivenPatternTests`). In der Referenzskizze zählt jeder Skizzenpunkt als Instanz: Ersatzpunkte für fehlende externe Bezüge werden dort – wie in der Positionsskizze einer Bohrung – Endpunkte fixierter Konstruktionslinien (`BuildContext.PointSketches`). Angelegt wird mit Auswahl (Skizze 64, Referenzpunkt 32, Saat 4/128/256) und `FeatureSketchDrivenPattern`, ersatzweise über `CreateDefinition(swFmSketchPattern)`.
 
 ### Baugruppe
 

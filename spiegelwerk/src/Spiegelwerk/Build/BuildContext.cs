@@ -85,6 +85,12 @@ namespace Spiegelwerk.Build
         /// <summary>Sketch of a hole (original name) → its hole (original name).</summary>
         public Dictionary<string, string> PartOwners { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
+        /// <summary>
+        /// Original names of sketches in which every sketch point is an instance – reference
+        /// sketches of sketch driven patterns: a stand-in there must not be a point of its own.
+        /// </summary>
+        public HashSet<string> PointSketches { get; } = new HashSet<string>(StringComparer.Ordinal);
+
         /// <summary>Original feature name → new feature.</summary>
         public Dictionary<string, Feature> Created { get; } = new Dictionary<string, Feature>(StringComparer.Ordinal);
 

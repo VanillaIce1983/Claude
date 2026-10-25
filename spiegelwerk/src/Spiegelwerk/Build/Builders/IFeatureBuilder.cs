@@ -130,6 +130,18 @@ namespace Spiegelwerk.Build.Builders
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
+        public static bool CurvePattern(ModelDoc2 doc, Feature f, Action<CurveDrivenPatternFeatureData> change)
+        {
+            var d = (CurveDrivenPatternFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool SketchPattern(ModelDoc2 doc, Feature f, Action<SketchPatternFeatureData> change)
+        {
+            var d = (SketchPatternFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
         public static bool LinearPattern(ModelDoc2 doc, Feature f, Action<LinearPatternFeatureData> change)
         {
             var d = (LinearPatternFeatureData)f.GetDefinition();
