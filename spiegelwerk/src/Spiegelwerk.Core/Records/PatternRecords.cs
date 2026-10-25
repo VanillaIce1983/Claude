@@ -145,7 +145,17 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Chosen reference point (sketch point or vertex) without <see cref="UseCentroid"/>.</summary>
         public GeometryRef? ReferencePoint { get; set; }
 
-        /// <summary>Points of the reference sketch: an upper bound for the instance indices to read.</summary>
+        /// <summary>
+        /// The chosen reference point is the origin. It stays the origin only if the mirror
+        /// plane passes through it (always so for a new part, which is mirrored at one of its
+        /// standard planes).
+        /// </summary>
+        public bool ReferenceIsOrigin { get; set; }
+
+        /// <summary>
+        /// Standalone points and arc/ellipse centres of the reference sketch – segment end
+        /// points are no instances: an upper bound for the instance indices to read.
+        /// </summary>
         public int SketchPointCount { get; set; }
     }
 }

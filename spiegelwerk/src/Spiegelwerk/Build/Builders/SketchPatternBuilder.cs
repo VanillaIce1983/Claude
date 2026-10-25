@@ -36,7 +36,14 @@ namespace Spiegelwerk.Build.Builders
                 return Fail($"Die Referenzskizze „{r.SketchName}“ wurde nicht gespiegelt.", notes);
             if (FindSeeds(ctx, r, new List<string>()) == null) return Fail(NoSeeds(r), notes);
             object? point = null;
-            if (!r.UseCentroid)
+            if (r.ReferenceIsOrigin)
+            {
+                // R(0) = 0 only if the mirror plane passes through the origin.
+                if (!ctx.Mirror.Apply(Vec3.Zero).AlmostEquals(Vec3.Zero))
+                    return Fail("Referenzpunkt ist der Ursprung; die Spiegelebene geht nicht durch ihn, gespiegelt liegt er nicht im Ursprung des Ziels.", notes);
+                point = SwDoc.OriginPoint(ctx.Doc);
+            }
+            else if (!r.UseCentroid)
             {
                 point = Find(ctx, r.ReferencePoint, notes);
                 if (point == null) return Fail("Referenzpunkt des Musters im Ziel nicht gefunden.", notes);
@@ -51,7 +58,12 @@ namespace Spiegelwerk.Build.Builders
             if (OptionsDiffer(ctx.Doc, f, r) &&
                 (!FeatureEdit.SketchPattern(ctx.Doc, f, d =>
                 {
-                    if (d.UseCentroid != r.UseCentroid) d.UseCentroid = r.UseCentroid;
+                    if (d.UseCentroid != r.UseCentroid)
+                    {
+                        d.UseCentroid = r.UseCentroid;
+                        // Without the centroid the pattern needs its point.
+                        if (point != null) d.ReferencePoint = point;
+                    }
                     if (d.GeometryPattern != r.GeometryPattern) d.GeometryPattern = r.GeometryPattern;
                 }) || OptionsDiffer(ctx.Doc, f, r)))
                 notes.Add("Schwerpunkt- bzw. Geometriemuster-Option weicht ab und ließ sich nicht übernehmen.");

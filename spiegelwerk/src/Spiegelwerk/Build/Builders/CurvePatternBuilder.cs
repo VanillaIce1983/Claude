@@ -69,6 +69,13 @@ namespace Spiegelwerk.Build.Builders
             {
                 bool ok = FeatureEdit.CurvePattern(ctx.Doc, f, d =>
                 {
+                    // Direction 2 the creation call did not take up from the selection.
+                    if (curve2 != null && !d.Dir2Specified)
+                    {
+                        d.Dir2Specified = true;
+                        d.D2Direction = curve2;
+                        d.D2ReverseDirection = r.Reverse2;
+                    }
                     Apply(d, r);
                     if (r.SkippedItems.Count > 0) d.SkippedItemArray = r.SkippedItems.ToArray();
                     if (faceNormal != null) faceSet = SwLate.Set(d, "D1FaceNormal", faceNormal);
@@ -106,7 +113,8 @@ namespace Spiegelwerk.Build.Builders
         private static Feature? CreateBySelection(BuildContext ctx, CurvePatternRecord r, Seeds seeds, object curve1, object? curve2)
         {
             ModelDoc2 doc = ctx.Doc;
-            Feature? before = doc.Extension.GetLastFeatureAdded();
+            // The name now: the object of an earlier feature need not stay readable.
+            string before = doc.Extension.GetLastFeatureAdded()?.Name ?? "";
             SwSelect.Clear(doc);
             try
             {
@@ -131,7 +139,7 @@ namespace Spiegelwerk.Build.Builders
                 SwSelect.Clear(doc);
             }
             Feature? after = doc.Extension.GetLastFeatureAdded();
-            return after != null && (before == null || after.Name != before.Name) && after.GetDefinition() is CurveDrivenPatternFeatureData ? after : null;
+            return after != null && after.Name != before && after.GetDefinition() is CurveDrivenPatternFeatureData ? after : null;
         }
 
         private static Feature? CreateByDefinition(BuildContext ctx, CurvePatternRecord r, Seeds seeds, object curve1, object? curve2)

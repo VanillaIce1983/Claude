@@ -18,7 +18,10 @@ namespace Spiegelwerk.Build.Builders
     /// </summary>
     internal static class PatternSupport
     {
-        /// <summary>Selection marks of the seeds, the same for all pattern types (API help).</summary>
+        /// <summary>
+        /// Selection marks of the seeds, the same for all pattern types: features 4 per the API
+        /// help; faces 128 and bodies 256 are not documented for every type (STOLPERSTEINE 65).
+        /// </summary>
         public const int FeatureMark = 4, FaceMark = 128, BodyMark = 256;
 
         public sealed class Seeds

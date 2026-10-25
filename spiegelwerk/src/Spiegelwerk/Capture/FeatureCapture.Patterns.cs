@@ -149,13 +149,23 @@ namespace Spiegelwerk.Capture
                 var r = new SketchPatternRecord(f.Name, type, SwDoc.SketchNameOf(sketch))
                 {
                     UseCentroid = d.UseCentroid,
-                    SketchPointCount = (sketch.GetSketchPoints2() as object[])?.Length ?? 0,
+                    SketchPointCount = InstancePointBound(sketch),
                 };
                 if (!r.UseCentroid)
                 {
-                    r.ReferencePoint = ToGeometryRef(d.ReferencePoint);
-                    if (r.ReferencePoint == null || r.ReferencePoint.Kind == GeometryRefKind.Unknown)
-                        throw new NotSupportedException("Referenzpunkt des Musters nicht lesbar (erwartet: Skizzenpunkt oder Eckpunkt).");
+                    object point = d.ReferencePoint;
+                    if (IsOrigin(point))
+                    {
+                        r.ReferenceIsOrigin = true;
+                    }
+                    else
+                    {
+                        if (point is SketchPoint sp && sp.GetSketch() is Sketch owner && owner.Is3D())
+                            throw new NotSupportedException("Referenzpunkt in einer 3D-Skizze wird nicht unterstützt.");
+                        r.ReferencePoint = ToGeometryRef(point);
+                        if (r.ReferencePoint == null || r.ReferencePoint.Kind == GeometryRefKind.Unknown)
+                            throw new NotSupportedException("Referenzpunkt des Musters nicht lesbar (erwartet: Skizzenpunkt, Eckpunkt oder Ursprung).");
+                    }
                 }
 
                 ReadSeeds(r, d.BodyPattern, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, null);
@@ -225,6 +235,31 @@ namespace Spiegelwerk.Capture
             if (SwLate.Get(d, "FeatureScope") is bool scope && scope && SwLate.Get(d, "AutoSelect") is bool auto && !auto)
                 r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
         }
+
+        /// <summary>
+        /// Upper bound for the instances of a sketch driven pattern: standalone points plus
+        /// arc and ellipse centres – not the end points of segments, which in a layout sketch
+        /// can be many times more and would push the count past <see cref="MaxInstancesRead"/>.
+        /// </summary>
+        private static int InstancePointBound(Sketch sketch)
+        {
+            try
+            {
+                return sketch.GetUserPointsCount() + sketch.GetArcCount() + sketch.GetEllipseCount();
+            }
+            catch (Exception)
+            {
+                return (sketch.GetSketchPoints2() as object[])?.Length ?? 0;
+            }
+        }
+
+        /// <summary>The origin, as a point of the origin "sketch" or as the origin feature itself.</summary>
+        private static bool IsOrigin(object o) => o switch
+        {
+            SketchPoint p => p.GetSketch() is Feature owner && owner.GetTypeName2() == "OriginProfileFeature",
+            Feature f => f.GetTypeName2() == "OriginProfileFeature",
+            _ => false,
+        };
 
         /// <summary>
         /// Curve of a curve driven pattern: sketch segment, whole sketch or model edge – a
