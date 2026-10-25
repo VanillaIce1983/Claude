@@ -260,6 +260,7 @@ namespace Spiegelwerk.Build
             // A hole's sketches belong to the hole alone and go with it.
             BuilderSupport.Delete(ctx, result.Feature!, record is PositionedHoleRecord);
             if (record is PositionedHoleRecord hole) ctx.ForgetSketch(hole.PositionSketchName);
+            result.RemoveHelpers?.Invoke();
             ctx.Unregister(record.Name);
             var failed = BuildResult.Failed("Das Feature hätte die Originalkörper verändert und wurde wieder entfernt.");
             failed.Notes.AddRange(result.Notes);

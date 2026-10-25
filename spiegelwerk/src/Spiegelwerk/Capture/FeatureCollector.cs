@@ -93,8 +93,11 @@ namespace Spiegelwerk.Capture
                 foreach (Feature seed in SeedsOf(doc, queue.Dequeue(), ref seedBodies))
                     if (wanted.Add(seed.Name)) queue.Enqueue(seed);
 
-            // Sketches the wanted features are built from (absorbed or shared).
-            foreach (Feature f in all.Where(x => wanted.Contains(x.Name)).ToList())
+            // Sketches the wanted features are built from (absorbed or shared). Not those of
+            // planes, axes and coordinate systems: they are rebuilt from their geometry alone,
+            // and a sketch they sit on would be an extra copy – or, as a 3D sketch, a feature
+            // without an equivalent that keeps "delete original" from running.
+            foreach (Feature f in all.Where(x => wanted.Contains(x.Name) && !IsDatum(x)).ToList())
             {
                 foreach (Feature sub in SwDoc.SubFeatures(f).Where(SwDoc.IsSketch)) wanted.Add(sub.Name);
                 if (f.GetParents() is object[] parents)
@@ -103,6 +106,8 @@ namespace Spiegelwerk.Capture
 
             return all.Where(f => wanted.Contains(f.Name) && !SwDoc.IsSystemFeature(f) && !standard.Contains(f.Name)).ToList();
         }
+
+        private static bool IsDatum(Feature f) => f.GetTypeName2() is "RefPlane" or "RefAxis" or "CoordSys";
 
         /// <summary>
         /// What a pattern (linear, circular, curve, sketch or table driven) repeats: its seed

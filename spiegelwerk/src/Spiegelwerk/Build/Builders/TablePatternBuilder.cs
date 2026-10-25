@@ -67,7 +67,10 @@ namespace Spiegelwerk.Build.Builders
                 if (created) ctx.Planes.RemoveCoordinateSystem(cs);
                 return Fail(refused ?? "SOLIDWORKS hat das Tabellenmuster nicht erzeugt.", notes);
             }
-            return Finish(ctx, r, f, cs, helper, notes);
+            BuildResult result = Finish(ctx, r, f, cs, helper, notes);
+            // Removed again by the job (it reached the original): the helper made for it goes too.
+            if (created) result.RemoveHelpers = () => ctx.Planes.RemoveCoordinateSystem(cs);
+            return result;
         }
 
         /// <summary>Reference point and seeds looked up again (a helper coordinate system rebuilt the model), then the pattern.</summary>

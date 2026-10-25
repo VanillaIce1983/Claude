@@ -45,6 +45,9 @@ namespace Spiegelwerk.Build.Builders
         public List<string> Notes { get; } = new List<string>();
         public List<Alternative> Alternatives { get; } = new List<Alternative>();
 
+        /// <summary>Removes helpers made for this feature alone – called if the job removes the feature again.</summary>
+        public Action? RemoveHelpers { get; set; }
+
         public bool Success => Feature != null && Status != ReportStatus.Failed;
 
         public static BuildResult Ok(Feature f, string message) => new BuildResult(f, ReportStatus.Ok, message);

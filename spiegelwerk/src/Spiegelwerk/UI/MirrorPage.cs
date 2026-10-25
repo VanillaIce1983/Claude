@@ -53,6 +53,9 @@ namespace Spiegelwerk.UI
         private readonly List<Body2> _bodies = new List<Body2>();
         private readonly List<Component2> _components = new List<Component2>();
 
+        /// <summary>Selected items ReadItems could not take over.</summary>
+        private int _droppedItems;
+
         public MirrorPage(SldWorks sw, ModelDoc2 doc)
         {
             _sw = sw;
@@ -200,6 +203,13 @@ namespace Spiegelwerk.UI
                 Message("Keine gültige Spiegelebene gewählt (ebene Fläche oder Referenzebene).", swMessageBoxIcon_e.swMbStop);
                 return;
             }
+            // Never fall back to the whole part because a selection could not be taken over.
+            if (_droppedItems > 0)
+            {
+                Message($"{_droppedItems} der gewählten Elemente lassen sich nicht spiegeln (z. B. temporäre Achsen). Bitte die Auswahl anpassen.",
+                    swMessageBoxIcon_e.swMbStop);
+                return;
+            }
             try
             {
                 MirrorReport report;
@@ -275,18 +285,22 @@ namespace Spiegelwerk.UI
         {
             var sm = (SelectionMgr)_doc.SelectionManager;
             int n = sm.GetSelectedObjectCount2(ItemMark);
+            _droppedItems = n;
             for (int i = 1; i <= n; i++)
             {
                 switch (sm.GetSelectedObject6(i, ItemMark))
                 {
                     case Component2 c:
                         _components.Add(c);
+                        _droppedItems--;
                         break;
                     case Body2 b:
                         _bodies.Add(b);
+                        _droppedItems--;
                         break;
                     case Feature f:
                         _features.Add(f);
+                        _droppedItems--;
                         break;
                 }
             }
@@ -310,6 +324,9 @@ namespace Spiegelwerk.UI
             if (Id == SelPlane && Selection is Face2 f) return TopologyCapture.PlaneOfFace(f).HasValue;
             // Sub-assemblies, virtual and suppressed components cannot be mirrored: refuse them right away.
             if (Id == SelItems && Selection is Component2 c) return AssemblyMirror.CheckComponent(c) == null;
+            // In a part only what ReadItems takes over: a temporary axis, for one, is no feature
+            // and would be dropped – with nothing else selected the whole part would be mirrored.
+            if (Id == SelItems && !_isAssembly) return Selection is Feature || Selection is Body2;
             return true;
         }
 
