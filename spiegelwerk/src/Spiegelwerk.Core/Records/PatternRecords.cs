@@ -147,8 +147,8 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>
         /// The chosen reference point is the origin. It stays the origin only if the mirror
-        /// plane passes through it (always so for a new part, which is mirrored at one of its
-        /// standard planes).
+        /// plane passes through it – always so in the assembly context, where the part is
+        /// mirrored at one of its standard planes; otherwise it depends on the chosen plane.
         /// </summary>
         public bool ReferenceIsOrigin { get; set; }
 

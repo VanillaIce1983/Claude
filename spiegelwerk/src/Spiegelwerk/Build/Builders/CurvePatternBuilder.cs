@@ -69,17 +69,20 @@ namespace Spiegelwerk.Build.Builders
             {
                 bool ok = FeatureEdit.CurvePattern(ctx.Doc, f, d =>
                 {
-                    // Direction 2 the creation call did not take up from the selection.
-                    if (curve2 != null && !d.Dir2Specified)
-                    {
-                        d.Dir2Specified = true;
-                        d.D2Direction = curve2;
-                        d.D2ReverseDirection = r.Reverse2;
-                    }
                     Apply(d, r);
                     if (r.SkippedItems.Count > 0) d.SkippedItemArray = r.SkippedItems.ToArray();
                     if (faceNormal != null) faceSet = SwLate.Set(d, "D1FaceNormal", faceNormal);
                 });
+                // Direction 2 the creation call did not take up from the selection: an edit of
+                // its own, so that a refusal can cost direction 2 only, not the values above.
+                if (curve2 != null && differing.Contains("Richtung 2"))
+                    FeatureEdit.CurvePattern(ctx.Doc, f, d =>
+                    {
+                        d.Dir2Specified = true;
+                        d.D2Direction = curve2;
+                        d.D2ReverseDirection = r.Reverse2;
+                        Apply(d, r);
+                    });
                 differing = Read(ctx.Doc, f, d => Differences(d, r)) ?? differing;
                 if (!ok && r.SkippedItems.Count > 0)
                     notes.Add($"Die {r.SkippedItems.Count} übersprungenen Instanzen ließen sich nicht übernehmen.");
