@@ -30,14 +30,21 @@ namespace Spiegelwerk.Capture
             {
                 d.ReleaseSelectionAccess();
             }
-            if (r.RemovedFaces.Count == 0) r.BodyFace = OuterFaceOfShelledBody(f);
+            if (r.RemovedFaces.Count == 0)
+            {
+                r.BodyFace = OuterFaceOfShelledBody(f);
+                // Shelled outward, the original surface became the cavity wall: seen from the
+                // material its normal is reversed compared with the face before the shell.
+                if (r.BodyFace != null && r.Direction != 0 && r.BodyFace.Kind == SurfaceKind.Plane) r.BodyFace.Normal = -r.BodyFace.Normal;
+            }
             return r;
         }
 
         /// <summary>
         /// Closed shell: with the rollback bar right after the shell, the body carrying the
-        /// shell's faces is the hollowed one; any of its faces made by another feature is an
-        /// outer face, unchanged by the shell and therefore present in the target before it.
+        /// shell's faces is the hollowed one; any of its faces made by another feature lies
+        /// where a face of the body was before the shell (inward: still the outside; outward:
+        /// now the cavity wall). Its place identifies the body in the target.
         /// </summary>
         private FaceSignature? OuterFaceOfShelledBody(Feature shell)
         {

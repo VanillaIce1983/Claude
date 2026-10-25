@@ -1,6 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
+using Spiegelwerk.Capture;
+using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
 using static Spiegelwerk.Build.Builders.BuilderSupport;
@@ -53,7 +57,7 @@ namespace Spiegelwerk.Build.Builders
                 List<Body2> candidates = ctx.SeparateBody ? ctx.OwnBodies() : SwDoc.SolidBodies(doc);
                 if (candidates.Count == 0)
                     return Fail("Es gibt noch keinen gespiegelten Körper, den die Wandung aushöhlen könnte; das Original bleibt unberührt.", notes);
-                Body2? body = ShelledBody(ctx, r, candidates, notes);
+                Body2? body = ShelledBody(ctx, r, candidates);
                 if (body == null)
                     return Fail("Geschlossene Wandung: der ausgehöhlte Körper ist im Ziel nicht eindeutig.", notes);
                 f = Create(doc, new List<object> { body }, r);
@@ -89,15 +93,23 @@ namespace Spiegelwerk.Build.Builders
         }
 
         /// <summary>
-        /// The body a closed shell hollows: the one carrying the mirrored outer face, or the
-        /// only candidate. Null if that is not clear.
+        /// The body a closed shell hollows: the candidate with a face through the mirrored
+        /// sample point of the captured face; if two touch there (stacked blocks), the one whose
+        /// face also matches type, area and normal. Without a captured face only a single
+        /// candidate is taken. Null if it is not clear – then no shell rather than the wrong body.
         /// </summary>
-        private static Body2? ShelledBody(BuildContext ctx, ShellRecord r, List<Body2> candidates, List<string> notes)
+        private static Body2? ShelledBody(BuildContext ctx, ShellRecord r, List<Body2> candidates)
         {
-            if (r.BodyFace != null && ctx.Topology.FindFace(r.BodyFace.Mirror(ctx.Mirror), notes)?.GetBody() is Body2 body &&
-                (!ctx.SeparateBody || ctx.IsOwnBody(body)))
-                return body;
-            return candidates.Count == 1 ? candidates[0] : null;
+            if (r.BodyFace == null) return candidates.Count == 1 ? candidates[0] : null;
+            FaceSignature wanted = r.BodyFace.Mirror(ctx.Mirror);
+            var hits = candidates
+                .Select(b => (body: b, faces: ((b.GetFaces() as object[]) ?? Array.Empty<object>()).OfType<Face2>()
+                    .Where(face => TopologyCapture.DistanceToFace(face, wanted.Sample) <= Tol.Length).ToList()))
+                .Where(h => h.faces.Count > 0)
+                .ToList();
+            if (hits.Count == 1) return hits[0].body;
+            var exact = hits.Where(h => h.faces.Any(face => wanted.CouldBe(TopologyCapture.Face(face)))).ToList();
+            return exact.Count == 1 ? exact[0].body : null;
         }
 
         /// <summary>

@@ -37,8 +37,9 @@ namespace Spiegelwerk.Core.Records
         public List<FaceThickness> MultiThickness { get; } = new List<FaceThickness>();
 
         /// <summary>
-        /// Closed shell: an outer face of the body it hollowed (outer faces are not changed by
-        /// the shell). Identifies the body in the target, where several may exist.
+        /// Closed shell: a face of the hollowed body that the shell did not make, as it was
+        /// before the shell (the planar normal reversed for an outward shell). Its sample point
+        /// identifies the body in the target, where several may exist.
         /// </summary>
         public FaceSignature? BodyFace { get; set; }
     }
