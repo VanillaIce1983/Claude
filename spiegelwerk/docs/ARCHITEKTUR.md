@@ -45,7 +45,7 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `PatternInstances` | Lage der Musterinstanzen spiegeln (R ∘ T ∘ R) und als Mengen vergleichen |
 | `Matching` | `EdgeSignature`, `FaceSignature`, `TopologyMatcher` | Fingerabdrücke und deren Zuordnung im neu aufgebauten Teil |
 | `Verification` | `MassState`, `MassComparison` | Volumen und erstes Moment, gespiegelt und verglichen |
-| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs`, `HoleRecords.cs` mit der Typzuordnung `HoleTypes`, `ShellDraftRecords.cs`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
+| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs`, `HoleRecords.cs` mit der Typzuordnung `HoleTypes`, `ShellDraftRecords.cs`, `VariableFilletRecords.cs` mit `EdgeLocation`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
 
 ### Spiegelwerk (Add-In)
 
@@ -63,7 +63,7 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `SwPreferences`, `SketchInputScope`, `UpdateFreeze` | Benutzereinstellungen und Anzeige während des Laufs abschalten und wiederherstellen |
 | `Capture/` | `FeatureCollector` | Welche Features, in Erstellungsreihenfolge |
 | | `SketchCapture` | `ISketch` → `SketchModel` |
-| | `FeatureCapture` (+ `.SweepLoft`, `.Patterns`, `.Holes`, `.ShellDraft`) | Feature-Definitionen → `FeatureRecord` (mit `AccessSelections`) |
+| | `FeatureCapture` (+ `.SweepLoft`, `.Patterns`, `.Holes`, `.ShellDraft`, `.VariableFillet`) | Feature-Definitionen → `FeatureRecord` (mit `AccessSelections`) |
 | | `TopologyCapture` | Kante/Fläche/Eckpunkt → Fingerabdruck |
 | | `MassCapture` | Volumenänderung und Flächenproben jedes Features über die Rückrollleiste |
 | `Build/` | `MirrorJob` | Der ganze Lauf; neues Teil anlegen, Gleichungen kopieren, Original löschen |
@@ -71,7 +71,7 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `PlaneResolver` | Liefert für eine Ebene ein Ebenen-Feature im Ziel, für eine Gerade eine Achse |
 | | `TopologyFinder` | Findet Kanten, Flächen, Eckpunkte, Achsen und Skizzen im Ziel |
 | | `SketchBuilder` | Schreibt eine gespiegelte Skizze – neu oder in eine vorhandene (Positionsskizze einer Bohrung) |
-| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, Fase, Wandung, Formschräge, Bohrung, Muster |
+| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, variable Verrundung, Fase, Wandung, Formschräge, Bohrung, Muster |
 | | `StepVerifier` | Messen (Volumen, Moment, Flächenproben), Varianten probieren |
 | `AssemblyContext/` | `AssemblyMirror` | Komponente spiegeln, speichern, platzieren |
 
@@ -166,6 +166,12 @@ Eine Bohrung des Bohrungsassistenten besteht aus dem Feature und zwei eigenen Sk
 4. **Zählen:** Die Kopie muss so viele Bohrungen haben wie das Original.
 
 Die Bohrrichtung bezieht sich auf die Normale der Positionsskizze. Auf einer Fläche ist das die Außennormale, und die bleibt bei einer Spiegelung außen (σ = +1) – das Flag „Richtung umkehren“ bleibt. Liegt die Bohrung auf einer Ebene (oder steht eine Ebene für eine nicht gefundene Fläche), kann die Skizze andersherum liegen; dann folgt das Flag σ wie bei Extrusionen. Ersatzpunkte für fehlende Skizzenbezüge sind in der Positionsskizze Endpunkte fixierter Konstruktionslinien, denn jeder eigene Skizzenpunkt wäre eine zusätzliche Bohrung. Maße werden nicht gespiegelt, auch nicht die Gewinderichtung: Ein Gegenstück bekommt dieselben Bohrungen mit denselben Rechtsgewinden. Eine geometrische Spiegelung würde Linksgewinde ergeben; die kosmetische Gewindedarstellung trägt aber gar keine Drehrichtung.
+
+## Variable Verrundung
+
+Radien ändern sich bei einer Spiegelung nicht, wohl aber die Richtung, in der eine Kante läuft. Eckradien hängen an Eckpunkten und werden über deren gespiegelte Lage zugeordnet. Kontrollpunkte hängen an einer Kante und einer Lage entlang dieser Kante, gezählt von ihrem Anfang. Läuft die neu aufgebaute Kante andersherum als die gespiegelte, wird die Lage vom anderen Ende gezählt (`EdgeLocation.Map`, Tests in `VariableFilletTests`); bei geschlossenen Kanten legt der Kern die Naht frei, dort wird nichts geraten.
+
+`FeatureFillet3` legt die Verrundung an; in welcher Reihenfolge es Radien und Kontrollpunkte erwartet, ist nicht dokumentiert. Deshalb werden alle Werte danach auf den Feature-Daten gesetzt, unter `AccessSelections` – dann ist das Modell vor die Verrundung zurückgerollt, und ihre Kanten und Eckpunkte existieren: Eckradius je Eckpunkt nach Lage, Kontrollpunkte je Kante nach Anzahl (SOLIDWORKS beginnt mit drei je Kante bei 25, 50, 75 %), Übergang, Überlauf, Fortsetzung wie gelesen.
 
 ## Wandung und Formschräge
 

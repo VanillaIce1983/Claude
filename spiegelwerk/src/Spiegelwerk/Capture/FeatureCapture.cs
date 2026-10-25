@@ -47,6 +47,9 @@ namespace Spiegelwerk.Capture
                         return CaptureExtrude(f, type, ex);
                     case RevolveFeatureData2 rev:
                         return CaptureRevolve(f, type, rev);
+                    // Before the simple fillet: a variable fillet's data might answer to both.
+                    case VariableFilletFeatureData2 vf:
+                        return CaptureVariableFillet(f, type, vf);
                     case SimpleFilletFeatureData2 fil:
                         return CaptureFillet(f, type, fil);
                     case ChamferFeatureData2 ch:
@@ -393,7 +396,6 @@ namespace Spiegelwerk.Capture
                                "Abhilfe: im Original durch die gespiegelten Einzel-Features ersetzen oder nach dem Lauf von Hand spiegeln.",
             "CurvePattern" or "SketchPattern" or "TablePattern" or "FillPattern" or "DimPattern" or "VarPattern" =>
                 "Dieses Muster wird nicht unterstützt (nur lineare und kreisförmige Muster).",
-            "VarFillet" => "Variable Verrundung wird nicht unterstützt.",
             _ => $"Feature-Typ {type} wird nicht unterstützt.",
         };
     }

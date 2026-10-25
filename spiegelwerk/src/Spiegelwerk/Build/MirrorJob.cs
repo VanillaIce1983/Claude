@@ -68,6 +68,7 @@ namespace Spiegelwerk.Build
             new SweepBuilder(),
             new LoftBuilder(),
             new FilletBuilder(),
+            new VariableFilletBuilder(),
             new ChamferBuilder(),
             new ShellBuilder(),
             new DraftBuilder(),

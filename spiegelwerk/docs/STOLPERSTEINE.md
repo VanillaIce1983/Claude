@@ -132,6 +132,13 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 87. **Trennlinien.** Eine Trennlinie mit Lücke ist keine; die „andere Seite“ je Kante hängt an der Kantenorientierung. → Alle Kanten oder keine Formschräge; Seiten übernehmen, Gegenseite als Variante. Die Zuordnung der Seiten-Flags zu den Kanten folgt der Auswahlreihenfolge (Annahme, siehe Tabelle).
 88. **Körper-Formschrägen und DraftXpert** lassen sich über `IDraftFeatureData2` nicht erkennen; sie werden als gewöhnliche Formschräge neu aufgebaut.
 
+## Variable Verrundung
+
+89. **Reihenfolge der Radien bei `FeatureFillet3` ist nicht dokumentiert.** → Anlegen mit einer plausiblen Reihenfolge (Kantenenden in Auswahlreihenfolge), dann jeden Eckradius über `SetRadius(Eckpunkt, …)` setzen; die Eckpunkte werden unter `AccessSelections` aus den Kanten der neuen Verrundung gelesen und nach Lage zugeordnet.
+90. **Kontrollpunkte zählen vom Kantenanfang.** Die gespiegelte Kante kann im neuen Teil andersherum laufen; 25 % wären dann 75 %. → Anfang und Ende der neuen Kante mit der gespiegelten vergleichen und die Lage notfalls von der anderen Seite zählen. Ob die Lage als Bruchteil oder in Prozent gemeldet wird, ist nicht dokumentiert: Werte über 1 gelten als Prozent.
+91. **Kontrollpunkte gibt es nur in der Anzahl, die die Verrundung hat** (anfangs drei je Kante). → Nur übertragen, wenn die Anzahl je Kante mit dem Original übereinstimmt; sonst Hinweis, und die Prüfung zeigt die Abweichung.
+92. **Variable und einfache Verrundung** könnten beide Datenschnittstellen beantworten. → Die variable zuerst abfragen.
+
 ## Was beim ersten Test in SOLIDWORKS zu prüfen ist
 
 Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in einer laufenden Sitzung erprobt. Diese Stellen beruhen auf der API-Hilfe und offiziellen Beispielen, wo diese uneindeutig sind; Spiegelwerk fängt sie ab, der Bericht zeigt, welcher Weg genommen wurde:
@@ -157,6 +164,8 @@ Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in eine
 | Bohrung über Datenobjekt | `CreateDefinition(swFmHoleWzd)` + `InitializeHole` + Fläche am Punkt gewählt + `CreateFeature` (Beispiel der Hilfe) | `HoleWizard5` mit −1 für die typabhängigen Werte |
 | Positionsskizze der neuen Bohrung | 2D-Skizze auf ebener Fläche, über `GetSketchPoints` zu finden, per `EditSketch` beschreibbar | sonst wird die Bohrung entfernt und gemeldet |
 | Wandung | offene Flächen mit Markierung 1 (Beispiel eines Drittanbieters), sonst 0; `Direction` 0/1 = innen/außen | Richtung wird nach dem Anlegen verglichen und gesetzt; Alternative für die Prüfung |
+| Variable Verrundung | Kanten mit Markierung 1, `FeatureFillet3` mit Typ „variabler Radius“ | alle Werte danach über die Feature-Daten |
+| Lage der Kontrollpunkte | Bruchteil 0–1 oder Prozent, ab Kantenanfang | Prüfung zeigt Abweichungen |
 | Geschlossene Wandung | Körper mit Markierung 1 (sonst 0) wählen | bei genau einem Körper auch ohne Auswahl |
 | Formschräge | Zugbezug 1, Flächen 2, Trennlinien 4 (API-Hilfe) | — |
 | Seiten einer Trennlinie | `SetOtherFacesFlagAtIndex` zählt in Auswahlreihenfolge | Variante „andere Seite“ für die Prüfung |
@@ -165,4 +174,4 @@ Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in eine
 | Genauigkeit der Masseneigenschaften | relativ 1e-7 | sonst Untergrenze in `MassComparison.NoiseRelative` anpassen |
 | Schließen des Teilfensters in der Baugruppe | `CloseDoc` schließt nur das Fenster, die Baugruppe hält das Teil geladen | — |
 
-Ein guter erster Test: einfache Platte mit Tasche und Verrundung auf *vorne*, an *rechts* gespiegelt, in ein neues Teil – dann dasselbe mit einer Skizze auf *rechts* (σ = −1), mit einer schrägen Hilfsebene und mit einer Tasche, deren Skizze oberhalb des Teils liegt („bis Fläche“). Danach: ein lineares Muster entlang einer Kante und ein Kreismuster mit 3 × 40° um eine Referenzachse (Richtung muss im Bericht „geprüft“ oder „korrigiert“ heißen), eine Austragung eines Quadrats mit 90° Verdrehung entlang einer Geraden und eine Ausformung zwischen einem Quadrat und einem um 45° gedrehten Quadrat (Verbinder). Für Bohrungen: drei M6-Senkbohrungen auf einer Platte, mit Abständen zu den Kanten bemaßt, an *rechts* gespiegelt – im Bericht „3 × M6“ ohne Hinweis auf nicht übernommene Maße – und ein Muster dieser Bohrung. Für Wandung und Formschräge: ein Napf mit offener Oberseite und dickerem Boden, mit 3° Formschräge an der Ebene *oben* – einmal an *rechts*, einmal an *oben* gespiegelt (σ = −1 für die Zugrichtung).
+Ein guter erster Test: einfache Platte mit Tasche und Verrundung auf *vorne*, an *rechts* gespiegelt, in ein neues Teil – dann dasselbe mit einer Skizze auf *rechts* (σ = −1), mit einer schrägen Hilfsebene und mit einer Tasche, deren Skizze oberhalb des Teils liegt („bis Fläche“). Danach: ein lineares Muster entlang einer Kante und ein Kreismuster mit 3 × 40° um eine Referenzachse (Richtung muss im Bericht „geprüft“ oder „korrigiert“ heißen), eine Austragung eines Quadrats mit 90° Verdrehung entlang einer Geraden und eine Ausformung zwischen einem Quadrat und einem um 45° gedrehten Quadrat (Verbinder). Für Bohrungen: drei M6-Senkbohrungen auf einer Platte, mit Abständen zu den Kanten bemaßt, an *rechts* gespiegelt – im Bericht „3 × M6“ ohne Hinweis auf nicht übernommene Maße – und ein Muster dieser Bohrung. Für Wandung und Formschräge: ein Napf mit offener Oberseite und dickerem Boden, mit 3° Formschräge an der Ebene *oben* – einmal an *rechts*, einmal an *oben* gespiegelt (σ = −1 für die Zugrichtung). Für die variable Verrundung: eine Kante mit 2 mm am einen und 5 mm am anderen Ende und einem Kontrollpunkt mit 3 mm bei 25 % – gespiegelt muss der dünne Teil am gespiegelten Ende liegen.
