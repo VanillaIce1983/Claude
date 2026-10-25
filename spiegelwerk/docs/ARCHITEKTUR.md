@@ -175,7 +175,7 @@ Radien ändern sich bei einer Spiegelung nicht, wohl aber die Richtung, in der e
 
 ## Flächen- und vollständige Verrundung
 
-Beide beziehen sich nur auf Flächen: zwei Flächengruppen (Flächenverrundung) oder zwei Seitengruppen und eine Mittelgruppe (vollständige Verrundung). Die Flächen werden über ihre gespiegelten Fingerabdrücke gefunden und mit den dokumentierten Markierungen gewählt (Gruppe 1: 2, Gruppe 2: 4, Mitte: 512). Fehlt eine Fläche, entsteht keine Verrundung – zwischen anderen Flächen wäre es eine andere. Die Flags „Normale umkehren“ beziehen sich auf die Außennormalen, die eine Spiegelung außen lässt; sie gehen unverändert als Optionen mit, die Gegenrichtung bleibt als Variante für die Prüfung. Haltelinien werden danach auf den Feature-Daten gesetzt.
+Beide beziehen sich nur auf Flächen: zwei Flächengruppen (Flächenverrundung) oder zwei Seitengruppen und eine Mittelgruppe (vollständige Verrundung). Die Flächen werden über ihre gespiegelten Fingerabdrücke gefunden und mit den dokumentierten Markierungen gewählt (Gruppe 1: 2, Gruppe 2: 4, Mitte: 512). Fehlt eine Fläche, entsteht keine Verrundung – zwischen anderen Flächen wäre es eine andere. Die Flags „Normale umkehren“ beziehen sich auf die Außennormalen, die eine Spiegelung außen lässt; sie gehen unverändert als Optionen mit, die Gegenrichtung beider Gruppen zusammen und jeder einzeln bleibt als Variante für die Prüfung. Haltelinien werden danach auf den Feature-Daten gesetzt; mit Haltelinien ist der gespeicherte Radius nur ein Platzhalter für das Anlegen.
 
 ## Wandung und Formschräge
 

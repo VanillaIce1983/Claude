@@ -33,14 +33,14 @@ namespace Spiegelwerk.Build.Builders
             if (set1 == null || set2 == null || center == null)
                 return Fail("Eine Fläche der Verrundung wurde im Ziel nicht gefunden.", notes);
 
+            // Hold lines define the fillet's size: a missing one would make it a different fillet.
             var holds = new List<object>();
             foreach (EdgeSignature e in r.HoldLines)
             {
                 Edge? found = ctx.Topology.FindEdge(e.Mirror(ctx.Mirror), notes);
-                if (found != null) holds.Add(Safe(found)!);
+                if (found == null) return Fail("Eine Haltelinie der Flächenverrundung wurde im Ziel nicht gefunden.", notes);
+                holds.Add(Safe(found)!);
             }
-            if (holds.Count < r.HoldLines.Count)
-                notes.Add($"{r.HoldLines.Count - holds.Count} von {r.HoldLines.Count} Haltelinien nicht gefunden.");
 
             int options = 0;
             if (r.Propagate) options |= (int)swFeatureFilletOptions_e.swFeatureFilletPropagate;
@@ -51,9 +51,59 @@ namespace Spiegelwerk.Build.Builders
             if (r.ReverseNormal2) options |= (int)swFeatureFilletOptions_e.swFeatureFilletReverseFace2Dir;
 
             ModelDoc2 doc = ctx.Doc;
+            Feature? f = Create(doc, r, set1, set2, center, options, r.Radius);
+            // With hold lines the radius is not used (the stored value may be anything); a
+            // radius that does not fit only has to get the fillet created until they take over.
+            if (f == null && holds.Count > 0)
+                f = Create(doc, r, set1, set2, center, options, r.Radius / 10) ?? Create(doc, r, set1, set2, center, options, 1e-4);
+            if (f == null) return Fail("SOLIDWORKS hat die Verrundung nicht erzeugt.", notes);
+
+            if (r.Kind == FaceFilletKind.Face)
+            {
+                bool ok = FeatureEdit.SimpleFillet(doc, f, d =>
+                {
+                    if (d.get_ReverseFaceNormal(Set1) != r.ReverseNormal1) d.set_ReverseFaceNormal(Set1, r.ReverseNormal1);
+                    if (d.get_ReverseFaceNormal(Set2) != r.ReverseNormal2) d.set_ReverseFaceNormal(Set2, r.ReverseNormal2);
+                    if (holds.Count > 0) d.HoldLines = holds.ToArray();
+                });
+                if (!ok && holds.Count > 0)
+                {
+                    Delete(ctx, f);
+                    return Fail("Die Haltelinien ließen sich nicht setzen; ohne sie wäre es eine andere Verrundung – sie wurde wieder entfernt.", notes);
+                }
+                if (!ok) notes.Add("Die Normalenrichtung der Flächengruppen ließ sich nicht prüfen.");
+            }
+
+            ctx.Register(r.Name, f);
+            string size = holds.Count > 0 ? $"{holds.Count} Haltelinien" : $"R = {r.Radius * 1000:0.###} mm";
+            BuildResult result = Ok(f, r.Kind == FaceFilletKind.FullRound
+                ? $"Vollständige Verrundung, {r.Set1.Count} + {r.Center.Count} + {r.Set2.Count} Flächen"
+                : $"Flächenverrundung, {size}, {r.Set1.Count} + {r.Set2.Count} Flächen",
+                notes);
+            if (r.Kind == FaceFilletKind.Face)
+            {
+                // Both together first: if the flags are read the other way than assumed, it
+                // is wrong for both sets at once, and one flipped set alone just fails.
+                result.Alternatives.Add(new Alternative("Normalen beider Flächengruppen umgekehrt", () => FeatureEdit.SimpleFillet(doc, f, d =>
+                {
+                    d.set_ReverseFaceNormal(Set1, !d.get_ReverseFaceNormal(Set1));
+                    d.set_ReverseFaceNormal(Set2, !d.get_ReverseFaceNormal(Set2));
+                })));
+                result.Alternatives.Add(new Alternative("Normale der Flächengruppe 1 umgekehrt",
+                    () => FeatureEdit.SimpleFillet(doc, f, d => d.set_ReverseFaceNormal(Set1, !d.get_ReverseFaceNormal(Set1)))));
+                result.Alternatives.Add(new Alternative("Normale der Flächengruppe 2 umgekehrt",
+                    () => FeatureEdit.SimpleFillet(doc, f, d => d.set_ReverseFaceNormal(Set2, !d.get_ReverseFaceNormal(Set2)))));
+            }
+            return result;
+        }
+
+        private const int Set1 = (int)swSimpleFilletWhichFaces_e.swFaceFilletSet1, Set2 = (int)swSimpleFilletWhichFaces_e.swFaceFilletSet2;
+
+        /// <summary>Selects the sets (side 1, centre, side 2 – the order the user interface asks for) and creates the fillet.</summary>
+        private static Feature? Create(ModelDoc2 doc, FaceFilletRecord r, List<object> set1, List<object> set2, List<object> center, int options, double radius)
+        {
             SwSelect.Clear(doc);
-            bool selected = true;
-            bool first = true;
+            bool selected = true, first = true;
             void Select(List<object> faces, int mark)
             {
                 foreach (object face in faces)
@@ -62,7 +112,6 @@ namespace Spiegelwerk.Build.Builders
                     first = false;
                 }
             }
-            // Order as the user interface asks for a full round fillet: side 1, centre, side 2.
             Select(set1, Set1Mark);
             Select(center, CenterMark);
             Select(set2, Set2Mark);
@@ -70,37 +119,11 @@ namespace Spiegelwerk.Build.Builders
                 ? (int)swFeatureFilletType_e.swFeatureFilletType_FullRound
                 : (int)swFeatureFilletType_e.swFeatureFilletType_Face;
             Feature? f = selected
-                ? doc.FeatureManager.FeatureFillet3(options, r.Radius, 0, 0, type, r.OverflowType,
+                ? doc.FeatureManager.FeatureFillet3(options, radius, 0, 0, type, r.OverflowType,
                     (int)swFeatureFilletProfileType_e.swFeatureFilletCircular, null, null, null, null, null, null, null) as Feature
                 : null;
             SwSelect.Clear(doc);
-            if (f == null) return Fail("SOLIDWORKS hat die Verrundung nicht erzeugt.", notes);
-
-            if (r.Kind == FaceFilletKind.Face)
-            {
-                bool ok = FeatureEdit.SimpleFillet(doc, f, d =>
-                {
-                    const int s1 = (int)swSimpleFilletWhichFaces_e.swFaceFilletSet1, s2 = (int)swSimpleFilletWhichFaces_e.swFaceFilletSet2;
-                    if (d.get_ReverseFaceNormal(s1) != r.ReverseNormal1) d.set_ReverseFaceNormal(s1, r.ReverseNormal1);
-                    if (d.get_ReverseFaceNormal(s2) != r.ReverseNormal2) d.set_ReverseFaceNormal(s2, r.ReverseNormal2);
-                    if (holds.Count > 0) d.HoldLines = holds.ToArray();
-                });
-                if (!ok) notes.Add("Flächennormalen oder Haltelinien ließen sich nicht setzen.");
-            }
-
-            ctx.Register(r.Name, f);
-            BuildResult result = Ok(f, r.Kind == FaceFilletKind.FullRound
-                ? $"Vollständige Verrundung, {r.Set1.Count} + {r.Center.Count} + {r.Set2.Count} Flächen"
-                : $"Flächenverrundung R = {r.Radius * 1000:0.###} mm, {r.Set1.Count} + {r.Set2.Count} Flächen" + (holds.Count > 0 ? $", {holds.Count} Haltelinien" : ""),
-                notes);
-            if (r.Kind == FaceFilletKind.Face)
-            {
-                result.Alternatives.Add(new Alternative("Normale der Flächengruppe 1 umgekehrt", () => FeatureEdit.SimpleFillet(doc, f, d =>
-                    d.set_ReverseFaceNormal((int)swSimpleFilletWhichFaces_e.swFaceFilletSet1, !d.get_ReverseFaceNormal((int)swSimpleFilletWhichFaces_e.swFaceFilletSet1)))));
-                result.Alternatives.Add(new Alternative("Normale der Flächengruppe 2 umgekehrt", () => FeatureEdit.SimpleFillet(doc, f, d =>
-                    d.set_ReverseFaceNormal((int)swSimpleFilletWhichFaces_e.swFaceFilletSet2, !d.get_ReverseFaceNormal((int)swSimpleFilletWhichFaces_e.swFaceFilletSet2)))));
-            }
-            return result;
+            return f;
         }
 
         /// <summary>All faces of a set, or null if one is missing – a fillet between other faces is a different fillet.</summary>

@@ -144,7 +144,8 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 
 94. **Eigene Markierungen für jede Flächengruppe:** Gruppe 1 = 2, Gruppe 2 = 4, Mittelflächen einer vollständigen Verrundung = 512; die Benutzeroberfläche verlangt die Reihenfolge Seite 1, Mitte, Seite 2. → Genau so wählen.
 95. **Unvollständige Flächengruppen** ergäben eine Verrundung zwischen anderen Flächen. → Fehlt eine Fläche, keine Verrundung, sondern eine Meldung.
-96. **Normalenrichtung der Gruppen** steuert, auf welcher Seite die Flächenverrundung entsteht. Außennormalen bleiben bei einer Spiegelung außen. → Flags unverändert (als Optionen beim Anlegen und danach geprüft), Gegenrichtung je Gruppe als Variante. Hilfspunkt und Haltelinien aus Trennlinien-Kurven werden nicht übernommen (Hinweis).
+96. **Normalenrichtung der Gruppen** steuert, auf welcher Seite die Flächenverrundung entsteht. Außennormalen bleiben bei einer Spiegelung außen. → Flags unverändert (als Optionen beim Anlegen und danach geprüft). Als Varianten für die Prüfung: zuerst beide Gruppen zusammen umgekehrt – wird das Flag anders gelesen als angenommen, ist es für beide falsch, und eine einzeln umgekehrte Gruppe scheitert nur –, dann jede Gruppe einzeln. Hilfspunkt und Haltelinien aus Trennlinien-Kurven werden nicht übernommen (Hinweis).
+97. **Haltelinien bestimmen die Größe**, der gespeicherte Radius ist dann bedeutungslos und passt womöglich gar nicht. → Fehlt eine Haltelinie, keine Verrundung; passt der Radius beim Anlegen nicht, mit kleinerem Platzhalter anlegen, bis die Haltelinien gesetzt sind; lassen sie sich nicht setzen, wird die Verrundung wieder entfernt.
 
 ## Was beim ersten Test in SOLIDWORKS zu prüfen ist
 
