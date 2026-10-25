@@ -94,6 +94,18 @@ namespace Spiegelwerk.Build.Builders
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
+        public static bool Shell(ModelDoc2 doc, Feature f, Action<ShellFeatureData> change)
+        {
+            var d = (ShellFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool Draft(ModelDoc2 doc, Feature f, Action<DraftFeatureData2> change)
+        {
+            var d = (DraftFeatureData2)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
         public static bool Hole(ModelDoc2 doc, Feature f, Action<WizardHoleFeatureData2> change)
         {
             var d = (WizardHoleFeatureData2)f.GetDefinition();

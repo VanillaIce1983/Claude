@@ -45,7 +45,7 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `PatternInstances` | Lage der Musterinstanzen spiegeln (R ∘ T ∘ R) und als Mengen vergleichen |
 | `Matching` | `EdgeSignature`, `FaceSignature`, `TopologyMatcher` | Fingerabdrücke und deren Zuordnung im neu aufgebauten Teil |
 | `Verification` | `MassState`, `MassComparison` | Volumen und erstes Moment, gespiegelt und verglichen |
-| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs`, `HoleRecords.cs` mit der Typzuordnung `HoleTypes`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
+| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs`, `HoleRecords.cs` mit der Typzuordnung `HoleTypes`, `ShellDraftRecords.cs`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
 
 ### Spiegelwerk (Add-In)
 
@@ -63,7 +63,7 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `SwPreferences`, `SketchInputScope`, `UpdateFreeze` | Benutzereinstellungen und Anzeige während des Laufs abschalten und wiederherstellen |
 | `Capture/` | `FeatureCollector` | Welche Features, in Erstellungsreihenfolge |
 | | `SketchCapture` | `ISketch` → `SketchModel` |
-| | `FeatureCapture` (+ `.SweepLoft`, `.Patterns`, `.Holes`) | Feature-Definitionen → `FeatureRecord` (mit `AccessSelections`) |
+| | `FeatureCapture` (+ `.SweepLoft`, `.Patterns`, `.Holes`, `.ShellDraft`) | Feature-Definitionen → `FeatureRecord` (mit `AccessSelections`) |
 | | `TopologyCapture` | Kante/Fläche/Eckpunkt → Fingerabdruck |
 | | `MassCapture` | Volumenänderung und Flächenproben jedes Features über die Rückrollleiste |
 | `Build/` | `MirrorJob` | Der ganze Lauf; neues Teil anlegen, Gleichungen kopieren, Original löschen |
@@ -71,7 +71,7 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `PlaneResolver` | Liefert für eine Ebene ein Ebenen-Feature im Ziel, für eine Gerade eine Achse |
 | | `TopologyFinder` | Findet Kanten, Flächen, Eckpunkte, Achsen und Skizzen im Ziel |
 | | `SketchBuilder` | Schreibt eine gespiegelte Skizze – neu oder in eine vorhandene (Positionsskizze einer Bohrung) |
-| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, Fase, Bohrung, Muster |
+| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, Fase, Wandung, Formschräge, Bohrung, Muster |
 | | `StepVerifier` | Messen (Volumen, Moment, Flächenproben), Varianten probieren |
 | `AssemblyContext/` | `AssemblyMirror` | Komponente spiegeln, speichern, platzieren |
 
@@ -166,6 +166,12 @@ Eine Bohrung des Bohrungsassistenten besteht aus dem Feature und zwei eigenen Sk
 4. **Zählen:** Die Kopie muss so viele Bohrungen haben wie das Original.
 
 Die Bohrrichtung bezieht sich auf die Normale der Positionsskizze. Auf einer Fläche ist das die Außennormale, und die bleibt bei einer Spiegelung außen (σ = +1) – das Flag „Richtung umkehren“ bleibt. Liegt die Bohrung auf einer Ebene (oder steht eine Ebene für eine nicht gefundene Fläche), kann die Skizze andersherum liegen; dann folgt das Flag σ wie bei Extrusionen. Ersatzpunkte für fehlende Skizzenbezüge sind in der Positionsskizze Endpunkte fixierter Konstruktionslinien, denn jeder eigene Skizzenpunkt wäre eine zusätzliche Bohrung. Maße werden nicht gespiegelt, auch nicht die Gewinderichtung: Ein Gegenstück bekommt dieselben Bohrungen mit denselben Rechtsgewinden. Eine geometrische Spiegelung würde Linksgewinde ergeben; die kosmetische Gewindedarstellung trägt aber gar keine Drehrichtung.
+
+## Wandung und Formschräge
+
+Eine **Wandung** ist ganz auf den Körper bezogen: Wandstärke, innen oder außen, offene Flächen, Flächen mit eigener Stärke. Eine Spiegelung ändert daran nichts außer den Flächen selbst, die über ihre gespiegelten Fingerabdrücke wiedergefunden werden. Die offenen Flächen werden für `InsertFeatureShell` gewählt; Flächen mit eigener Stärke und die Richtung werden danach auf den Feature-Daten gesetzt. Eine geschlossene Wandung (hohler Körper) wird im selben Teil auf den gespiegelten Körper gerichtet.
+
+Eine **Formschräge** neigt Flächen um einen Winkel gegen eine Zugrichtung: die Normale der neutralen Ebene oder die Richtung des Zugbezugs (Ebene, ebene Fläche, Kante). Werden Flächen und Zugrichtung zusammen gespiegelt, bleibt der Winkel, wie er ist. Das Flag „Richtung umkehren“ bezieht sich aber auf den Bezug, und der Bezug der Kopie kann andersherum zeigen – eine zusammenfallende Ebene mit entgegengesetzter Normale, eine Kante, die andersherum läuft. Deshalb folgt das Flag σ der Bezugsrichtung (`DirectionRules.Sigma` mit der Bezugsrichtung statt der Skizzennormale, `BuilderSupport.FlagForReference`, Tests in `DraftDirectionTests`). Welche Seite einer Trennlinie geneigt wird, hängt an der inneren Orientierung der Kante; übernommen, die Gegenseite als Variante.
 
 ## Ebenen und Achsen im Ziel
 

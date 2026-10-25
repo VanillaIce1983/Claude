@@ -1,6 +1,6 @@
 # Spiegelwerk
 
-SOLIDWORKS-Add-In, das Bauteile **unabhängig** spiegelt. Statt eines Spiegel-Features (Körper oder Features spiegeln) baut Spiegelwerk jedes Feature des Originals gespiegelt neu auf: neue Skizzen mit umgerechneten Beziehungen und Bemaßungen, neue Extrusionen, Schnitte, Rotationen, Austragungen, Ausformungen, Bohrungen, Muster, Verrundungen und Fasen. Das Ergebnis ist ein eigener, vollständig bearbeitbarer Feature-Baum ohne Verknüpfung zum Original.
+SOLIDWORKS-Add-In, das Bauteile **unabhängig** spiegelt. Statt eines Spiegel-Features (Körper oder Features spiegeln) baut Spiegelwerk jedes Feature des Originals gespiegelt neu auf: neue Skizzen mit umgerechneten Beziehungen und Bemaßungen, neue Extrusionen, Schnitte, Rotationen, Austragungen, Ausformungen, Bohrungen, Muster, Verrundungen, Fasen, Wandungen und Formschrägen. Das Ergebnis ist ein eigener, vollständig bearbeitbarer Feature-Baum ohne Verknüpfung zum Original.
 
 Spiegelwerk ist eine eigenständige Entwicklung und steht in keiner Verbindung zu Dassault Systèmes; SOLIDWORKS ist eine Marke von Dassault Systèmes.
 
@@ -24,11 +24,13 @@ Nach jedem Lauf zeigt ein Bericht pro Feature, ob es neu aufgebaut wurde, was an
 | Austragung (Aufsatz/Schnitt) | Profil-, Pfad- und Führungskurven-Skizzen, Kreisprofil, Verdrehung (Richtung wird gegensinnig, gemessen bestätigt), Pfadausrichtung, Start-/Endtangente, Richtungsvektoren, dünnwandig. Nicht: 3D-Skizzen oder Helix als Pfad, Werkzeugkörper-Schnitt. |
 | Ausformung (Aufsatz/Schnitt) | Profile (Skizzen, Punkte, Flächen) in Originalreihenfolge, Führungskurven, Mittellinie, Verbinder über die gespiegelten Auswahlpunkte, Start-/Endbedingungen, geschlossen, dünnwandig. |
 | Bohrungsassistent | Bohrung, Senkbohrung zylindrisch und kegelig, Gewinde- und Rohrgewindebohrung mit Norm, Schraubenart, Größe, Passung, Endbedingung, Senkungen und eigenen Maßen. Die Positionsskizze mit allen Bohrpunkten, Beziehungen und Bemaßungen wird gespiegelt in die Positionsskizze der neuen Bohrung geschrieben. Gewinde bleiben Rechtsgewinde. Nicht: Langlöcher, Bohrungen im alten Format, 3D-Positionsskizzen (Bohrungen auf mehreren oder gekrümmten Flächen). |
+| Wandung | Wandstärke, nach innen oder außen, offene Flächen, Flächen mit eigener Wandstärke, auch geschlossen (hohler Körper). |
+| Formschräge | Neutrale Ebene, Trennlinie und Stufe; Winkel, Fortsetzung auf Nachbarflächen, Seiten der Trennlinie. Die Zugrichtung folgt der Ausrichtung des gespiegelten Bezugs. |
 | Lineares und kreisförmiges Muster | Features, Flächen oder Körper; zwei Richtungen, gleicher Abstand, symmetrisch, übersprungene Instanzen. Die Richtungen werden über die Lage der Instanzen des Originals bestimmt, nicht geraten. Die Saat (Saat-Features, die Features der Saatflächen oder -körper) wird automatisch mitgespiegelt. |
 | Verrundung | Konstanter Radius, auch mit mehreren Radien, Kanten und Flächen. |
 | Fase | Winkel-Abstand, Abstand-Abstand, gleicher Abstand. |
 | Referenzebene, Referenzachse | Neu an gespiegelter Lage, nur von den Standardebenen bzw. einer fixierten Hilfslinie abhängig. |
-| Noch nicht | Erweiterte Bohrung, Wandung, Formschräge, variable Verrundung, Kurven-/Skizzen-/Tabellenmuster, 3D-Skizzen, Skizzentext. Spiegel-Features im Original werden bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. Sie erscheinen im Bericht; Features, die darauf aufbauen, können dann ebenfalls scheitern. Wie ein weiterer Typ dazukommt, steht in der [Architektur](docs/ARCHITEKTUR.md#einen-feature-typ-ergänzen). |
+| Noch nicht | Erweiterte Bohrung, variable Verrundung, Kurven-/Skizzen-/Tabellenmuster, 3D-Skizzen, Skizzentext. Spiegel-Features im Original werden bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. Sie erscheinen im Bericht; Features, die darauf aufbauen, können dann ebenfalls scheitern. Wie ein weiterer Typ dazukommt, steht in der [Architektur](docs/ARCHITEKTUR.md#einen-feature-typ-ergänzen). |
 
 ## Bedienung
 
@@ -83,4 +85,4 @@ spiegelwerk/
 
 ## Stand
 
-Version 0.3 (Bohrungsassistent; 0.2: Austragung, Ausformung, Muster, Achsen, Flächenprüfung). Die Kernlogik ist durch Tests abgesichert; das Add-In übersetzt fehlerfrei gegen die API von SOLIDWORKS 2019 und 2024 (CI) und ist durch ein Code-Review gegangen, dessen bestätigte Befunde behoben sind. In einer laufenden SOLIDWORKS-Sitzung ist es noch nicht erprobt. Die Stellen, an denen sich die API je nach Version anders verhalten kann, misst Spiegelwerk nach, statt sich auf eine Annahme zu verlassen; sie sind in den [Stolpersteinen](docs/STOLPERSTEINE.md#was-beim-ersten-test-in-solidworks-zu-prüfen-ist) aufgeführt.
+Version 0.4 (Wandung, Formschräge; 0.3: Bohrungsassistent; 0.2: Austragung, Ausformung, Muster, Achsen, Flächenprüfung). Die Kernlogik ist durch Tests abgesichert; das Add-In übersetzt fehlerfrei gegen die API von SOLIDWORKS 2019 und 2024 (CI) und ist durch ein Code-Review gegangen, dessen bestätigte Befunde behoben sind. In einer laufenden SOLIDWORKS-Sitzung ist es noch nicht erprobt. Die Stellen, an denen sich die API je nach Version anders verhalten kann, misst Spiegelwerk nach, statt sich auf eine Annahme zu verlassen; sie sind in den [Stolpersteinen](docs/STOLPERSTEINE.md#was-beim-ersten-test-in-solidworks-zu-prüfen-ist) aufgeführt.

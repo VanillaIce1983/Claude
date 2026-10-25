@@ -61,6 +61,10 @@ namespace Spiegelwerk.Capture
                         return CaptureCircularPattern(f, type, cp);
                     case WizardHoleFeatureData2 wh:
                         return CaptureHole(f, type, wh);
+                    case ShellFeatureData sh:
+                        return CaptureShell(f, type, sh);
+                    case DraftFeatureData2 dr:
+                        return CaptureDraft(f, type, dr);
                 }
                 return new UnsupportedRecord(f.Name, type, UnsupportedReason(type), ChangesSolid(type));
             }
@@ -390,8 +394,6 @@ namespace Spiegelwerk.Capture
             "CurvePattern" or "SketchPattern" or "TablePattern" or "FillPattern" or "DimPattern" or "VarPattern" =>
                 "Dieses Muster wird nicht unterstützt (nur lineare und kreisförmige Muster).",
             "VarFillet" => "Variable Verrundung wird nicht unterstützt.",
-            "Shell" => "Wandung: noch nicht umgesetzt.",
-            "Draft" => "Formschräge: noch nicht umgesetzt.",
             _ => $"Feature-Typ {type} wird nicht unterstützt.",
         };
     }

@@ -122,6 +122,16 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 80. **Die Skizzen einer Bohrung, die nicht entsteht.** Wird die Bohrung nicht neu aufgebaut (nicht gewählt, nicht unterstützt, übersprungen), wird die Positionsskizze wieder eine gewöhnliche Skizze und die Profilskizze entfällt mit Hinweis; scheitert die Bohrung, nimmt der Bericht das „entsteht mit ihr“ zurück. Wird eine Bohrung wieder entfernt, gehen ihre Skizzen mit (`swDelete_Absorbed`), und die Zuordnung der Positionsskizze wird vergessen.
 81. **Varianten ohne eigene Option** (z. B. Gewindebohrung mit entferntem Gewinde) zeigen sich nur im genauen Typ. → Typ der Kopie mit dem Original vergleichen, bei Abweichung setzen, sonst melden.
 
+## Wandung und Formschräge
+
+82. **`InsertFeatureShell` gibt kein Feature zurück.** → Das neue Feature ist das zuletzt hinzugefügte, wenn es eine Wandung ist und vorher nicht da war.
+83. **Mehrfachdicken über `InsertFeatureShellAddThickness`** sind kaum dokumentiert (Reihenfolge, Markierungen). → Wandung mit den offenen Flächen anlegen, Flächen mit eigener Stärke danach über `MultipleThicknessFaces` und `SetMultipleThicknessAtIndex` setzen.
+84. **Geschlossene Wandung im selben Teil** könnte ohne Auswahl alle Körper aushöhlen. → Den gespiegelten Körper wählen; die Prüfung der Originalkörper fängt den Rest.
+85. **Eine fehlende offene Fläche** ergäbe einen anderen Körper (dort geschlossen). → Dann keine Wandung, sondern eine Meldung. Fehlende Flächen mit eigener Stärke bekommen die Standardstärke, mit Hinweis.
+86. **Die Zugrichtung einer Formschräge hängt am Bezug.** Eine Ebene, die mit der gespiegelten zusammenfällt, kann die entgegengesetzte Normale haben (die Standardebene *rechts* beim Spiegeln an *rechts*). → Flag nach σ der Bezugsrichtung; die Gegenrichtung bleibt als Variante für die Prüfung.
+87. **Trennlinien.** Eine Trennlinie mit Lücke ist keine; die „andere Seite“ je Kante hängt an der Kantenorientierung. → Alle Kanten oder keine Formschräge; Seiten übernehmen, Gegenseite als Variante. Die Zuordnung der Seiten-Flags zu den Kanten folgt der Auswahlreihenfolge (Annahme, siehe Tabelle).
+88. **Körper-Formschrägen und DraftXpert** lassen sich über `IDraftFeatureData2` nicht erkennen; sie werden als gewöhnliche Formschräge neu aufgebaut.
+
 ## Was beim ersten Test in SOLIDWORKS zu prüfen ist
 
 Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in einer laufenden Sitzung erprobt. Diese Stellen beruhen auf der API-Hilfe und offiziellen Beispielen, wo diese uneindeutig sind; Spiegelwerk fängt sie ab, der Bericht zeigt, welcher Weg genommen wurde:
@@ -146,9 +156,12 @@ Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in eine
 | Flächenproben | `IFeature.GetFaces` liefert im zurückgerollten Zustand die Flächen des Features | ohne Flächen keine Proben, nur Massenprüfung |
 | Bohrung über Datenobjekt | `CreateDefinition(swFmHoleWzd)` + `InitializeHole` + Fläche am Punkt gewählt + `CreateFeature` (Beispiel der Hilfe) | `HoleWizard5` mit −1 für die typabhängigen Werte |
 | Positionsskizze der neuen Bohrung | 2D-Skizze auf ebener Fläche, über `GetSketchPoints` zu finden, per `EditSketch` beschreibbar | sonst wird die Bohrung entfernt und gemeldet |
+| Wandung | offene Flächen mit Markierung 1 (Beispiel eines Drittanbieters), sonst 0; `Direction` 0/1 = innen/außen | Richtung wird nach dem Anlegen verglichen und gesetzt; Alternative für die Prüfung |
+| Formschräge | Zugbezug 1, Flächen 2, Trennlinien 4 (API-Hilfe) | — |
+| Seiten einer Trennlinie | `SetOtherFacesFlagAtIndex` zählt in Auswahlreihenfolge | Variante „andere Seite“ für die Prüfung |
 | Feature-Bereich von Mustern | `FeatureScope`/`SetFeatureScope` spät gebunden, falls vorhanden (Interop 2024) | sonst Prüfung der Originalkörper, Feature wird ggf. entfernt |
 | `Body2.GetMassProperties` | Index 0–2 Schwerpunkt, 3 Volumen | bei falscher Annahme schlägt jede Prüfung an – sofort sichtbar |
 | Genauigkeit der Masseneigenschaften | relativ 1e-7 | sonst Untergrenze in `MassComparison.NoiseRelative` anpassen |
 | Schließen des Teilfensters in der Baugruppe | `CloseDoc` schließt nur das Fenster, die Baugruppe hält das Teil geladen | — |
 
-Ein guter erster Test: einfache Platte mit Tasche und Verrundung auf *vorne*, an *rechts* gespiegelt, in ein neues Teil – dann dasselbe mit einer Skizze auf *rechts* (σ = −1), mit einer schrägen Hilfsebene und mit einer Tasche, deren Skizze oberhalb des Teils liegt („bis Fläche“). Danach: ein lineares Muster entlang einer Kante und ein Kreismuster mit 3 × 40° um eine Referenzachse (Richtung muss im Bericht „geprüft“ oder „korrigiert“ heißen), eine Austragung eines Quadrats mit 90° Verdrehung entlang einer Geraden und eine Ausformung zwischen einem Quadrat und einem um 45° gedrehten Quadrat (Verbinder). Für Bohrungen: drei M6-Senkbohrungen auf einer Platte, mit Abständen zu den Kanten bemaßt, an *rechts* gespiegelt – im Bericht „3 × M6“ ohne Hinweis auf nicht übernommene Maße – und ein Muster dieser Bohrung.
+Ein guter erster Test: einfache Platte mit Tasche und Verrundung auf *vorne*, an *rechts* gespiegelt, in ein neues Teil – dann dasselbe mit einer Skizze auf *rechts* (σ = −1), mit einer schrägen Hilfsebene und mit einer Tasche, deren Skizze oberhalb des Teils liegt („bis Fläche“). Danach: ein lineares Muster entlang einer Kante und ein Kreismuster mit 3 × 40° um eine Referenzachse (Richtung muss im Bericht „geprüft“ oder „korrigiert“ heißen), eine Austragung eines Quadrats mit 90° Verdrehung entlang einer Geraden und eine Ausformung zwischen einem Quadrat und einem um 45° gedrehten Quadrat (Verbinder). Für Bohrungen: drei M6-Senkbohrungen auf einer Platte, mit Abständen zu den Kanten bemaßt, an *rechts* gespiegelt – im Bericht „3 × M6“ ohne Hinweis auf nicht übernommene Maße – und ein Muster dieser Bohrung. Für Wandung und Formschräge: ein Napf mit offener Oberseite und dickerem Boden, mit 3° Formschräge an der Ebene *oben* – einmal an *rechts*, einmal an *oben* gespiegelt (σ = −1 für die Zugrichtung).

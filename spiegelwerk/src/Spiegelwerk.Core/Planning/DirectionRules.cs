@@ -17,6 +17,11 @@ namespace Spiegelwerk.Core.Planning
     /// </summary>
     public static class DirectionRules
     {
+        /// <remarks>
+        /// The same comparison serves any reference direction a flag is relative to – the
+        /// normal of a neutral plane, a linear edge giving the pull direction: the copy's
+        /// reference points along R(original) (σ = +1) or against it (σ = −1).
+        /// </remarks>
         public static int Sigma(Vec3 sourceNormal, Reflection r, Vec3 targetNormal) =>
             targetNormal.Dot(r.ApplyVector(sourceNormal)) >= 0 ? 1 : -1;
 

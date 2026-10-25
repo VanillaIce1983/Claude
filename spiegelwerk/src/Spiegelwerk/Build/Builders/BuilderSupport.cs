@@ -3,6 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
+using Spiegelwerk.Capture;
+using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Matching;
+using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
 
@@ -78,6 +82,46 @@ namespace Spiegelwerk.Build.Builders
             return ctx.SeparateBody && isCut && ownBefore == 0
                 ? "Es gibt noch keinen gespiegelten Körper, auf den der Schnitt wirken könnte; das Original bleibt unberührt."
                 : null;
+        }
+
+        /// <summary>The direction a reference of the original stands for: plane or planar-face normal, line direction.</summary>
+        public static Vec3? ReferenceDirection(GeometryRef? g) => g?.Kind switch
+        {
+            GeometryRefKind.Plane => g.Plane.Normal,
+            GeometryRefKind.Face when g.Face!.Kind == SurfaceKind.Plane => g.Face.Normal,
+            GeometryRefKind.Axis => g.Axis.Direction,
+            _ => (Vec3?)null,
+        };
+
+        /// <summary>The same for an object of the target, as SOLIDWORKS orients it; null if it has none.</summary>
+        public static Vec3? ReferenceDirection(BuildContext ctx, object? o)
+        {
+            switch (o)
+            {
+                case Face2 face:
+                {
+                    FaceSignature sig = TopologyCapture.Face(face);
+                    return sig.Kind == SurfaceKind.Plane ? sig.Normal : (Vec3?)null;
+                }
+                case Edge edge:
+                    return TopologyCapture.LineOfEdge(edge)?.Direction;
+                case Feature f when f.GetSpecificFeature2() is RefPlane plane:
+                    return ctx.Math.PlaneOf(plane).Normal;
+                case Feature f when f.GetSpecificFeature2() is RefAxis axis:
+                    return SwDoc.AxisLine(axis).Direction;
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>
+        /// A "reverse" flag relative to a reference: σ of the reference direction (as for a
+        /// sketch normal). If either direction is unknown, the flag stays as it was.
+        /// </summary>
+        public static bool FlagForReference(BuildContext ctx, GeometryRef? original, object? target, bool flag)
+        {
+            Vec3? a = ReferenceDirection(original), b = ReferenceDirection(ctx, target);
+            return a.HasValue && b.HasValue ? DirectionRules.ReverseFlag(flag, DirectionRules.Sigma(a.Value, ctx.Mirror, b.Value)) : flag;
         }
 
         public static BuildResult Fail(string message, List<string> notes)
