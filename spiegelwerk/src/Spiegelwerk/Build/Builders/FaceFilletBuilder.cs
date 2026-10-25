@@ -53,9 +53,12 @@ namespace Spiegelwerk.Build.Builders
             ModelDoc2 doc = ctx.Doc;
             Feature? f = Create(doc, r, set1, set2, center, options, r.Radius);
             // With hold lines the radius is not used (the stored value may be anything); a
-            // radius that does not fit only has to get the fillet created until they take over.
+            // placeholder only has to get the fillet created until they take over – smaller if
+            // the stored one is too big for the faces, larger if it cannot bridge between them.
             if (f == null && holds.Count > 0)
-                f = Create(doc, r, set1, set2, center, options, r.Radius / 10) ?? Create(doc, r, set1, set2, center, options, 1e-4);
+                f = Create(doc, r, set1, set2, center, options, r.Radius / 10)
+                    ?? Create(doc, r, set1, set2, center, options, 1e-4)
+                    ?? Create(doc, r, set1, set2, center, options, r.Radius * 10);
             if (f == null) return Fail("SOLIDWORKS hat die Verrundung nicht erzeugt.", notes);
 
             if (r.Kind == FaceFilletKind.Face)
