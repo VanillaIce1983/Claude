@@ -45,7 +45,7 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `PatternInstances` | Lage der Musterinstanzen spiegeln (R ∘ T ∘ R) und als Mengen vergleichen |
 | `Matching` | `EdgeSignature`, `FaceSignature`, `TopologyMatcher` | Fingerabdrücke und deren Zuordnung im neu aufgebauten Teil |
 | `Verification` | `MassState`, `MassComparison` | Volumen und erstes Moment, gespiegelt und verglichen |
-| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
+| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs`, `HoleRecords.cs` mit der Typzuordnung `HoleTypes`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
 
 ### Spiegelwerk (Add-In)
 
@@ -58,18 +58,20 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | `Sw/` | `SwMath` | `MathTransform` ↔ `Frame3`/`Affine`, Skizzen- und Ebenenkoordinaten |
 | | `SwDoc`, `SwSelect` | Feature-Baum, Standardebenen, Körper, Massen; Auswahl mit Markierung |
 | | `SwPattern` | Lage der Instanzen eines Musters lesen (`GetTransform`) |
+| | `SwHole` | Maße und Optionen einer Bohrung lesen, vergleichen, setzen; Positionsskizze finden |
+| | `SwLate` | Spät gebundener Zugriff auf API-Teile, die erst neuere Versionen haben |
 | | `SwPreferences`, `SketchInputScope`, `UpdateFreeze` | Benutzereinstellungen und Anzeige während des Laufs abschalten und wiederherstellen |
 | `Capture/` | `FeatureCollector` | Welche Features, in Erstellungsreihenfolge |
 | | `SketchCapture` | `ISketch` → `SketchModel` |
-| | `FeatureCapture` (+ `.SweepLoft`, `.Patterns`) | Feature-Definitionen → `FeatureRecord` (mit `AccessSelections`) |
+| | `FeatureCapture` (+ `.SweepLoft`, `.Patterns`, `.Holes`) | Feature-Definitionen → `FeatureRecord` (mit `AccessSelections`) |
 | | `TopologyCapture` | Kante/Fläche/Eckpunkt → Fingerabdruck |
 | | `MassCapture` | Volumenänderung und Flächenproben jedes Features über die Rückrollleiste |
 | `Build/` | `MirrorJob` | Der ganze Lauf; neues Teil anlegen, Gleichungen kopieren, Original löschen |
 | | `BuildContext`, `SketchMap` | Zustand des Laufs; Zuordnung alter → neuer Skizzenelemente |
 | | `PlaneResolver` | Liefert für eine Ebene ein Ebenen-Feature im Ziel, für eine Gerade eine Achse |
 | | `TopologyFinder` | Findet Kanten, Flächen, Eckpunkte, Achsen und Skizzen im Ziel |
-| | `SketchBuilder` | Schreibt eine gespiegelte Skizze |
-| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, Fase, Muster |
+| | `SketchBuilder` | Schreibt eine gespiegelte Skizze – neu oder in eine vorhandene (Positionsskizze einer Bohrung) |
+| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, Fase, Bohrung, Muster |
 | | `StepVerifier` | Messen (Volumen, Moment, Flächenproben), Varianten probieren |
 | `AssemblyContext/` | `AssemblyMirror` | Komponente spiegeln, speichern, platzieren |
 
@@ -152,6 +154,19 @@ Original-Komponente: Teilgeometrie x, Platzierung T. Gewünscht ist R_asm(T(x)).
 
 Zwei Spiegelungen und eine starre Bewegung ergeben Determinante +1 – eine gültige Komponententransformation. Weil R_part frei wählbar ist, spiegelt Spiegelwerk das Teil an **seiner eigenen** Standardebene durch den Ursprung, deren Normale der Baugruppen-Spiegelebene am nächsten liegt. Das neue Teil sieht dann aus wie ein konstruiertes Gegenstück (Skizzen auf vorne/oben/rechts) und nicht wie eine irgendwo im Raum verschobene Kopie (`ComponentPlacement`, Test `Component_placement_puts_the_mirrored_part_where_the_mirror_image_is`).
 
+## Bohrungen
+
+Eine Bohrung des Bohrungsassistenten besteht aus dem Feature und zwei eigenen Skizzen: der Profilskizze und der Positionsskizze, deren Punkte die Bohrungen sind (`IWizardHoleFeatureData2.GetSketchPoints` zeigt, welche die Positionsskizze ist). Beide entstehen in SOLIDWORKS mit der Bohrung und werden deshalb nicht einzeln aufgebaut (`PartOfFeatureRecord`); die Positionsskizze wird mit der Bohrung erfasst.
+
+`HoleBuilder`:
+
+1. **Eine Bohrung anlegen** wie in der API-Hilfe beschrieben: `CreateDefinition(swFmHoleWzd)`, `InitializeHole` mit Typ, Norm, Schraubenart, Größe und Endbedingung, Maße und Optionen setzen, Platzierungsfläche am ersten gespiegelten Bohrpunkt wählen, `CreateFeature`. Ersatzweg: `HoleWizard5`. Den allgemeinen Typ, den beide Wege verlangen, liefert die API nicht; `HoleTypes.GenericOf` leitet ihn aus dem genauen Typ ab (Tests in `HoleTests`).
+2. **Positionsskizze übertragen:** `SketchBuilder.BuildInto` öffnet die Positionsskizze der neuen Bohrung, schreibt die gespiegelte Skizze hinein – alle Bohrpunkte mit Beziehungen und Bemaßungen, Bezüge zu Kanten wie bei jeder Skizze – und entfernt den Punkt, den Schritt 1 gesetzt hat.
+3. **Maße abgleichen:** Nur Werte, die von den Normmaßen der neuen Bohrung abweichen, werden geschrieben (`SwHole`); eine Normbohrung bleibt so eine Normbohrung. Dazu Endbezug und Feature-Bereich.
+4. **Zählen:** Die Kopie muss so viele Bohrungen haben wie das Original.
+
+Die Bohrrichtung bezieht sich auf die Außennormale der Platzierungsfläche, und die bleibt bei einer Spiegelung außen – das Flag „Richtung umkehren“ wird unverändert übernommen. Maße werden nicht gespiegelt, auch nicht die Gewinderichtung: Ein Gegenstück bekommt dieselben Bohrungen mit denselben Rechtsgewinden. Eine geometrische Spiegelung würde Linksgewinde ergeben; die kosmetische Gewindedarstellung trägt aber gar keine Drehrichtung.
+
 ## Ebenen und Achsen im Ziel
 
 `PlaneResolver` liefert für jede gespiegelte Skizzenebene ein Ebenen-Feature, das **nicht** vom Original abhängt:
@@ -209,4 +224,4 @@ internal sealed class ShellBuilder : IFeatureBuilder
 }
 ```
 
-Eine Spiegelung kehrt jede Drehrichtung um: Kreismuster und Verdrehungen von Austragungen laufen in der Kopie gegensinnig (das erledigen `PatternBuilder` und `SweepBuilder`). Beim Bohrungsassistenten bliebe das Bohrbild (Positionsskizze) eine gewöhnliche Skizze und liefe durch `SketchBuilder`.
+Eine Spiegelung kehrt jede Drehrichtung um: Kreismuster und Verdrehungen von Austragungen laufen in der Kopie gegensinnig (das erledigen `PatternBuilder` und `SweepBuilder`). Beim Bohrungsassistenten läuft das Bohrbild (Positionsskizze) als gewöhnliche Skizze durch `SketchBuilder` – nur in die vorhandene Skizze der Bohrung hinein.

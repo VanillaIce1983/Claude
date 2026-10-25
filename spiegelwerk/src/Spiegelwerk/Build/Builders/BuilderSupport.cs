@@ -41,12 +41,15 @@ namespace Spiegelwerk.Build.Builders
             return result;
         }
 
-        /// <summary>Removes a feature that could not be completed; its sketch stays for the next feature.</summary>
-        public static void Delete(BuildContext ctx, Feature f)
+        /// <summary>
+        /// Removes a feature that could not be completed. Its sketch stays for the next feature,
+        /// unless <paramref name="withAbsorbed"/> – a hole's sketches belong to the hole alone.
+        /// </summary>
+        public static void Delete(BuildContext ctx, Feature f, bool withAbsorbed = false)
         {
             SwSelect.Clear(ctx.Doc);
             SwSelect.Select(ctx.Doc, f, 0, false);
-            ctx.Doc.Extension.DeleteSelection2(0);
+            ctx.Doc.Extension.DeleteSelection2(withAbsorbed ? (int)swDeleteSelectionOptions_e.swDelete_Absorbed : 0);
             SwSelect.Clear(ctx.Doc);
             ctx.Topology.Invalidate();
         }

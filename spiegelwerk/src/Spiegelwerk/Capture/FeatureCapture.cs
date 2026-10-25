@@ -33,6 +33,8 @@ namespace Spiegelwerk.Capture
             string type = f.GetTypeName2();
             try
             {
+                if ((type == "ProfileFeature" || type == "3DProfileFeature") && HoleOwnerOf(f) is string hole)
+                    return new PartOfFeatureRecord(f.Name, type, hole);
                 if (type == "ProfileFeature") return new SketchRecord(f.Name, ReadSketch(f));
                 if (type == "3DProfileFeature") return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);
                 if (type == "RefPlane") return new RefPlaneRecord(f.Name, _math.PlaneOf((RefPlane)f.GetSpecificFeature2()));
@@ -57,6 +59,8 @@ namespace Spiegelwerk.Capture
                         return CaptureLinearPattern(f, type, lp);
                     case CircularPatternFeatureData cp:
                         return CaptureCircularPattern(f, type, cp);
+                    case WizardHoleFeatureData2 wh:
+                        return CaptureHole(f, type, wh);
                 }
                 return new UnsupportedRecord(f.Name, type, UnsupportedReason(type), ChangesSolid(type));
             }
@@ -380,7 +384,7 @@ namespace Spiegelwerk.Capture
 
         private static string UnsupportedReason(string type) => type switch
         {
-            "HoleWzd" => "Bohrungsassistent: noch nicht umgesetzt (Positionsskizze spiegeln, Bohrungsdaten übernehmen).",
+            "AdvHoleWzd" or "AdvancedHole" => "Erweiterte Bohrungen werden nicht unterstützt (nur der Bohrungsassistent).",
             "MirrorPattern" => "Spiegel-Feature im Original: wird bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. " +
                                "Abhilfe: im Original durch die gespiegelten Einzel-Features ersetzen oder nach dem Lauf von Hand spiegeln.",
             "CurvePattern" or "SketchPattern" or "TablePattern" or "FillPattern" or "DimPattern" or "VarPattern" =>

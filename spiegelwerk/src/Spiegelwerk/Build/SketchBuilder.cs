@@ -54,18 +54,7 @@ namespace Spiegelwerk.Build
             SketchMap map;
             try
             {
-                Frame3 target = _ctx.Math.SketchFrame(sketch);
-                SketchMirrorResult res = SketchMirror.Mirror(src, _ctx.Mirror, target);
-                notes.AddRange(res.Warnings);
-                notes.AddRange(res.Sketch.Warnings);
-                map = new SketchMap((Feature)sketch, sketch, src, res);
-
-                using (new SketchInputScope(_sm))
-                {
-                    CreateGeometry(map, notes);
-                    CreateRelations(map, notes);
-                }
-                CreateDimensions(map, notes);
+                map = Write(src, sketch, notes);
                 CheckConstrainedStatus(map, notes);
             }
             catch
@@ -84,6 +73,60 @@ namespace Spiegelwerk.Build
             SwSelect.Clear(_doc);
             _sm.InsertSketch(true);
             _ctx.Sketches[src.Name] = map;
+            return map;
+        }
+
+        /// <summary>
+        /// Writes the mirrored sketch into an existing sketch: the position sketch SOLIDWORKS
+        /// creates together with a Hole Wizard hole. The points the sketch held before (the
+        /// first hole, placed where the face was picked) are removed afterwards, so exactly the
+        /// mirrored points with their relations and dimensions remain. Unlike
+        /// <see cref="Build"/>, a failure does not delete the sketch – it belongs to the hole.
+        /// </summary>
+        public SketchMap BuildInto(SketchModel src, Feature existing, List<string> notes)
+        {
+            SwSelect.Clear(_doc);
+            SwSelect.Select(_doc, existing, 0, false);
+            _doc.EditSketch();
+            Sketch sketch = _sm.ActiveSketch ?? throw new InvalidOperationException($"Skizze \"{existing.Name}\" konnte nicht bearbeitet werden.");
+
+            SketchMap map;
+            try
+            {
+                if (sketch.Is3D()) throw new NotSupportedException($"Skizze \"{existing.Name}\" ist eine 3D-Skizze; erwartet war eine 2D-Positionsskizze.");
+                List<SketchPoint> before = (sketch.GetUserPoints2() as object[])?.OfType<SketchPoint>().ToList() ?? new List<SketchPoint>();
+                map = Write(src, sketch, notes);
+                foreach (SketchPoint old in before)
+                {
+                    SwSelect.Clear(_doc);
+                    if (SwSelect.Select(_doc, old, 0, false)) _doc.EditDelete();
+                }
+                CheckConstrainedStatus(map, notes);
+            }
+            finally
+            {
+                SwSelect.Clear(_doc);
+                if (_sm.ActiveSketch != null) _sm.InsertSketch(true);
+            }
+            _ctx.Sketches[src.Name] = map;
+            return map;
+        }
+
+        /// <summary>Mirrors the model into the open sketch: frame, geometry, relations, dimensions.</summary>
+        private SketchMap Write(SketchModel src, Sketch sketch, List<string> notes)
+        {
+            Frame3 target = _ctx.Math.SketchFrame(sketch);
+            SketchMirrorResult res = SketchMirror.Mirror(src, _ctx.Mirror, target);
+            notes.AddRange(res.Warnings);
+            notes.AddRange(res.Sketch.Warnings);
+            var map = new SketchMap((Feature)sketch, sketch, src, res);
+
+            using (new SketchInputScope(_sm))
+            {
+                CreateGeometry(map, notes);
+                CreateRelations(map, notes);
+            }
+            CreateDimensions(map, notes);
             return map;
         }
 

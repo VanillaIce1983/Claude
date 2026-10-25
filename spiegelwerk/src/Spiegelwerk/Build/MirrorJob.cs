@@ -60,6 +60,7 @@ namespace Spiegelwerk.Build
         private static readonly IFeatureBuilder[] Builders =
         {
             new SketchFeatureBuilder(),
+            new PartOfBuilder(),
             new RefPlaneBuilder(),
             new AxisBuilder(),
             new ExtrudeBuilder(),
@@ -68,6 +69,7 @@ namespace Spiegelwerk.Build
             new LoftBuilder(),
             new FilletBuilder(),
             new ChamferBuilder(),
+            new HoleBuilder(),
             new PatternBuilder(),
         };
 
