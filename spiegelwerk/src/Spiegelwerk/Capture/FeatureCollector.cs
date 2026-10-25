@@ -93,15 +93,18 @@ namespace Spiegelwerk.Capture
                 foreach (Feature seed in SeedsOf(doc, queue.Dequeue(), ref seedBodies))
                     if (wanted.Add(seed.Name)) queue.Enqueue(seed);
 
-            // Sketches the wanted features are built from (absorbed or shared). Not those of
-            // planes, axes and coordinate systems: they are rebuilt from their geometry alone,
-            // and a sketch they sit on would be an extra copy – or, as a 3D sketch, a feature
-            // without an equivalent that keeps "delete original" from running.
-            foreach (Feature f in all.Where(x => wanted.Contains(x.Name) && !IsDatum(x)).ToList())
+            // Sketches the wanted features are built from (absorbed or shared). Planes, axes and
+            // coordinate systems are rebuilt from their geometry alone; the 2D sketches they sit
+            // on still come along – another collected sketch may refer to them –, but not a 3D
+            // sketch: it cannot be rebuilt, and as a feature without an equivalent it would keep
+            // "delete original" from running.
+            foreach (Feature f in all.Where(x => wanted.Contains(x.Name)).ToList())
             {
+                bool datum = IsDatum(f);
                 foreach (Feature sub in SwDoc.SubFeatures(f).Where(SwDoc.IsSketch)) wanted.Add(sub.Name);
                 if (f.GetParents() is object[] parents)
-                    foreach (Feature p in parents.OfType<Feature>().Where(SwDoc.IsSketch)) wanted.Add(p.Name);
+                    foreach (Feature p in parents.OfType<Feature>().Where(SwDoc.IsSketch))
+                        if (!datum || p.GetTypeName2() != "3DProfileFeature") wanted.Add(p.Name);
             }
 
             return all.Where(f => wanted.Contains(f.Name) && !SwDoc.IsSystemFeature(f) && !standard.Contains(f.Name)).ToList();
