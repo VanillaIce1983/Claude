@@ -35,6 +35,12 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>Faces with a wall thickness of their own.</summary>
         public List<FaceThickness> MultiThickness { get; } = new List<FaceThickness>();
+
+        /// <summary>
+        /// Closed shell: an outer face of the body it hollowed (outer faces are not changed by
+        /// the shell). Identifies the body in the target, where several may exist.
+        /// </summary>
+        public FaceSignature? BodyFace { get; set; }
     }
 
     /// <summary>Same numbers as swDraftType_e.</summary>

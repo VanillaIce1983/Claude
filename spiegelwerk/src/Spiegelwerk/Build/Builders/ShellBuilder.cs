@@ -42,17 +42,28 @@ namespace Spiegelwerk.Build.Builders
                 else notes.Add($"Fläche mit eigener Wandstärke ({ft.Thickness * 1000:0.###} mm) nicht gefunden; dort gilt die Standardstärke.");
             }
 
-            // A closed shell has nothing selected; in the same part it has to be pointed at the
-            // mirrored body, or it might hollow out the original as well.
-            List<object> targets = removed.Count > 0 ? removed
-                : ctx.SeparateBody ? ctx.OwnBodies().Cast<object>().ToList()
-                : new List<object>();
-            Feature? f = Create(doc, targets, r);
-            if (f == null && removed.Count == 0 && targets.Count == 0)
-                f = Create(doc, SwDoc.SolidBodies(doc).Cast<object>().ToList(), r);
+            Feature? f;
+            if (removed.Count > 0)
+            {
+                f = Create(doc, removed, r);
+            }
+            else
+            {
+                // Closed shell: exactly the body it hollowed, never "whatever SOLIDWORKS takes".
+                List<Body2> candidates = ctx.SeparateBody ? ctx.OwnBodies() : SwDoc.SolidBodies(doc);
+                if (candidates.Count == 0)
+                    return Fail("Es gibt noch keinen gespiegelten Körper, den die Wandung aushöhlen könnte; das Original bleibt unberührt.", notes);
+                Body2? body = ShelledBody(ctx, r, candidates, notes);
+                if (body == null)
+                    return Fail("Geschlossene Wandung: der ausgehöhlte Körper ist im Ziel nicht eindeutig.", notes);
+                f = Create(doc, new List<object> { body }, r);
+                // The only body there is: also without selection, as in the user interface.
+                if (f == null && SwDoc.SolidBodies(doc).Count == 1) f = Create(doc, new List<object>(), r);
+            }
             if (f == null) return Fail("SOLIDWORKS hat die Wandung nicht erzeugt.", notes);
 
             bool needsEdit = multi.Count > 0 || Direction(doc, f) != r.Direction;
+            int appliedMulti = 0;
             if (needsEdit)
             {
                 bool ok = FeatureEdit.Shell(doc, f, d =>
@@ -65,15 +76,28 @@ namespace Spiegelwerk.Build.Builders
                     }
                 });
                 if (!ok) notes.Add("Richtung oder Flächen mit eigener Wandstärke ließen sich nicht setzen.");
+                appliedMulti = ok ? multi.Count : 0;
             }
 
             ctx.Register(r.Name, f);
             BuildResult result = Ok(f, $"Wandung {r.Thickness * 1000:0.###} mm, {r.RemovedFaces.Count} offene Fläche(n)" +
-                                       (r.MultiThickness.Count > 0 ? $", {r.MultiThickness.Count} mit eigener Stärke" : ""), notes);
+                                       (appliedMulti > 0 ? $", {appliedMulti} mit eigener Stärke" : ""), notes);
             if (r.Direction == 0 || r.Direction == 1)
                 result.Alternatives.Add(new Alternative("Wandung nach außen/innen gewechselt",
                     () => FeatureEdit.Shell(doc, f, d => d.Direction = 1 - d.Direction)));
             return result;
+        }
+
+        /// <summary>
+        /// The body a closed shell hollows: the one carrying the mirrored outer face, or the
+        /// only candidate. Null if that is not clear.
+        /// </summary>
+        private static Body2? ShelledBody(BuildContext ctx, ShellRecord r, List<Body2> candidates, List<string> notes)
+        {
+            if (r.BodyFace != null && ctx.Topology.FindFace(r.BodyFace.Mirror(ctx.Mirror), notes)?.GetBody() is Body2 body &&
+                (!ctx.SeparateBody || ctx.IsOwnBody(body)))
+                return body;
+            return candidates.Count == 1 ? candidates[0] : null;
         }
 
         /// <summary>

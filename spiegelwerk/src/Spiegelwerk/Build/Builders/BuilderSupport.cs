@@ -109,6 +109,16 @@ namespace Spiegelwerk.Build.Builders
                     return ctx.Math.PlaneOf(plane).Normal;
                 case Feature f when f.GetSpecificFeature2() is RefAxis axis:
                     return SwDoc.AxisLine(axis).Direction;
+                case SketchLine line:
+                {
+                    // Start → end in model coordinates; points of a 3D sketch are model coordinates already.
+                    Sketch sketch = ((SketchSegment)line).GetSketch();
+                    var a = (SketchPoint)line.GetStartPoint2();
+                    var b = (SketchPoint)line.GetEndPoint2();
+                    if (sketch.Is3D()) return new Vec3(b.X - a.X, b.Y - a.Y, b.Z - a.Z);
+                    Frame3 frame = ctx.Math.SketchFrame(sketch);
+                    return frame.ToWorld(b.X, b.Y) - frame.ToWorld(a.X, a.Y);
+                }
                 default:
                     return null;
             }

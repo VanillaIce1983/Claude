@@ -126,7 +126,7 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 
 82. **`InsertFeatureShell` gibt kein Feature zurück.** → Das neue Feature ist das zuletzt hinzugefügte, wenn es eine Wandung ist und vorher nicht da war.
 83. **Mehrfachdicken über `InsertFeatureShellAddThickness`** sind kaum dokumentiert (Reihenfolge, Markierungen). → Wandung mit den offenen Flächen anlegen, Flächen mit eigener Stärke danach über `MultipleThicknessFaces` und `SetMultipleThicknessAtIndex` setzen.
-84. **Geschlossene Wandung im selben Teil** könnte ohne Auswahl alle Körper aushöhlen. → Den gespiegelten Körper wählen; die Prüfung der Originalkörper fängt den Rest.
+84. **Geschlossene Wandung:** Ohne offene Flächen sagt die Wandung nicht, welchen Körper sie aushöhlt, und ohne Auswahl könnte SOLIDWORKS einen beliebigen oder alle nehmen. → Eine Außenfläche des ausgehöhlten Körpers erfassen und im Ziel genau diesen Körper wählen (im selben Teil nur gespiegelte Körper); nicht eindeutig oder noch kein gespiegelter Körper: keine Wandung, sondern eine Meldung. Ohne Auswahl nur, wenn das Teil genau einen Körper hat.
 85. **Eine fehlende offene Fläche** ergäbe einen anderen Körper (dort geschlossen). → Dann keine Wandung, sondern eine Meldung. Fehlende Flächen mit eigener Stärke bekommen die Standardstärke, mit Hinweis.
 86. **Die Zugrichtung einer Formschräge hängt am Bezug.** Eine Ebene, die mit der gespiegelten zusammenfällt, kann die entgegengesetzte Normale haben (die Standardebene *rechts* beim Spiegeln an *rechts*). → Flag nach σ der Bezugsrichtung; die Gegenrichtung bleibt als Variante für die Prüfung.
 87. **Trennlinien.** Eine Trennlinie mit Lücke ist keine; die „andere Seite“ je Kante hängt an der Kantenorientierung. → Alle Kanten oder keine Formschräge; Seiten übernehmen, Gegenseite als Variante. Die Zuordnung der Seiten-Flags zu den Kanten folgt der Auswahlreihenfolge (Annahme, siehe Tabelle).
@@ -157,6 +157,7 @@ Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in eine
 | Bohrung über Datenobjekt | `CreateDefinition(swFmHoleWzd)` + `InitializeHole` + Fläche am Punkt gewählt + `CreateFeature` (Beispiel der Hilfe) | `HoleWizard5` mit −1 für die typabhängigen Werte |
 | Positionsskizze der neuen Bohrung | 2D-Skizze auf ebener Fläche, über `GetSketchPoints` zu finden, per `EditSketch` beschreibbar | sonst wird die Bohrung entfernt und gemeldet |
 | Wandung | offene Flächen mit Markierung 1 (Beispiel eines Drittanbieters), sonst 0; `Direction` 0/1 = innen/außen | Richtung wird nach dem Anlegen verglichen und gesetzt; Alternative für die Prüfung |
+| Geschlossene Wandung | Körper mit Markierung 1 (sonst 0) wählen | bei genau einem Körper auch ohne Auswahl |
 | Formschräge | Zugbezug 1, Flächen 2, Trennlinien 4 (API-Hilfe) | — |
 | Seiten einer Trennlinie | `SetOtherFacesFlagAtIndex` zählt in Auswahlreihenfolge | Variante „andere Seite“ für die Prüfung |
 | Feature-Bereich von Mustern | `FeatureScope`/`SetFeatureScope` spät gebunden, falls vorhanden (Interop 2024) | sonst Prüfung der Originalkörper, Feature wird ggf. entfernt |

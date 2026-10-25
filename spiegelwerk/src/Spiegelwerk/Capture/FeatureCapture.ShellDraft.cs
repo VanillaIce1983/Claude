@@ -1,6 +1,8 @@
 using System;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
+using SolidWorks.Interop.swconst;
+using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Records;
 
 namespace Spiegelwerk.Capture
@@ -28,7 +30,34 @@ namespace Spiegelwerk.Capture
             {
                 d.ReleaseSelectionAccess();
             }
+            if (r.RemovedFaces.Count == 0) r.BodyFace = OuterFaceOfShelledBody(f);
             return r;
+        }
+
+        /// <summary>
+        /// Closed shell: with the rollback bar right after the shell, the body carrying the
+        /// shell's faces is the hollowed one; any of its faces made by another feature is an
+        /// outer face, unchanged by the shell and therefore present in the target before it.
+        /// </summary>
+        private FaceSignature? OuterFaceOfShelledBody(Feature shell)
+        {
+            FeatureManager fm = _doc.FeatureManager;
+            if (!fm.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, shell.Name)) return null;
+            try
+            {
+                if (!(shell.GetFaces() is object[] own) || !(own.OfType<Face2>().FirstOrDefault()?.GetBody() is Body2 body)) return null;
+                if (!(body.GetFaces() is object[] faces)) return null;
+                Face2? outer = faces.OfType<Face2>().FirstOrDefault(face => (face.GetFeature() as Feature)?.Name != shell.Name);
+                return outer == null ? null : TopologyCapture.Face(outer);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+            finally
+            {
+                fm.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToEnd, "");
+            }
         }
 
         private DraftRecord CaptureDraft(Feature f, string type, DraftFeatureData2 d)

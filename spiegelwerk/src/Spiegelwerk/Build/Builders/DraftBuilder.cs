@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
+using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
 using static Spiegelwerk.Build.Builders.BuilderSupport;
@@ -32,7 +33,14 @@ namespace Spiegelwerk.Build.Builders
             var notes = new List<string>();
             bool partingLine = r.Kind != DraftKind.NeutralPlane;
 
-            object? direction = Find(ctx, r.Direction, notes);
+            // Nothing to draft: fail before the direction can add a helper plane or axis.
+            var probe = new List<string>();
+            if (!partingLine && !r.Faces.Any(fc => ctx.Topology.FindFace(fc.Mirror(ctx.Mirror), probe) != null))
+                return Fail("Keine der Flächen der Formschräge wurde im Ziel gefunden.", notes);
+            if (partingLine && r.PartingLines.Any(e => ctx.Topology.FindEdge(e.Mirror(ctx.Mirror), probe) == null))
+                return Fail("Eine Kante der Trennlinie wurde im Ziel nicht gefunden.", notes);
+
+            object? direction = r.Direction!.Kind == GeometryRefKind.Axis ? PullAxis(ctx, r.Direction.Mirror(ctx.Mirror).Axis, notes) : Find(ctx, r.Direction, notes);
             if (direction == null)
                 return Fail(partingLine ? "Zugrichtung im Ziel nicht gefunden." : "Neutrale Ebene im Ziel nicht gefunden.", notes);
 
@@ -95,6 +103,26 @@ namespace Spiegelwerk.Build.Builders
                     for (short i = 0; i < d.GetPartingLinesCount(); i++) d.SetOtherFacesFlagAtIndex(i, !d.GetOtherFacesFlagAtIndex(i));
                 })));
             return result;
+        }
+
+        /// <summary>
+        /// A pull direction along a line: an axis of this job, a straight edge (in the same part
+        /// only of the mirrored bodies) or a helper axis – not a sketch line, which SOLIDWORKS
+        /// does not offer as a direction of pull. Faces found later come after any rebuild.
+        /// </summary>
+        private static object? PullAxis(BuildContext ctx, Line3 line, List<string> notes)
+        {
+            if (ctx.Planes.FindAxis(line) is Feature axis) return axis;
+            if (ctx.Topology.FindLinearEdgeOn(line, ctx.SamePart) is Edge edge) return Safe(edge);
+            try
+            {
+                return ctx.Planes.Axis(line);
+            }
+            catch (InvalidOperationException ex)
+            {
+                notes.Add(ex.Message);
+                return null;
+            }
         }
 
         private static string Describe(DraftRecord r, bool flipped)
