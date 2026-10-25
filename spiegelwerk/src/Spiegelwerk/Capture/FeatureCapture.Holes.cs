@@ -8,7 +8,7 @@ using Spiegelwerk.Sw;
 
 namespace Spiegelwerk.Capture
 {
-    /// <summary>Hole Wizard holes: hole data, hole centres and the position sketch.</summary>
+    /// <summary>Hole Wizard holes: hole data, hole centres and the position sketch; sketches of both kinds of hole.</summary>
     internal sealed partial class FeatureCapture
     {
         /// <summary>Sketch name → the hole it belongs to.</summary>
@@ -18,9 +18,9 @@ namespace Spiegelwerk.Capture
         private readonly Dictionary<string, string?> _positionSketches = new Dictionary<string, string?>(StringComparer.Ordinal);
 
         /// <summary>
-        /// The hole a sketch belongs to, if it is one of the two sketches of a Hole Wizard hole
-        /// (position and profile). Those are not rebuilt on their own: the new hole brings its
-        /// own, and the position sketch is written into that.
+        /// The hole a sketch belongs to, if it is one of the sketches of a Hole Wizard hole
+        /// (position and profile) or an Advanced Hole. Those are not rebuilt on their own: the
+        /// new hole brings its own, and the position sketch is written into that.
         /// </summary>
         private PartOfFeatureRecord? HolePart(Feature sketch, string type)
         {
@@ -28,12 +28,36 @@ namespace Spiegelwerk.Capture
             if (_holeParts == null)
             {
                 _holeParts = new Dictionary<string, string>(StringComparer.Ordinal);
-                foreach (Feature hole in SwDoc.TopLevelFeatures(_doc).Where(x => x.GetTypeName2() == "HoleWzd"))
+                foreach (Feature hole in SwDoc.TopLevelFeatures(_doc).Where(IsPositionedHole))
                     foreach (Feature sub in SwDoc.SubFeatures(hole).Where(SwDoc.IsSketch))
                         _holeParts[sub.Name] = hole.Name;
             }
             return _holeParts.TryGetValue(sketch.Name, out string owner) ? new PartOfFeatureRecord(sketch.Name, type, owner) : null;
         }
+
+        /// <summary>
+        /// Hole Wizard hole or Advanced Hole. The type name of the latter is not documented:
+        /// features with "Hole" in it are asked for their definition – only those, so the
+        /// tree walk stays cheap.
+        /// </summary>
+        private static bool IsPositionedHole(Feature f)
+        {
+            string type = f.GetTypeName2();
+            if (type == "HoleWzd") return true;
+            if (type.IndexOf("Hole", StringComparison.OrdinalIgnoreCase) < 0) return false;
+            try
+            {
+                return f.GetDefinition() is AdvancedHoleFeatureData;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>The sketch the holes sit on, for either kind of hole.</summary>
+        private Feature? PositionSketchOf(Feature hole) =>
+            hole.GetDefinition() is AdvancedHoleFeatureData ? SwAdvancedHole.PositionSketch(hole) : SwHole.PositionSketch(_doc, hole);
 
         private bool IsPositionSketch(string hole, string sketch)
         {
@@ -41,7 +65,7 @@ namespace Spiegelwerk.Capture
             {
                 try
                 {
-                    position = SwDoc.FeatureByName(_doc, hole) is Feature f ? SwHole.PositionSketch(_doc, f)?.Name : null;
+                    position = SwDoc.FeatureByName(_doc, hole) is Feature f ? PositionSketchOf(f)?.Name : null;
                 }
                 catch (Exception)
                 {

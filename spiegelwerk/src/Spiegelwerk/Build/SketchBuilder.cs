@@ -84,9 +84,10 @@ namespace Spiegelwerk.Build
 
         /// <summary>
         /// Writes the mirrored sketch into an existing sketch: the position sketch SOLIDWORKS
-        /// creates together with a Hole Wizard hole. The points the sketch held before (the
-        /// first hole, placed where the face was picked) are removed afterwards, so exactly the
-        /// mirrored points with their relations and dimensions remain. Unlike
+        /// creates together with a Hole Wizard hole or an Advanced Hole. The points the sketch
+        /// held before (the first hole, placed where the face was picked) are removed
+        /// afterwards, so exactly the mirrored points with their relations and dimensions
+        /// remain. Unlike
         /// <see cref="Build"/>, a failure does not delete the sketch – it belongs to the hole.
         /// </summary>
         public SketchMap BuildInto(SketchModel src, Feature existing, List<string> notes)

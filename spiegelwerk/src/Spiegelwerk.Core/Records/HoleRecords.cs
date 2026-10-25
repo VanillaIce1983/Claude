@@ -5,14 +5,13 @@ using Spiegelwerk.Core.Sketch;
 namespace Spiegelwerk.Core.Records
 {
     /// <summary>
-    /// Hole Wizard hole. The holes sit at the points of the position sketch, which is captured
-    /// with the hole and rebuilt into the position sketch of the new hole. Sizes are kept
-    /// exactly: a mirrored part needs the same bores – and the same right-hand threads; a
-    /// cosmetic thread carries no handedness, so nothing has to be mirrored there.
+    /// A hole that brings its own position sketch – Hole Wizard and Advanced Hole. The holes
+    /// sit at the points of that sketch, which is captured with the hole and rebuilt into the
+    /// position sketch of the new hole; it is not rebuilt as a sketch of its own.
     /// </summary>
-    public sealed class HoleRecord : FeatureRecord
+    public abstract class PositionedHoleRecord : FeatureRecord
     {
-        public HoleRecord(string name, string typeName, string positionSketchName, SketchModel position) : base(name, typeName)
+        protected PositionedHoleRecord(string name, string typeName, string positionSketchName, SketchModel position) : base(name, typeName)
         {
             PositionSketchName = positionSketchName;
             Position = position;
@@ -25,6 +24,22 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>Hole centres in model coordinates (unmirrored), as the hole reports them.</summary>
         public List<Vec3> Points { get; } = new List<Vec3>();
+
+        /// <summary>Placement face (or plane).</summary>
+        public GeometryRef? Face { get; set; }
+    }
+
+    /// <summary>
+    /// Hole Wizard hole. Sizes are kept exactly: a mirrored part needs the same bores – and the
+    /// same right-hand threads; a cosmetic thread carries no handedness, so nothing has to be
+    /// mirrored there.
+    /// </summary>
+    public sealed class HoleRecord : PositionedHoleRecord
+    {
+        public HoleRecord(string name, string typeName, string positionSketchName, SketchModel position)
+            : base(name, typeName, positionSketchName, position)
+        {
+        }
 
         /// <summary>swWzdHoleTypes_e, the detailed type.</summary>
         public int HoleType { get; set; }
@@ -43,9 +58,6 @@ namespace Spiegelwerk.Core.Records
         public bool Reverse { get; set; }
         public string ThreadClass { get; set; } = "";
 
-        /// <summary>Placement face (or plane).</summary>
-        public GeometryRef? Face { get; set; }
-
         /// <summary>Up-to reference of the end condition, if it has one.</summary>
         public GeometryRef? EndReference { get; set; }
 
@@ -59,8 +71,8 @@ namespace Spiegelwerk.Core.Records
 
     /// <summary>
     /// A sub-feature that is not rebuilt on its own but together with its owner – the sketches
-    /// of a Hole Wizard hole. Only valid while the owner is rebuilt too; otherwise the job
-    /// captures the sketch on its own again.
+    /// of a Hole Wizard hole or an Advanced Hole. Only valid while the owner is rebuilt too;
+    /// otherwise the job captures the sketch on its own again.
     /// </summary>
     public sealed class PartOfFeatureRecord : FeatureRecord
     {

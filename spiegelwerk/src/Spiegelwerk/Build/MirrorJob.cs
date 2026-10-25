@@ -74,6 +74,7 @@ namespace Spiegelwerk.Build
             new ShellBuilder(),
             new DraftBuilder(),
             new HoleBuilder(),
+            new AdvancedHoleBuilder(),
             new PatternBuilder(),
         };
 
@@ -106,7 +107,7 @@ namespace Spiegelwerk.Build
             var capture = new FeatureCapture(source, _math);
             List<FeatureRecord> records = features.Select(capture.Capture).ToList();
             // Sketches of a hole are rebuilt with the hole – only if the hole itself is rebuilt.
-            var holes = new HashSet<string>(records.OfType<HoleRecord>().Select(h => h.Name), StringComparer.Ordinal);
+            var holes = new HashSet<string>(records.OfType<PositionedHoleRecord>().Select(h => h.Name), StringComparer.Ordinal);
             for (int i = 0; i < records.Count; i++)
                 if (records[i] is PartOfFeatureRecord part && !holes.Contains(part.Owner))
                     records[i] = capture.CaptureOnItsOwn(features[i], part);
@@ -252,8 +253,8 @@ namespace Spiegelwerk.Build
         private static BuildResult RemoveAgain(BuildContext ctx, FeatureRecord record, BuildResult result)
         {
             // A hole's sketches belong to the hole alone and go with it.
-            BuilderSupport.Delete(ctx, result.Feature!, record is HoleRecord);
-            if (record is HoleRecord hole) ctx.ForgetSketch(hole.PositionSketchName);
+            BuilderSupport.Delete(ctx, result.Feature!, record is PositionedHoleRecord);
+            if (record is PositionedHoleRecord hole) ctx.ForgetSketch(hole.PositionSketchName);
             ctx.Unregister(record.Name);
             var failed = BuildResult.Failed("Das Feature hätte die Originalkörper verändert und wurde wieder entfernt.");
             failed.Notes.AddRange(result.Notes);

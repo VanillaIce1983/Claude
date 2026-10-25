@@ -177,7 +177,7 @@ namespace Spiegelwerk.Build.Builders
                     d.AutoSelect = false;
                     d.FeatureScopeBodies = ctx.OwnBodies().Cast<object>().ToArray();
                 }
-                if (!SelectFace(ctx, face, centres)) return null;
+                if (!SelectFaceAt(ctx, face, centres.Count > 0 ? centres[0] : (Vec3?)null, 0)) return null;
                 Feature? f = fm.CreateFeature(d);
                 SwSelect.Clear(ctx.Doc);
                 if (f != null) scopeSet = scope;
@@ -197,7 +197,7 @@ namespace Spiegelwerk.Build.Builders
         /// </summary>
         private static Feature? CreateByHoleWizard(BuildContext ctx, HoleRecord r, object face, List<Vec3> centres, bool reverse)
         {
-            if (!SelectFace(ctx, face, centres)) return null;
+            if (!SelectFaceAt(ctx, face, centres.Count > 0 ? centres[0] : (Vec3?)null, 0)) return null;
             double Value(string name) => r.Values.TryGetValue(name, out double v) ? v : 0;
             double diameter = Value("HoleDiameter") > 0 ? Value("HoleDiameter") : Value("Diameter");
             double depth = Value("HoleDepth") > 0 ? Value("HoleDepth") : Value("Depth");
@@ -207,35 +207,6 @@ namespace Spiegelwerk.Build.Builders
                 r.ThreadClass, reverse, false, true, false, false, false);
             SwSelect.Clear(ctx.Doc);
             return f;
-        }
-
-        /// <summary>
-        /// The placement face, selected at the first mirrored hole centre (SOLIDWORKS places the
-        /// first hole where the face was picked). The pick must hit this very face – in the same
-        /// part the original may have a face at the same spot – otherwise the face is selected
-        /// without a point; the position sketch moves the holes to their places anyway.
-        /// </summary>
-        private static bool SelectFace(BuildContext ctx, object face, List<Vec3> centres)
-        {
-            ModelDoc2 doc = ctx.Doc;
-            SwSelect.Clear(doc);
-            if (face is Face2 target && centres.Count > 0)
-            {
-                Vec3 p = centres[0];
-                if (doc.Extension.SelectByID2("", "FACE", p.X, p.Y, p.Z, false, 0, null, 0) &&
-                    ((SelectionMgr)doc.SelectionManager).GetSelectedObject6(1, -1) is Face2 picked && IsSameFace(ctx, picked, target))
-                    return true;
-                SwSelect.Clear(doc);
-            }
-            return SwSelect.Select(doc, face, 0, false);
-        }
-
-        private static bool IsSameFace(BuildContext ctx, Face2 picked, Face2 target)
-        {
-            FaceSignature a = TopologyCapture.Face(picked), b = TopologyCapture.Face(target);
-            if (!b.CouldBe(a) || TopologyCapture.DistanceToFace(target, a.Sample) > Tol.Length) return false;
-            // Separate body: the face of the original at the same spot would put the hole into the original.
-            return !ctx.SeparateBody || (picked.GetBody() is Body2 body && ctx.IsOwnBody(body));
         }
 
         private static int HoleType(ModelDoc2 doc, Feature f)

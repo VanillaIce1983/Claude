@@ -124,6 +124,12 @@ namespace Spiegelwerk.Build.Builders
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
+        public static bool AdvancedHole(ModelDoc2 doc, Feature f, Action<AdvancedHoleFeatureData> change)
+        {
+            var d = (AdvancedHoleFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
         public static bool LinearPattern(ModelDoc2 doc, Feature f, Action<LinearPatternFeatureData> change)
         {
             var d = (LinearPatternFeatureData)f.GetDefinition();

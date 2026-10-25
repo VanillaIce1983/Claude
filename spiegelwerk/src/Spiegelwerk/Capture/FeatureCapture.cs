@@ -66,6 +66,8 @@ namespace Spiegelwerk.Capture
                         return CaptureCircularPattern(f, type, cp);
                     case WizardHoleFeatureData2 wh:
                         return CaptureHole(f, type, wh);
+                    case AdvancedHoleFeatureData ah:
+                        return CaptureAdvancedHole(f, type, ah);
                     case ShellFeatureData sh:
                         return CaptureShell(f, type, sh);
                     case DraftFeatureData2 dr:

@@ -12,7 +12,7 @@
     <AssemblyName>Spiegelwerk</AssemblyName>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <Product>Spiegelwerk</Product>
     <Description>Unabhängiges Spiegeln von Bauteilen für SOLIDWORKS</Description>
 

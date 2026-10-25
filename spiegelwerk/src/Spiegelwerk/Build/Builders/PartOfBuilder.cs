@@ -4,7 +4,8 @@ namespace Spiegelwerk.Build.Builders
 {
     /// <summary>
     /// Sketches that belong to a feature which brings its own (the position and profile sketch
-    /// of a Hole Wizard hole): nothing to build here, the owner takes care of them.
+    /// of a Hole Wizard hole, the sketches of an Advanced Hole): nothing to build here, the
+    /// owner takes care of them.
     /// </summary>
     internal sealed class PartOfBuilder : IFeatureBuilder
     {

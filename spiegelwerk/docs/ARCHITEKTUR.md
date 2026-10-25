@@ -43,9 +43,10 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `PlaneClassifier` | Welche Ebene trägt die gespiegelte Skizze: vorhandene, versetzte Standardebene oder Drei-Punkte-Ebene |
 | | `ComponentPlacement` | Platzierung des gespiegelten Teils in der Baugruppe |
 | | `PatternInstances` | Lage der Musterinstanzen spiegeln (R ∘ T ∘ R) und als Mengen vergleichen |
+| | `HoleAxis` | Wo eine Bohrungsachse den Körper verlässt (fernseitige Fläche der erweiterten Bohrung) |
 | `Matching` | `EdgeSignature`, `FaceSignature`, `TopologyMatcher` | Fingerabdrücke und deren Zuordnung im neu aufgebauten Teil |
 | `Verification` | `MassState`, `MassComparison` | Volumen und erstes Moment, gespiegelt und verglichen |
-| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs`, `HoleRecords.cs` mit der Typzuordnung `HoleTypes`, `ShellDraftRecords.cs`, `VariableFilletRecords.cs` mit `EdgeLocation`, `FaceFilletRecords.cs`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
+| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs`, `HoleRecords.cs` mit der gemeinsamen Basis `PositionedHoleRecord` und der Typzuordnung `HoleTypes`, `AdvancedHoleRecords.cs`, `ShellDraftRecords.cs`, `VariableFilletRecords.cs` mit `EdgeLocation`, `FaceFilletRecords.cs`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
 
 ### Spiegelwerk (Add-In)
 
@@ -59,11 +60,12 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `SwDoc`, `SwSelect` | Feature-Baum, Standardebenen, Körper, Massen; Auswahl mit Markierung |
 | | `SwPattern` | Lage der Instanzen eines Musters lesen (`GetTransform`) |
 | | `SwHole` | Maße und Optionen einer Bohrung lesen, vergleichen, setzen; Positionsskizze finden |
+| | `SwAdvancedHole` | Elemente einer erweiterten Bohrung lesen, anlegen, vergleichen, setzen; Positionsskizze finden |
 | | `SwLate` | Spät gebundener Zugriff auf API-Teile, die erst neuere Versionen haben |
 | | `SwPreferences`, `SketchInputScope`, `UpdateFreeze` | Benutzereinstellungen und Anzeige während des Laufs abschalten und wiederherstellen |
 | `Capture/` | `FeatureCollector` | Welche Features, in Erstellungsreihenfolge |
 | | `SketchCapture` | `ISketch` → `SketchModel` |
-| | `FeatureCapture` (+ `.SweepLoft`, `.Patterns`, `.Holes`, `.ShellDraft`, `.VariableFillet`, `.FaceFillet`) | Feature-Definitionen → `FeatureRecord` (mit `AccessSelections`) |
+| | `FeatureCapture` (+ `.SweepLoft`, `.Patterns`, `.Holes`, `.AdvancedHole`, `.ShellDraft`, `.VariableFillet`, `.FaceFillet`) | Feature-Definitionen → `FeatureRecord` (mit `AccessSelections`) |
 | | `TopologyCapture` | Kante/Fläche/Eckpunkt → Fingerabdruck |
 | | `MassCapture` | Volumenänderung und Flächenproben jedes Features über die Rückrollleiste |
 | `Build/` | `MirrorJob` | Der ganze Lauf; neues Teil anlegen, Gleichungen kopieren, Original löschen |
@@ -71,7 +73,7 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `PlaneResolver` | Liefert für eine Ebene ein Ebenen-Feature im Ziel, für eine Gerade eine Achse |
 | | `TopologyFinder` | Findet Kanten, Flächen, Eckpunkte, Achsen und Skizzen im Ziel |
 | | `SketchBuilder` | Schreibt eine gespiegelte Skizze – neu oder in eine vorhandene (Positionsskizze einer Bohrung) |
-| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, variable Verrundung, Flächen- und vollständige Verrundung, Fase, Wandung, Formschräge, Bohrung, Muster |
+| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, variable Verrundung, Flächen- und vollständige Verrundung, Fase, Wandung, Formschräge, Bohrung, erweiterte Bohrung, Muster |
 | | `StepVerifier` | Messen (Volumen, Moment, Flächenproben), Varianten probieren |
 | `AssemblyContext/` | `AssemblyMirror` | Komponente spiegeln, speichern, platzieren |
 
@@ -167,6 +169,21 @@ Eine Bohrung des Bohrungsassistenten besteht aus dem Feature und zwei eigenen Sk
 
 Die Bohrrichtung bezieht sich auf die Normale der Positionsskizze. Auf einer Fläche ist das die Außennormale, und die bleibt bei einer Spiegelung außen (σ = +1) – das Flag „Richtung umkehren“ bleibt. Liegt die Bohrung auf einer Ebene (oder steht eine Ebene für eine nicht gefundene Fläche), kann die Skizze andersherum liegen; dann folgt das Flag σ wie bei Extrusionen. Ersatzpunkte für fehlende Skizzenbezüge sind in der Positionsskizze Endpunkte fixierter Konstruktionslinien, denn jeder eigene Skizzenpunkt wäre eine zusätzliche Bohrung. Maße werden nicht gespiegelt, auch nicht die Gewinderichtung: Ein Gegenstück bekommt dieselben Bohrungen mit denselben Rechtsgewinden. Eine geometrische Spiegelung würde Linksgewinde ergeben; die kosmetische Gewindedarstellung trägt aber gar keine Drehrichtung.
 
+### Erweiterte Bohrung
+
+Eine erweiterte Bohrung ist ein Stapel von Elementen (Senkung zylindrisch oder kegelig, Bohrung, Gewinde, Kegelgewinde) von der nahseitigen Fläche ins Material, wahlweise ein zweiter Stapel von einer fernseitigen Fläche aus. Ihre Positionsskizze wird wie beim Bohrungsassistenten behandelt – beide Bohrungsarten teilen die Basis `PositionedHoleRecord`, und alles, was an Teil-Skizzen hängt (`PartOfFeatureRecord`, Wiedererfassen, Zurücknehmen, Entfernen samt Skizzen), gilt für beide. Die Positionsskizze ist die 2D-Unterskizze mit den meisten Skizzenpunkten; einen Getter dafür hat `IAdvancedHoleFeatureData` nicht.
+
+Die Feature-Daten nennen weder die nah- noch die fernseitige Fläche. Erfasst werden sie geometrisch im Zustand vor der Bohrung (Rückrollleiste vor das Feature): nahseitig die ebene Fläche unter einem Bohrpunkt, parallel zur Positionsskizze; fernseitig die ebene Fläche desselben Körpers, durch die die Bohrungsachse den Körper zuerst verlässt (`HoleAxis.FirstExit`, Tests in `AdvancedHoleTests`). Das trifft jede gewöhnliche Platte und jeden Flansch; wer eine andere Fläche gewählt hat, sieht es am Bericht, der die Annahme nennt, und an der Prüfung.
+
+`AdvancedHoleBuilder`:
+
+1. **Eine Bohrung anlegen** wie im Beispiel der API-Hilfe: nahseitige Fläche am ersten gespiegelten Bohrpunkt wählen, fernseitige dazu, Elemente mit `CreateAdvancedHoleElementData` anlegen und füllen (`SwAdvancedHole`: erst Norm, Schraubenart, Größe, dann die Schalter – eigener Durchmesser, Standardtiefe, Passung, Bohrspitze, Gewindeklasse –, dann Endbedingung samt Bezug, dann die Werte), `IFeatureManager.AdvancedHole`. Welche Auswahlmarkierungen der Aufruf erwartet und ob er ein Objekt-Array oder `DispatchWrapper` will, ist nicht dokumentiert: Die Varianten werden der Reihe nach versucht; liegt die Positionsskizze der neuen Bohrung auf der fernseitigen Fläche, waren die Seiten vertauscht, und die Bohrung wird vor dem nächsten Versuch wieder entfernt.
+2. **Positionsskizze übertragen** mit `SketchBuilder.BuildInto`, wie beim Bohrungsassistenten.
+3. **Elemente abgleichen:** jedes Element mit dem Original vergleichen; was abweicht, in einem `FeatureEdit` korrigieren – bei gleicher Anzahl und Typfolge in den vorhandenen Elementen, sonst mit neuen (`SetNearSideElements`/`SetFarSideElements`).
+4. **Zählen.**
+
+Eine Richtung gibt es nicht zu spiegeln: Die Elemente laufen von ihrer Fläche ins Material, und die Spiegelung lässt Außennormalen außen. Einen Feature-Bereich hat die API für die erweiterte Bohrung nicht; im selben Teil entfernt die Originalprüfung von `MirrorJob` eine Bohrung, die das Original erreichen würde. „Tiefe bis zur Spitze“ (`AdvancedHole2`, erst in neueren Versionen) ist aus den Feature-Daten nicht lesbar und bleibt bei der Voreinstellung.
+
 ## Variable Verrundung
 
 Radien ändern sich bei einer Spiegelung nicht, wohl aber die Richtung, in der eine Kante läuft. Eckradien hängen an Eckpunkten und werden über deren gespiegelte Lage zugeordnet. Kontrollpunkte hängen an einer Kante und einer Lage entlang dieser Kante, gezählt von ihrem Anfang. Läuft die neu aufgebaute Kante andersherum als die gespiegelte, wird die Lage vom anderen Ende gezählt (`EdgeLocation.Map`, Tests in `VariableFilletTests`); bei geschlossenen Kanten legt der Kern die Naht frei, dort wird nichts geraten.
@@ -240,4 +257,4 @@ internal sealed class ShellBuilder : IFeatureBuilder
 }
 ```
 
-Eine Spiegelung kehrt jede Drehrichtung um: Kreismuster und Verdrehungen von Austragungen laufen in der Kopie gegensinnig (das erledigen `PatternBuilder` und `SweepBuilder`). Beim Bohrungsassistenten läuft das Bohrbild (Positionsskizze) als gewöhnliche Skizze durch `SketchBuilder` – nur in die vorhandene Skizze der Bohrung hinein.
+Eine Spiegelung kehrt jede Drehrichtung um: Kreismuster und Verdrehungen von Austragungen laufen in der Kopie gegensinnig (das erledigen `PatternBuilder` und `SweepBuilder`). Bei beiden Bohrungsarten läuft das Bohrbild (Positionsskizze) als gewöhnliche Skizze durch `SketchBuilder` – nur in die vorhandene Skizze der Bohrung hinein.
