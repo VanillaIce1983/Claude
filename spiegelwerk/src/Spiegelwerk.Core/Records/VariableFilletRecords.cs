@@ -74,12 +74,14 @@ namespace Spiegelwerk.Core.Records
         /// <param name="wanted">The original edge, already mirrored.</param>
         /// <param name="actual">The rebuilt edge.</param>
         /// <param name="full">1 for fractions, 100 for percent.</param>
+        /// <remarks>The orientation is decided like edge matching does (summed end distances), so an edge that matched is never rejected here.</remarks>
         public static double? Map(EdgeSignature wanted, EdgeSignature actual, double location, double full, double tol = Tol.Length)
         {
             if (wanted.IsClosed || actual.IsClosed) return null;
-            if (actual.Start.AlmostEquals(wanted.Start, tol) && actual.End.AlmostEquals(wanted.End, tol)) return location;
-            if (actual.Start.AlmostEquals(wanted.End, tol) && actual.End.AlmostEquals(wanted.Start, tol)) return full - location;
-            return null;
+            double same = actual.Start.DistanceTo(wanted.Start) + actual.End.DistanceTo(wanted.End);
+            double swapped = actual.Start.DistanceTo(wanted.End) + actual.End.DistanceTo(wanted.Start);
+            if (System.Math.Min(same, swapped) > 2 * tol) return null;
+            return same <= swapped ? location : full - location;
         }
     }
 }

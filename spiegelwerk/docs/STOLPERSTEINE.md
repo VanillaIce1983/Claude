@@ -134,10 +134,11 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 
 ## Variable Verrundung
 
-89. **Reihenfolge der Radien bei `FeatureFillet3` ist nicht dokumentiert.** → Anlegen mit einer plausiblen Reihenfolge (Kantenenden in Auswahlreihenfolge), dann jeden Eckradius über `SetRadius(Eckpunkt, …)` setzen; die Eckpunkte werden unter `AccessSelections` aus den Kanten der neuen Verrundung gelesen und nach Lage zugeordnet.
-90. **Kontrollpunkte zählen vom Kantenanfang.** Die gespiegelte Kante kann im neuen Teil andersherum laufen; 25 % wären dann 75 %. → Anfang und Ende der neuen Kante mit der gespiegelten vergleichen und die Lage notfalls von der anderen Seite zählen. Ob die Lage als Bruchteil oder in Prozent gemeldet wird, ist nicht dokumentiert: Werte über 1 gelten als Prozent.
+89. **Reihenfolge der Radien bei `FeatureFillet3` ist nicht dokumentiert.** → Anlegen mit einer plausiblen Reihenfolge (Kantenenden in Auswahlreihenfolge), dann jeden Eckpunkt über `SetRadius(Eckpunkt, …)` setzen – den Radius des gespiegelten Eckpunkts, oder den Standardradius, wo das Original keinen eigenen hatte (dort kann beim Anlegen ein Radius für eine andere Ecke gelandet sein). Die Eckpunkte werden unter `AccessSelections` aus den Kanten der neuen Verrundung gelesen und nach Lage zugeordnet.
+90. **Kontrollpunkte zählen vom Kantenanfang.** Die gespiegelte Kante kann im neuen Teil andersherum laufen; 25 % wären dann 75 %. → Anfang und Ende der neuen Kante mit der gespiegelten vergleichen (wie beim Zuordnen der Kanten über die Summe der Endabstände) und die Lage notfalls von der anderen Seite zählen. Ob die Lage als Bruchteil oder in Prozent gemeldet wird, ist nicht dokumentiert: Werte über 1 gelten als Prozent.
 91. **Kontrollpunkte gibt es nur in der Anzahl, die die Verrundung hat** (anfangs drei je Kante). → Nur übertragen, wenn die Anzahl je Kante mit dem Original übereinstimmt; sonst Hinweis, und die Prüfung zeigt die Abweichung.
 92. **Variable und einfache Verrundung** könnten beide Datenschnittstellen beantworten. → Die variable zuerst abfragen.
+93. **Verluste, die schon beim Erfassen feststehen** (Feature-Bereich, Rücksprungabstände, Regionen, nicht lesbare Verbinder …), standen bisher nur in den Details, der Eintrag blieb „OK“ – und „Original löschen“ hätte gegriffen. → Jeder Hinweis aus dem Erfassen macht ein sonst fehlerfreies Feature zur Warnung.
 
 ## Was beim ersten Test in SOLIDWORKS zu prüfen ist
 

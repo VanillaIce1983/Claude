@@ -37,6 +37,18 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Edge_that_matches_within_tolerance_is_oriented_like_the_matcher_does()
+        {
+            Vec3 a = new Vec3(0.01, 0, 0), b = new Vec3(0.05, 0.02, 0);
+            EdgeSignature wanted = Line(a, b);
+            // Runs backwards, one end 1.5 µm off (across the edge, so the length stays): the matcher
+            // accepts it, the sum of the end distances is below 2 µm.
+            EdgeSignature rebuilt = Line(b + new Vec3(0, 0, 1.5e-6), a + new Vec3(0, 0, 0.4e-6));
+            Assert.True(TopologyMatcher.FindEdge(wanted, new[] { rebuilt }).Found);
+            Assert.Equal(0.75, EdgeLocation.Map(wanted, rebuilt, 0.25, 1)!.Value, 9);
+        }
+
+        [Fact]
         public void Closed_or_unrelated_edges_are_not_guessed()
         {
             var c = new Vec3(0.01, 0.01, 0);

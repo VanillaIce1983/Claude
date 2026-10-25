@@ -203,6 +203,10 @@ namespace Spiegelwerk.Build
                 result.Notes.Add($"Prüfung nicht möglich: {ex.Message}");
                 ctx.Topology.Invalidate();
             }
+            // What capture already knew could not be carried over (feature scope, setbacks, regions
+            // ...) makes the copy a warning, not "OK" – also for "delete original".
+            if (result.Success && result.Status == ReportStatus.Ok && record.Notes.Count > 0) result.Status = ReportStatus.Warning;
+
             if (guardOriginal && result.Success && !OriginalUntouched(ctx, originalBefore))
             {
                 result = RemoveAgain(ctx, record, result);

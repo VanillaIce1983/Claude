@@ -85,7 +85,7 @@ namespace Spiegelwerk.Build.Builders
                 for (int i = 0; i < d.FilletEdgeCount; i++)
                     if (d.GetFilletEdgeAtIndex(i) is Edge e) edges.Add((e, TopologyCapture.Edge(e)));
 
-                verticesSet = SetVertexRadii(d, edges, wantedVertices);
+                verticesSet = SetVertexRadii(d, edges, wantedVertices, r.DefaultRadius);
                 pointsSet = SetControlPoints(d, r, wantedEdges, editNotes);
             });
             notes.AddRange(editNotes);
@@ -115,19 +115,27 @@ namespace Spiegelwerk.Build.Builders
             return f;
         }
 
-        /// <summary>Each vertex of the new fillet edges that has a radius in the original gets it; returns how many.</summary>
-        private static int SetVertexRadii(VariableFilletFeatureData2 d, List<(Edge edge, EdgeSignature sig)> edges, List<VertexRadius> wanted)
+        /// <summary>
+        /// Every vertex of the new fillet edges: the radius of the mirrored original vertex, or
+        /// the default where the original had none – the creation call may have put a radius
+        /// meant for another vertex there. Returns how many of the original's radii were set.
+        /// </summary>
+        private static int SetVertexRadii(VariableFilletFeatureData2 d, List<(Edge edge, EdgeSignature sig)> edges, List<VertexRadius> wanted,
+            double defaultRadius)
         {
             var done = new List<Vec3>();
+            int matched = 0;
             foreach (var (edge, _) in edges)
                 foreach (Vertex v in new[] { edge.GetStartVertex(), edge.GetEndVertex() }.OfType<Vertex>())
                 {
                     Vec3 p = TopologyCapture.Vertex(v);
                     if (done.Any(x => x.AlmostEquals(p))) continue;
+                    done.Add(p);
                     VertexRadius? w = wanted.FirstOrDefault(x => x.Point.AlmostEquals(p));
-                    if (w != null && Try(() => d.SetRadius(v, w.Radius))) done.Add(p);
+                    double radius = w?.Radius ?? defaultRadius;
+                    if (Try(() => d.SetRadius(v, radius)) && w != null) matched++;
                 }
-            return done.Count;
+            return matched;
         }
 
         /// <summary>
@@ -165,7 +173,8 @@ namespace Spiegelwerk.Build.Builders
                     double? location = EdgeLocation.Map(wantedEdges[group.Key], mine[i].sig, theirs[i].Location, full);
                     if (location == null)
                     {
-                        notes.Add($"Kante {group.Key + 1}: Lage eines Kontrollpunkts nicht übertragbar (geschlossene Kante).");
+                        string why = wantedEdges[group.Key].IsClosed || mine[i].sig.IsClosed ? "geschlossene Kante" : "Kantenenden passen nicht";
+                        notes.Add($"Kante {group.Key + 1}: Lage eines Kontrollpunkts nicht übertragbar ({why}).");
                         continue;
                     }
                     int index = mine[i].index;
