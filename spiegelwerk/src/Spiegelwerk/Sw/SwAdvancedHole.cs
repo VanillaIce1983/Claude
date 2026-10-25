@@ -226,6 +226,10 @@ namespace Spiegelwerk.Sw
         public static object[] Elements(AdvancedHoleFeatureData d, bool farSide) =>
             (farSide ? Get(() => d.GetFarSideElements()) : Get(() => d.GetNearSideElements())) as object[] ?? Array.Empty<object>();
 
+        /// <summary>Number of elements of one side as the feature data reports it; null if not readable.</summary>
+        public static int? ElementCount(AdvancedHoleFeatureData d, bool farSide) =>
+            farSide ? GetValue(() => d.FarSideElementsCount) : GetValue(() => d.NearSideElementsCount);
+
         /// <summary>
         /// The position sketch of an Advanced Hole: its 2D sub-sketch with the most sketch
         /// points (the hole centres). The data object has no getter for it.

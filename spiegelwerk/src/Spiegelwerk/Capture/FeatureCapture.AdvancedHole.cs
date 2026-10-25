@@ -89,6 +89,10 @@ namespace Spiegelwerk.Capture
         {
             object[] elements = SwAdvancedHole.Elements(d, farSide);
             string side = farSide ? "fernseitig" : "nahseitig";
+            // A side that cannot be handed out must not pass as a side without elements.
+            int? count = SwAdvancedHole.ElementCount(d, farSide);
+            if (count.HasValue && count.Value != elements.Length)
+                throw new NotSupportedException($"Elemente {side} nicht vollständig lesbar ({elements.Length} von {count.Value}).");
             for (int i = 0; i < elements.Length; i++)
             {
                 AdvancedHoleElement e;

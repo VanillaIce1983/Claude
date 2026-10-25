@@ -79,15 +79,16 @@ namespace Spiegelwerk.Capture
         /// <summary>
         /// A sketch of a hole that is not rebuilt (not in the job, unsupported, skipped): the
         /// position sketch becomes an ordinary sketch again, so its points stay available; the
-        /// profile sketch means nothing without the hole and is left out.
+        /// profile sketch means nothing without the hole and is left out. A 3D sub-sketch can
+        /// only be a position sketch (on several or curved faces) – profiles are always 2D.
         /// </summary>
         public FeatureRecord CaptureOnItsOwn(Feature f, PartOfFeatureRecord part)
         {
             string type = f.GetTypeName2();
-            if (!IsPositionSketch(part.Owner, f.Name))
-                return new UnsupportedRecord(f.Name, type, $"Profilskizze der Bohrung „{part.Owner}“, die nicht gespiegelt wird – entfällt mit ihr.", false);
             if (type != "ProfileFeature")
                 return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);
+            if (!IsPositionSketch(part.Owner, f.Name))
+                return new UnsupportedRecord(f.Name, type, $"Profilskizze der Bohrung „{part.Owner}“, die nicht gespiegelt wird – entfällt mit ihr.", false);
             try
             {
                 return new SketchRecord(f.Name, ReadSketch(f));

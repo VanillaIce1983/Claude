@@ -395,7 +395,8 @@ namespace Spiegelwerk.Capture
 
         private static string UnsupportedReason(string type) => type switch
         {
-            "AdvHoleWzd" or "AdvancedHole" => "Erweiterte Bohrungen werden nicht unterstützt (nur der Bohrungsassistent).",
+            // Reached only if the definition does not answer as IAdvancedHoleFeatureData.
+            "AdvHoleWzd" or "AdvancedHole" => "Erweiterte Bohrung: Feature-Daten nicht lesbar.",
             "MirrorPattern" => "Spiegel-Feature im Original: wird bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. " +
                                "Abhilfe: im Original durch die gespiegelten Einzel-Features ersetzen oder nach dem Lauf von Hand spiegeln.",
             "CurvePattern" or "SketchPattern" or "TablePattern" or "FillPattern" or "DimPattern" or "VarPattern" =>
