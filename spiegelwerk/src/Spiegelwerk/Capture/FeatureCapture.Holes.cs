@@ -11,8 +11,11 @@ namespace Spiegelwerk.Capture
     /// <summary>Hole Wizard holes: hole data, hole centres and the position sketch.</summary>
     internal sealed partial class FeatureCapture
     {
-        /// <summary>Sketch name → the hole it belongs to and whether it is the position sketch.</summary>
-        private Dictionary<string, (string owner, bool position)>? _holeParts;
+        /// <summary>Sketch name → the hole it belongs to.</summary>
+        private Dictionary<string, string>? _holeParts;
+
+        /// <summary>Hole name → name of its position sketch, read only when needed.</summary>
+        private readonly Dictionary<string, string?> _positionSketches = new Dictionary<string, string?>(StringComparer.Ordinal);
 
         /// <summary>
         /// The hole a sketch belongs to, if it is one of the two sketches of a Hole Wizard hole
@@ -21,29 +24,32 @@ namespace Spiegelwerk.Capture
         /// </summary>
         private PartOfFeatureRecord? HolePart(Feature sketch, string type)
         {
+            // Tree walk only – no selection access, so runs without holes cost nothing extra.
             if (_holeParts == null)
             {
-                _holeParts = new Dictionary<string, (string, bool)>(StringComparer.Ordinal);
+                _holeParts = new Dictionary<string, string>(StringComparer.Ordinal);
                 foreach (Feature hole in SwDoc.TopLevelFeatures(_doc).Where(x => x.GetTypeName2() == "HoleWzd"))
-                {
-                    string? position = PositionSketchName(hole);
                     foreach (Feature sub in SwDoc.SubFeatures(hole).Where(SwDoc.IsSketch))
-                        _holeParts[sub.Name] = (hole.Name, sub.Name == position);
-                }
+                        _holeParts[sub.Name] = hole.Name;
             }
-            return _holeParts.TryGetValue(sketch.Name, out var part) ? new PartOfFeatureRecord(sketch.Name, type, part.owner, part.position) : null;
+            return _holeParts.TryGetValue(sketch.Name, out string owner) ? new PartOfFeatureRecord(sketch.Name, type, owner) : null;
         }
 
-        private string? PositionSketchName(Feature hole)
+        private bool IsPositionSketch(string hole, string sketch)
         {
-            try
+            if (!_positionSketches.TryGetValue(hole, out string? position))
             {
-                return SwHole.PositionSketch(_doc, hole)?.Name;
+                try
+                {
+                    position = SwDoc.FeatureByName(_doc, hole) is Feature f ? SwHole.PositionSketch(_doc, f)?.Name : null;
+                }
+                catch (Exception)
+                {
+                    position = null;
+                }
+                _positionSketches[hole] = position;
             }
-            catch (Exception)
-            {
-                return null;
-            }
+            return position == sketch;
         }
 
         /// <summary>
@@ -54,7 +60,7 @@ namespace Spiegelwerk.Capture
         public FeatureRecord CaptureOnItsOwn(Feature f, PartOfFeatureRecord part)
         {
             string type = f.GetTypeName2();
-            if (!part.IsPositionSketch)
+            if (!IsPositionSketch(part.Owner, f.Name))
                 return new UnsupportedRecord(f.Name, type, $"Profilskizze der Bohrung „{part.Owner}“, die nicht gespiegelt wird – entfällt mit ihr.", false);
             if (type != "ProfileFeature")
                 return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);

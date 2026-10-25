@@ -211,7 +211,8 @@ namespace Spiegelwerk.Build
             entry.Verification = verification;
             entry.HasEquivalent = result.HasEquivalent;
             entry.Details.AddRange(result.Notes);
-            if (!entry.IsMirrored) WithdrawParts(ctx, record.Name);
+            // Only if the hole is not in the target – one with a rebuild error still has its sketches.
+            if (!entry.IsMirrored && !ctx.Created.ContainsKey(record.Name)) WithdrawParts(ctx, record.Name);
             return entry;
         }
 

@@ -64,17 +64,12 @@ namespace Spiegelwerk.Core.Records
     /// </summary>
     public sealed class PartOfFeatureRecord : FeatureRecord
     {
-        public PartOfFeatureRecord(string name, string typeName, string owner, bool isPositionSketch) : base(name, typeName)
+        public PartOfFeatureRecord(string name, string typeName, string owner) : base(name, typeName)
         {
             Owner = owner;
-            IsPositionSketch = isPositionSketch;
         }
 
         public string Owner { get; }
-
-        /// <summary>The position sketch of the hole (its points are the holes), not the profile sketch.</summary>
-        public bool IsPositionSketch { get; }
-
         public override bool ChangesSolid => false;
     }
 
