@@ -33,8 +33,8 @@ namespace Spiegelwerk.Capture
             string type = f.GetTypeName2();
             try
             {
-                if ((type == "ProfileFeature" || type == "3DProfileFeature") && HoleOwnerOf(f) is string hole)
-                    return new PartOfFeatureRecord(f.Name, type, hole);
+                if ((type == "ProfileFeature" || type == "3DProfileFeature") && HolePart(f, type) is PartOfFeatureRecord part)
+                    return part;
                 if (type == "ProfileFeature") return new SketchRecord(f.Name, ReadSketch(f));
                 if (type == "3DProfileFeature") return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);
                 if (type == "RefPlane") return new RefPlaneRecord(f.Name, _math.PlaneOf((RefPlane)f.GetSpecificFeature2()));

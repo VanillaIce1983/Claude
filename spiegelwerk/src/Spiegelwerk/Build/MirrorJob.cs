@@ -101,6 +101,11 @@ namespace Spiegelwerk.Build
             }
             var capture = new FeatureCapture(source, _math);
             List<FeatureRecord> records = features.Select(capture.Capture).ToList();
+            // Sketches of a hole are rebuilt with the hole – only if the hole itself is rebuilt.
+            var holes = new HashSet<string>(records.OfType<HoleRecord>().Select(h => h.Name), StringComparer.Ordinal);
+            for (int i = 0; i < records.Count; i++)
+                if (records[i] is PartOfFeatureRecord part && !holes.Contains(part.Owner))
+                    records[i] = capture.CaptureOnItsOwn(features[i], part);
             if (opt.VerifySteps) MassCapture.Measure(source, records);
 
             // ---- 2. target
@@ -109,6 +114,7 @@ namespace Spiegelwerk.Build
             // Whole part, selected bodies, or seed bodies of a selected body pattern: a body of its own.
             bool separateBody = opt.Target == MirrorTarget.SamePart && (req.Features.Count == 0 || req.Bodies.Count > 0 || seedBodies);
             var ctx = new BuildContext(_sw, target, _math, new Reflection(req.MirrorPlane), opt, report, separateBody);
+            foreach (PartOfFeatureRecord part in records.OfType<PartOfFeatureRecord>()) ctx.PartOwners[part.Name] = part.Owner;
             report.General.Add($"Spiegelebene: {req.MirrorPlane}");
 
             try
@@ -205,7 +211,22 @@ namespace Spiegelwerk.Build
             entry.Verification = verification;
             entry.HasEquivalent = result.HasEquivalent;
             entry.Details.AddRange(result.Notes);
+            if (!entry.IsMirrored) WithdrawParts(ctx, record.Name);
             return entry;
+        }
+
+        /// <summary>
+        /// The sketches of a hole were reported as "built with the hole" before the hole was
+        /// built. If the hole failed, they were not.
+        /// </summary>
+        private static void WithdrawParts(BuildContext ctx, string owner)
+        {
+            foreach (ReportEntry e in ctx.Report.Entries)
+                if (ctx.PartOwners.TryGetValue(e.Feature, out string o) && o == owner && e.HasEquivalent)
+                {
+                    e.HasEquivalent = false;
+                    e.Message = $"Teil von „{owner}“; nicht entstanden, weil „{owner}“ nicht gespiegelt wurde.";
+                }
         }
 
         /// <summary>
@@ -221,7 +242,9 @@ namespace Spiegelwerk.Build
 
         private static BuildResult RemoveAgain(BuildContext ctx, FeatureRecord record, BuildResult result)
         {
-            BuilderSupport.Delete(ctx, result.Feature!);
+            // A hole's sketches belong to the hole alone and go with it.
+            BuilderSupport.Delete(ctx, result.Feature!, record is HoleRecord);
+            if (record is HoleRecord hole) ctx.ForgetSketch(hole.PositionSketchName);
             ctx.Unregister(record.Name);
             var failed = BuildResult.Failed("Das Feature hätte die Originalkörper verändert und wurde wieder entfernt.");
             failed.Notes.AddRange(result.Notes);

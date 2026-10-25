@@ -82,6 +82,9 @@ namespace Spiegelwerk.Build
 
         public Dictionary<string, SketchMap> Sketches { get; } = new Dictionary<string, SketchMap>(StringComparer.Ordinal);
 
+        /// <summary>Sketch of a hole (original name) → its hole (original name).</summary>
+        public Dictionary<string, string> PartOwners { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
         /// <summary>Original feature name → new feature.</summary>
         public Dictionary<string, Feature> Created { get; } = new Dictionary<string, Feature>(StringComparer.Ordinal);
 
@@ -104,6 +107,13 @@ namespace Spiegelwerk.Build
         {
             Created.Remove(originalName);
             Topology.Invalidate();
+        }
+
+        /// <summary>A rebuilt sketch that was removed again (with its hole): neither as feature nor as sketch map any more.</summary>
+        public void ForgetSketch(string originalName)
+        {
+            Sketches.Remove(originalName);
+            Unregister(originalName);
         }
 
         /// <summary>Helper features (planes, anchor sketches) also count as "ours".</summary>

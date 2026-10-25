@@ -156,7 +156,7 @@ Zwei Spiegelungen und eine starre Bewegung ergeben Determinante +1 – eine gül
 
 ## Bohrungen
 
-Eine Bohrung des Bohrungsassistenten besteht aus dem Feature und zwei eigenen Skizzen: der Profilskizze und der Positionsskizze, deren Punkte die Bohrungen sind (`IWizardHoleFeatureData2.GetSketchPoints` zeigt, welche die Positionsskizze ist). Beide entstehen in SOLIDWORKS mit der Bohrung und werden deshalb nicht einzeln aufgebaut (`PartOfFeatureRecord`); die Positionsskizze wird mit der Bohrung erfasst.
+Eine Bohrung des Bohrungsassistenten besteht aus dem Feature und zwei eigenen Skizzen: der Profilskizze und der Positionsskizze, deren Punkte die Bohrungen sind (`IWizardHoleFeatureData2.GetSketchPoints` zeigt, welche die Positionsskizze ist). Beide entstehen in SOLIDWORKS mit der Bohrung und werden deshalb nicht einzeln aufgebaut (`PartOfFeatureRecord`); die Positionsskizze wird mit der Bohrung erfasst. Das gilt nur, solange die Bohrung selbst neu aufgebaut wird: Ist sie nicht Teil des Laufs, nicht unterstützt oder übersprungen, wird die Positionsskizze wieder als gewöhnliche Skizze erfasst und die Profilskizze entfällt mit Hinweis; scheitert die Bohrung beim Aufbau, nimmt der Bericht das „entsteht mit ihr“ der beiden Skizzen zurück.
 
 `HoleBuilder`:
 
@@ -165,7 +165,7 @@ Eine Bohrung des Bohrungsassistenten besteht aus dem Feature und zwei eigenen Sk
 3. **Maße abgleichen:** Nur Werte, die von den Normmaßen der neuen Bohrung abweichen, werden geschrieben (`SwHole`); eine Normbohrung bleibt so eine Normbohrung. Dazu Endbezug und Feature-Bereich.
 4. **Zählen:** Die Kopie muss so viele Bohrungen haben wie das Original.
 
-Die Bohrrichtung bezieht sich auf die Außennormale der Platzierungsfläche, und die bleibt bei einer Spiegelung außen – das Flag „Richtung umkehren“ wird unverändert übernommen. Maße werden nicht gespiegelt, auch nicht die Gewinderichtung: Ein Gegenstück bekommt dieselben Bohrungen mit denselben Rechtsgewinden. Eine geometrische Spiegelung würde Linksgewinde ergeben; die kosmetische Gewindedarstellung trägt aber gar keine Drehrichtung.
+Die Bohrrichtung bezieht sich auf die Normale der Positionsskizze. Auf einer Fläche ist das die Außennormale, und die bleibt bei einer Spiegelung außen (σ = +1) – das Flag „Richtung umkehren“ bleibt. Liegt die Bohrung auf einer Ebene (oder steht eine Ebene für eine nicht gefundene Fläche), kann die Skizze andersherum liegen; dann folgt das Flag σ wie bei Extrusionen. Ersatzpunkte für fehlende Skizzenbezüge sind in der Positionsskizze Endpunkte fixierter Konstruktionslinien, denn jeder eigene Skizzenpunkt wäre eine zusätzliche Bohrung. Maße werden nicht gespiegelt, auch nicht die Gewinderichtung: Ein Gegenstück bekommt dieselben Bohrungen mit denselben Rechtsgewinden. Eine geometrische Spiegelung würde Linksgewinde ergeben; die kosmetische Gewindedarstellung trägt aber gar keine Drehrichtung.
 
 ## Ebenen und Achsen im Ziel
 

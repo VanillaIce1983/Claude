@@ -11,24 +11,61 @@ namespace Spiegelwerk.Capture
     /// <summary>Hole Wizard holes: hole data, hole centres and the position sketch.</summary>
     internal sealed partial class FeatureCapture
     {
-        /// <summary>Sketch name → name of the hole it belongs to.</summary>
-        private Dictionary<string, string>? _holeParts;
+        /// <summary>Sketch name → the hole it belongs to and whether it is the position sketch.</summary>
+        private Dictionary<string, (string owner, bool position)>? _holeParts;
 
         /// <summary>
         /// The hole a sketch belongs to, if it is one of the two sketches of a Hole Wizard hole
         /// (position and profile). Those are not rebuilt on their own: the new hole brings its
         /// own, and the position sketch is written into that.
         /// </summary>
-        private string? HoleOwnerOf(Feature sketch)
+        private PartOfFeatureRecord? HolePart(Feature sketch, string type)
         {
             if (_holeParts == null)
             {
-                _holeParts = new Dictionary<string, string>(StringComparer.Ordinal);
+                _holeParts = new Dictionary<string, (string, bool)>(StringComparer.Ordinal);
                 foreach (Feature hole in SwDoc.TopLevelFeatures(_doc).Where(x => x.GetTypeName2() == "HoleWzd"))
+                {
+                    string? position = PositionSketchName(hole);
                     foreach (Feature sub in SwDoc.SubFeatures(hole).Where(SwDoc.IsSketch))
-                        _holeParts[sub.Name] = hole.Name;
+                        _holeParts[sub.Name] = (hole.Name, sub.Name == position);
+                }
             }
-            return _holeParts.TryGetValue(sketch.Name, out string owner) ? owner : null;
+            return _holeParts.TryGetValue(sketch.Name, out var part) ? new PartOfFeatureRecord(sketch.Name, type, part.owner, part.position) : null;
+        }
+
+        private string? PositionSketchName(Feature hole)
+        {
+            try
+            {
+                return SwHole.PositionSketch(_doc, hole)?.Name;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// A sketch of a hole that is not rebuilt (not in the job, unsupported, skipped): the
+        /// position sketch becomes an ordinary sketch again, so its points stay available; the
+        /// profile sketch means nothing without the hole and is left out.
+        /// </summary>
+        public FeatureRecord CaptureOnItsOwn(Feature f, PartOfFeatureRecord part)
+        {
+            string type = f.GetTypeName2();
+            if (!part.IsPositionSketch)
+                return new UnsupportedRecord(f.Name, type, $"Profilskizze der Bohrung „{part.Owner}“, die nicht gespiegelt wird – entfällt mit ihr.", false);
+            if (type != "ProfileFeature")
+                return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);
+            try
+            {
+                return new SketchRecord(f.Name, ReadSketch(f));
+            }
+            catch (NotSupportedException ex)
+            {
+                return new UnsupportedRecord(f.Name, type, ex.Message, false);
+            }
         }
 
         private HoleRecord CaptureHole(Feature f, string type, WizardHoleFeatureData2 d)

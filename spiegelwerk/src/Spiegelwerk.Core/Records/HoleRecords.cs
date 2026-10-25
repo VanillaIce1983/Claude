@@ -59,16 +59,22 @@ namespace Spiegelwerk.Core.Records
 
     /// <summary>
     /// A sub-feature that is not rebuilt on its own but together with its owner – the sketches
-    /// of a Hole Wizard hole.
+    /// of a Hole Wizard hole. Only valid while the owner is rebuilt too; otherwise the job
+    /// captures the sketch on its own again.
     /// </summary>
     public sealed class PartOfFeatureRecord : FeatureRecord
     {
-        public PartOfFeatureRecord(string name, string typeName, string owner) : base(name, typeName)
+        public PartOfFeatureRecord(string name, string typeName, string owner, bool isPositionSketch) : base(name, typeName)
         {
             Owner = owner;
+            IsPositionSketch = isPositionSketch;
         }
 
         public string Owner { get; }
+
+        /// <summary>The position sketch of the hole (its points are the holes), not the profile sketch.</summary>
+        public bool IsPositionSketch { get; }
+
         public override bool ChangesSolid => false;
     }
 

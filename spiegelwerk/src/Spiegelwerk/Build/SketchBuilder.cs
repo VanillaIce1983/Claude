@@ -34,6 +34,12 @@ namespace Spiegelwerk.Build
         /// <summary>Stand-ins for missing external references, by reference key.</summary>
         private readonly Dictionary<string, object> _substitutes = new Dictionary<string, object>(StringComparer.Ordinal);
 
+        /// <summary>
+        /// Writing into the position sketch of a hole: every sketch point there is a hole, so
+        /// a stand-in point must not be a sketch point of its own.
+        /// </summary>
+        private bool _pointsAreHoles;
+
         public SketchBuilder(BuildContext ctx)
         {
             _ctx = ctx;
@@ -91,6 +97,7 @@ namespace Spiegelwerk.Build
             Sketch sketch = _sm.ActiveSketch ?? throw new InvalidOperationException($"Skizze \"{existing.Name}\" konnte nicht bearbeitet werden.");
 
             SketchMap map;
+            _pointsAreHoles = true;
             try
             {
                 if (sketch.Is3D()) throw new NotSupportedException($"Skizze \"{existing.Name}\" ist eine 3D-Skizze; erwartet war eine 2D-Positionsskizze.");
@@ -105,6 +112,7 @@ namespace Spiegelwerk.Build
             }
             finally
             {
+                _pointsAreHoles = false;
                 SwSelect.Clear(_doc);
                 if (_sm.ActiveSketch != null) _sm.InsertSketch(true);
             }
@@ -441,6 +449,12 @@ namespace Spiegelwerk.Build
                     case SkRefKind.OtherSketchPoint:
                     {
                         Vec3 l = Local(r.Position);
+                        if (_pointsAreHoles)
+                        {
+                            // End point of a short fixed construction line: no hole of its own.
+                            created = (Construction(_sm.CreateLine(l.X, l.Y, 0, l.X + 0.001, l.Y, 0), rm) as SketchLine)?.GetStartPoint2();
+                            break;
+                        }
                         SketchPoint p = _sm.CreatePoint(l.X, l.Y, 0);
                         if (p != null) rm.AddRelation(new object[] { p }, (int)swConstraintType_e.swConstraintType_FIXED);
                         created = p;

@@ -6,6 +6,7 @@ using SolidWorks.Interop.swconst;
 using Spiegelwerk.Capture;
 using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Matching;
+using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
 using static Spiegelwerk.Build.Builders.BuilderSupport;
@@ -68,24 +69,33 @@ namespace Spiegelwerk.Build.Builders
                 Delete(ctx, f, true);
                 return Fail("Positionsskizze der neuen Bohrung nicht gefunden; die Bohrung wurde wieder entfernt.", notes);
             }
+            SketchMap map;
             try
             {
-                new SketchBuilder(ctx).BuildInto(r.Position, position, notes);
+                map = new SketchBuilder(ctx).BuildInto(r.Position, position, notes);
             }
             catch (Exception ex)
             {
                 Delete(ctx, f, true);
+                ctx.Sketches.Remove(r.PositionSketchName);
                 return Fail($"Positionsskizze ließ sich nicht übertragen ({ex.Message}); die Bohrung wurde wieder entfernt.", notes);
             }
             ctx.Register(r.PositionSketchName, position);
 
-            // ---- 3. sizes, end reference, scope
+            // On a face the position sketch follows the outward normal, which the mirror keeps
+            // (σ = +1). On a plane – placed there, or standing in for a face that was not
+            // found – the sketch may face the other way, and the direction flag with it.
+            bool reverse = DirectionRules.ReverseFlag(r.Reverse, map.Sigma);
+            bool flip = reverse != r.Reverse;
+
+            // ---- 3. sizes, end reference, scope, direction
             List<string> differing = Differences(ctx.Doc, f, r.Values);
-            bool needsEdit = differing.Count > 0 || (endReference != null && !byDefinition) || (scope && !scopeSet);
+            bool needsEdit = differing.Count > 0 || (endReference != null && !byDefinition) || (scope && !scopeSet) || flip;
             if (needsEdit)
             {
                 bool ok = FeatureEdit.Hole(ctx.Doc, f, d =>
                 {
+                    if (flip) d.ReverseDirection = reverse;
                     SwHole.Apply(d, r.Values);
                     if (endReference != null) d.SetEndConditionReference(endReference);
                     if (scope && !scopeSet)
@@ -98,13 +108,24 @@ namespace Spiegelwerk.Build.Builders
                 if (!ok && scope && !scopeSet)
                 {
                     Delete(ctx, f, true);
-                    ctx.Unregister(r.PositionSketchName);
+                    ctx.ForgetSketch(r.PositionSketchName);
                     return Fail("Der Feature-Bereich der Bohrung ließ sich nicht setzen; die Bohrung wurde wieder entfernt.", notes);
                 }
+                if (!ok && flip) notes.Add("Die Bohrrichtung ließ sich nicht an die umgekehrte Skizzennormale anpassen.");
                 differing = Differences(ctx.Doc, f, r.Values);
             }
             if (differing.Count > 0)
                 notes.Add($"Nicht übernommene Bohrungsmaße: {string.Join(", ", differing)}.");
+
+            // Variants without an option of their own (e.g. a tapped hole with the thread
+            // removed) show up only in the detailed type.
+            int type = HoleType(ctx.Doc, f);
+            if (type >= 0 && type != r.HoleType)
+            {
+                FeatureEdit.Hole(ctx.Doc, f, d => d.Type = r.HoleType);
+                type = HoleType(ctx.Doc, f);
+                if (type >= 0 && type != r.HoleType) notes.Add($"Bohrungsart weicht ab: Typ {type} statt {r.HoleType} (swWzdHoleTypes_e).");
+            }
 
             // ---- 4. count
             int count = SwHole.PointCount(ctx.Doc, f);
@@ -112,7 +133,8 @@ namespace Spiegelwerk.Build.Builders
                 notes.Add($"Die Kopie hat {count} statt {r.Points.Count} Bohrungen.");
 
             ctx.Register(r.Name, f);
-            BuildResult result = Ok(f, $"{r.Points.Count} × {r.Size} ({TypeText(r.GenericType)}), {r.End}", notes);
+            BuildResult result = Ok(f, $"{r.Points.Count} × {r.Size} ({TypeText(r.GenericType)}), {r.End}" +
+                                       (flip ? ", Richtungsflag umgekehrt (Skizzennormale entgegengesetzt)" : ""), notes);
             result.Alternatives.Add(new Alternative("Bohrrichtung umgekehrt",
                 () => FeatureEdit.Hole(ctx.Doc, f, d => d.ReverseDirection = !d.ReverseDirection)));
             return result;
@@ -195,7 +217,22 @@ namespace Spiegelwerk.Build.Builders
         {
             FaceSignature a = TopologyCapture.Face(picked), b = TopologyCapture.Face(target);
             if (!b.CouldBe(a) || TopologyCapture.DistanceToFace(target, a.Sample) > Tol.Length) return false;
-            return !ctx.SamePart || (picked.GetBody() is Body2 body && ctx.IsOwnBody(body));
+            // Separate body: the face of the original at the same spot would put the hole into the original.
+            return !ctx.SeparateBody || (picked.GetBody() is Body2 body && ctx.IsOwnBody(body));
+        }
+
+        private static int HoleType(ModelDoc2 doc, Feature f)
+        {
+            var d = (WizardHoleFeatureData2)f.GetDefinition();
+            if (!d.AccessSelections(doc, null)) return -1;
+            try
+            {
+                return d.Type;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
         }
 
         private static List<string> Differences(ModelDoc2 doc, Feature f, IReadOnlyDictionary<string, double> wanted)
