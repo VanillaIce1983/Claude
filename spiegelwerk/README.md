@@ -42,7 +42,7 @@ Nach jedem Lauf zeigt ein Bericht pro Feature, ob es neu aufgebaut wurde, was an
 Befehl **Unabhängig spiegeln** (Registerkarte *Spiegelwerk*, Menü und Symbolleiste) in Teilen und Baugruppen:
 
 1. **Spiegelebene:** Referenzebene oder ebene Fläche wählen – oder ohne Auswahl eine temporäre Ebene (YZ, XZ, XY mit Abstand), die nicht im Modell angelegt wird.
-2. **Zu spiegelnde Elemente:** Features, Skizzen oder Körper; leer lassen für das ganze Teil. In Baugruppen: Komponenten.
+2. **Zu spiegelnde Elemente:** Features, Skizzen, Ebenen, Achsen, Koordinatensysteme oder Körper; leer lassen für das ganze Teil. In Baugruppen: Komponenten.
 3. **Ergebnis:** neues Teil oder selbes Teil, Original löschen, Werkstoff und Gleichungen übernehmen, Namenszusatz.
 4. **Prüfung und Bezüge:** jeden Schritt prüfen, fehlende Skizzenbezüge durch fixierte Hilfsgeometrie ersetzen oder weglassen, beim ersten Fehler abbrechen.
 

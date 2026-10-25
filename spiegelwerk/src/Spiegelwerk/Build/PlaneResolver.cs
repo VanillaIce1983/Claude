@@ -21,7 +21,8 @@ namespace Spiegelwerk.Build
         private readonly BuildContext _ctx;
         private readonly List<(Feature feature, Plane3 plane)> _known = new List<(Feature, Plane3)>();
         private readonly List<(Feature feature, Line3 line)> _axes = new List<(Feature, Line3)>();
-        private readonly List<(Feature feature, Frame3 frame)> _coordinateSystems = new List<(Feature, Frame3)>();
+        private readonly List<(Feature feature, Frame3 frame, Feature anchor)> _coordinateSystems = new List<(Feature, Frame3, Feature)>();
+        private readonly List<Frame3> _failedCoordinateSystems = new List<Frame3>();
         private Feature[]? _standard;
         private int _counter;
         private int _axisCounter;
@@ -209,12 +210,37 @@ namespace Spiegelwerk.Build
         public Feature? FindCoordinateSystem(Frame3 wanted) =>
             _coordinateSystems.FirstOrDefault(c => SameFrame(c.frame, wanted)).feature;
 
-        /// <summary>A coordinate system with the given origin and axes: one of this job, otherwise a new helper.</summary>
-        public Feature CoordinateSystem(Frame3 wanted) =>
-            FindCoordinateSystem(wanted) ?? CreateCoordinateSystem(wanted, $"Spiegelwerk-KS {++_coordinateSystemCounter}");
+        /// <summary>
+        /// A coordinate system with the given origin and axes: one of this job, otherwise a new
+        /// helper (<paramref name="created"/>). A place where creating one has failed before is
+        /// not tried again – every attempt would leave nothing but another failure.
+        /// </summary>
+        public Feature CoordinateSystem(Frame3 wanted, out bool created)
+        {
+            created = false;
+            Feature? existing = FindCoordinateSystem(wanted);
+            if (existing != null) return existing;
+            if (_failedCoordinateSystems.Any(f => SameFrame(f, wanted)))
+                throw new InvalidOperationException($"Koordinatensystem {wanted} ließ sich schon zuvor nicht erzeugen.");
+            Feature cs = CreateCoordinateSystem(wanted, $"Spiegelwerk-KS {++_coordinateSystemCounter}");
+            created = true;
+            return cs;
+        }
 
         /// <summary>Rebuilds a coordinate system of the original as an independent one with the given name.</summary>
         public Feature CreateNamedCoordinateSystem(Frame3 wanted, string name) => CreateCoordinateSystem(wanted, name);
+
+        /// <summary>Removes a helper coordinate system this job made, with its helper sketch – for a feature that failed after asking for it.</summary>
+        public void RemoveCoordinateSystem(Feature cs)
+        {
+            int i = _coordinateSystems.FindIndex(c => c.feature.Name == cs.Name);
+            if (i < 0) return;
+            Feature anchor = _coordinateSystems[i].anchor;
+            _coordinateSystems.RemoveAt(i);
+            Delete(cs);
+            Delete(anchor);
+            _ctx.Topology.Invalidate();
+        }
 
         public static bool SameFrame(Frame3 a, Frame3 b) =>
             a.Origin.AlmostEquals(b.Origin) && a.XAxis.IsSameDirection(b.XAxis, 1e-6) && a.YAxis.IsSameDirection(b.YAxis, 1e-6);
@@ -224,7 +250,8 @@ namespace Spiegelwerk.Build
         /// one along Y, their common start point the origin – like helper planes and axes it
         /// depends on nothing else. Whether SOLIDWORKS takes a line's direction from its start
         /// to its end is not documented: the frame is read back, and an axis that came out
-        /// reversed is flipped (XFlipped/YFlipped).
+        /// reversed is flipped (XFlipped/YFlipped). If it cannot be made right, nothing stays
+        /// behind – neither the coordinate system nor its helper sketch.
         /// </summary>
         private Feature CreateCoordinateSystem(Frame3 wanted, string name)
         {
@@ -251,65 +278,77 @@ namespace Spiegelwerk.Build
             sm.Insert3DSketch(true);
             Feature anchor = doc.Extension.GetLastFeatureAdded();
             SwDoc.Rename(doc, anchor, $"Spiegelwerk-Anker {++_anchorCounter}");
+
+            Feature? cs = null;
+            try
+            {
+                if (xLine == null || yLine == null || !(xLine.GetStartPoint2() is SketchPoint origin))
+                    throw new InvalidOperationException($"Hilfsskizze für das Koordinatensystem {wanted} konnte nicht erzeugt werden.");
+
+                cs = InsertCoordinateSystem(origin, xLine, yLine);
+                if (cs == null) throw new InvalidOperationException($"Koordinatensystem {wanted} konnte nicht erzeugt werden.");
+                SwDoc.Rename(doc, cs, name);
+
+                Frame3? actual = SwDoc.CoordinateSystemFrame(doc, _ctx.Math, cs.Name);
+                if (actual.HasValue && !SameFrame(actual.Value, wanted))
+                {
+                    bool flipX = actual.Value.XAxis.IsSameDirection(-wanted.XAxis, 1e-6);
+                    bool flipY = actual.Value.YAxis.IsSameDirection(-wanted.YAxis, 1e-6);
+                    if (flipX || flipY)
+                        Builders.FeatureEdit.CoordinateSystem(doc, cs, d =>
+                        {
+                            if (flipX) d.XFlipped = !d.XFlipped;
+                            if (flipY) d.YFlipped = !d.YFlipped;
+                        });
+                    actual = SwDoc.CoordinateSystemFrame(doc, _ctx.Math, cs.Name);
+                }
+                if (!actual.HasValue || !SameFrame(actual.Value, wanted))
+                    throw new InvalidOperationException($"Koordinatensystem {wanted} lag nach dem Erzeugen falsch ({actual?.ToString() ?? "nicht lesbar"}).");
+            }
+            catch (Exception)
+            {
+                if (cs != null) Delete(cs);
+                Delete(anchor);
+                _failedCoordinateSystems.Add(wanted);
+                _ctx.Topology.Invalidate();
+                throw;
+            }
             _ctx.RegisterHelper(anchor);
-            if (xLine == null || yLine == null || !(xLine.GetStartPoint2() is SketchPoint origin))
-                throw new InvalidOperationException($"Hilfsskizze für das Koordinatensystem {wanted} konnte nicht erzeugt werden.");
-
-            Feature? cs = InsertCoordinateSystem(origin, xLine, yLine);
-            if (cs == null) throw new InvalidOperationException($"Koordinatensystem {wanted} konnte nicht erzeugt werden.");
-            SwDoc.Rename(doc, cs, name);
-
-            Frame3? actual = SwDoc.CoordinateSystemFrame(doc, _ctx.Math, cs.Name);
-            if (actual.HasValue && !SameFrame(actual.Value, wanted))
-            {
-                bool flipX = actual.Value.XAxis.IsSameDirection(-wanted.XAxis, 1e-6);
-                bool flipY = actual.Value.YAxis.IsSameDirection(-wanted.YAxis, 1e-6);
-                if (flipX || flipY)
-                    Builders.FeatureEdit.CoordinateSystem(doc, cs, d =>
-                    {
-                        if (flipX) d.XFlipped = !d.XFlipped;
-                        if (flipY) d.YFlipped = !d.YFlipped;
-                    });
-                actual = SwDoc.CoordinateSystemFrame(doc, _ctx.Math, cs.Name);
-            }
-            if (!actual.HasValue || !SameFrame(actual.Value, wanted))
-            {
-                Delete(cs);
-                throw new InvalidOperationException($"Koordinatensystem {wanted} lag nach dem Erzeugen falsch ({actual?.ToString() ?? "nicht lesbar"}).");
-            }
-            _ctx.RegisterHelper(cs);
-            _coordinateSystems.Add((cs, wanted));
+            _ctx.RegisterHelper(cs!);
+            _coordinateSystems.Add((cs!, wanted, anchor));
             _ctx.Topology.Invalidate();
-            return cs;
+            return cs!;
         }
 
-        /// <summary>InsertCoordinateSystem with the marks of the API help; CreateCoordinateSystem (newer versions) as fallback.</summary>
+        /// <summary>InsertCoordinateSystem with the marks of the API help; CreateCoordinateSystem with the entities as fallback.</summary>
         private Feature? InsertCoordinateSystem(SketchPoint origin, SketchLine xLine, SketchLine yLine)
         {
             ModelDoc2 doc = _ctx.Doc;
             SwSelect.Clear(doc);
-            Feature? cs = null;
             try
             {
                 if (SwSelect.Select(doc, origin, OriginMark, false) &&
                     SwSelect.Select(doc, xLine, XAxisMark, true) &&
-                    SwSelect.Select(doc, yLine, YAxisMark, true))
-                    cs = doc.FeatureManager.InsertCoordinateSystem(false, false, false);
+                    SwSelect.Select(doc, yLine, YAxisMark, true) &&
+                    doc.FeatureManager.InsertCoordinateSystem(false, false, false) is Feature cs)
+                    return cs;
             }
             catch (Exception)
             {
-                cs = null;
+                // Refused: the entity route follows.
             }
             finally
             {
                 SwSelect.Clear(doc);
             }
-            if (cs != null) return cs;
-
-            string before = doc.Extension.GetLastFeatureAdded()?.Name ?? "";
-            if (!SwLate.Call(doc.FeatureManager, "CreateCoordinateSystem", origin, new object[] { xLine }, new object[] { yLine }, null!)) return null;
-            Feature? after = doc.Extension.GetLastFeatureAdded();
-            return after != null && after.Name != before && after.GetTypeName2() == "CoordSys" ? after : null;
+            try
+            {
+                return doc.FeatureManager.CreateCoordinateSystem(origin, new object[] { xLine }, new object[] { yLine }, null);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         private Feature? InsertPlane(Func<bool> select, int c1, double v1, int c2, int c3)

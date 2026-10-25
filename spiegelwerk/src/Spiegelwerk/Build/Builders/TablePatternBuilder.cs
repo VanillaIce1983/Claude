@@ -39,42 +39,82 @@ namespace Spiegelwerk.Build.Builders
             var r = (TablePatternRecord)record;
             var notes = new List<string>();
 
-            // Nothing to pattern: fail before a helper coordinate system is added.
+            // Everything that can refuse the pattern before a helper coordinate system is added:
+            // a refused pattern leaves nothing behind.
             if (FindSeeds(ctx, r, new List<string>()) == null) return Fail(NoSeeds(r), notes);
+            // R(0) = 0 only if the mirror plane passes through the origin.
+            if (r.ReferenceIsOrigin && !ctx.Mirror.Apply(Vec3.Zero).AlmostEquals(Vec3.Zero))
+                return Fail("Referenzpunkt ist der Ursprung; die Spiegelebene geht nicht durch ihn, gespiegelt liegt er nicht im Ursprung des Ziels.", notes);
+            if (!r.ReferenceIsOrigin && !r.UseCentroid && Find(ctx, r.ReferencePoint, new List<string>()) == null)
+                return Fail("Referenzpunkt des Musters im Ziel nicht gefunden.", notes);
 
             Frame3 frame = ctx.Mirror.ApplyKeepingXY(r.CoordinateSystem);
-            Feature? cs;
+            Feature cs;
+            bool helper, created;
             try
             {
-                cs = CoordinateSystem(ctx, r, frame, notes);
+                cs = CoordinateSystem(ctx, r, frame, notes, out helper, out created);
             }
             catch (InvalidOperationException ex)
             {
                 return Fail($"Koordinatensystem des Musters ließ sich im Ziel nicht anlegen ({ex.Message}).", notes);
             }
 
+            Feature? f = Create(ctx, r, cs, notes, out string? refused);
+            if (f == null)
+            {
+                // A helper made just for this pattern goes with it.
+                if (created) ctx.Planes.RemoveCoordinateSystem(cs);
+                return Fail(refused ?? "SOLIDWORKS hat das Tabellenmuster nicht erzeugt.", notes);
+            }
+            return Finish(ctx, r, f, cs, helper, notes);
+        }
+
+        /// <summary>Reference point and seeds looked up again (a helper coordinate system rebuilt the model), then the pattern.</summary>
+        private static Feature? Create(BuildContext ctx, TablePatternRecord r, Feature cs, List<string> notes, out string? refused)
+        {
+            refused = null;
             object? point = null;
             if (r.ReferenceIsOrigin)
             {
-                // R(0) = 0 only if the mirror plane passes through the origin.
-                if (!ctx.Mirror.Apply(Vec3.Zero).AlmostEquals(Vec3.Zero))
-                    return Fail("Referenzpunkt ist der Ursprung; die Spiegelebene geht nicht durch ihn, gespiegelt liegt er nicht im Ursprung des Ziels.", notes);
                 point = SwDoc.OriginPoint(ctx.Doc);
             }
             else if (!r.UseCentroid)
             {
                 point = Find(ctx, r.ReferencePoint, notes);
-                if (point == null) return Fail("Referenzpunkt des Musters im Ziel nicht gefunden.", notes);
+                if (point == null)
+                {
+                    refused = "Referenzpunkt des Musters im Ziel nicht gefunden.";
+                    return null;
+                }
             }
-            // A helper coordinate system may have been added: look the seeds up again.
             Seeds? seeds = FindSeeds(ctx, r, notes);
-            if (seeds == null) return Fail(NoSeeds(r), notes);
+            if (seeds == null)
+            {
+                refused = NoSeeds(r);
+                return null;
+            }
 
             List<Vec3> points = TablePoints.Mirror(r.Points);
             Feature? f = CreateByDefinition(ctx, r, seeds, cs, points, point) ?? CreateBySelection(ctx, r, seeds, cs, points, point);
-            if (f == null) return Fail("SOLIDWORKS hat das Tabellenmuster nicht erzeugt.", notes);
+            if (f != null) SetExactValues(ctx, r, f, points, point, notes);
+            return f;
+        }
 
-            // ---- exact values: points, skipped instances, options
+        private static BuildResult Finish(BuildContext ctx, TablePatternRecord r, Feature f, Feature cs, bool helper, List<string> notes)
+        {
+            string placements = MatchPlacements(ctx, r, () => ReadInstances(ctx, f, r), Array.Empty<Func<bool>>(), notes, out bool _);
+            ctx.Register(r.Name, f);
+            // A helper is no deviation (like helper planes and axes): named in the message, not as a note.
+            string system = helper ? $"Hilfs-Koordinatensystem „{cs.Name}“ (an gespiegelter Lage von „{r.CoordinateSystemName}“)" : $"„{cs.Name}“";
+            return Ok(f, $"Tabellenmuster, {r.Points.Count} Punkte in {system}, " + (r.UseCentroid ? "Schwerpunkt" : "gewählter Referenzpunkt") +
+                         $", {SeedText(r)}" + placements, notes);
+        }
+
+        /// <summary>Points, skipped instances and options, compared and set again where they differ.</summary>
+        private static void SetExactValues(BuildContext ctx, TablePatternRecord r, Feature f, List<Vec3> points, object? point, List<string> notes)
+        {
+
             if (NeedsEdit(ctx.Doc, f, r, points))
             {
                 bool ok = FeatureEdit.TablePattern(ctx.Doc, f, d =>
@@ -95,30 +135,25 @@ namespace Spiegelwerk.Build.Builders
                 if (NeedsEdit(ctx.Doc, f, r, points, skippedToo: false))
                     notes.Add("Punkte bzw. Optionen des Tabellenmusters weichen ab und ließen sich nicht übernehmen.");
             }
-
-            string placements = MatchPlacements(ctx, r, () => ReadInstances(ctx, f, r), Array.Empty<Func<bool>>(), notes, out bool _);
-            ctx.Register(r.Name, f);
-            return Ok(f, $"Tabellenmuster, {r.Points.Count} Punkte in „{cs.Name}“, " + (r.UseCentroid ? "Schwerpunkt" : "gewählter Referenzpunkt") +
-                         $", {SeedText(r)}" + placements, notes);
         }
 
         /// <summary>
         /// The rebuilt coordinate system of the original if this job made it and it lies right,
         /// otherwise one of this job at the mirrored place, otherwise a new helper.
+        /// <paramref name="helper"/>: not the rebuilt one; <paramref name="created"/>: made just now.
         /// </summary>
-        private static Feature CoordinateSystem(BuildContext ctx, TablePatternRecord r, Frame3 frame, List<string> notes)
+        private static Feature CoordinateSystem(BuildContext ctx, TablePatternRecord r, Frame3 frame, List<string> notes, out bool helper, out bool created)
         {
+            helper = false;
+            created = false;
             if (ctx.Created.TryGetValue(r.CoordinateSystemName, out Feature built))
             {
                 Frame3? actual = SwDoc.CoordinateSystemFrame(ctx.Doc, ctx.Math, built.Name);
                 if (actual.HasValue && PlaneResolver.SameFrame(actual.Value, frame)) return built;
                 notes.Add($"Das gespiegelte Koordinatensystem „{built.Name}“ liegt nicht wie erwartet; das Muster bekommt ein eigenes.");
             }
-            Feature? existing = ctx.Planes.FindCoordinateSystem(frame);
-            if (existing != null) return existing;
-            Feature helper = ctx.Planes.CoordinateSystem(frame);
-            notes.Add($"Koordinatensystem „{r.CoordinateSystemName}“ wird nicht mitgespiegelt; Hilfs-Koordinatensystem „{helper.Name}“ an gespiegelter Lage angelegt.");
-            return helper;
+            helper = true;
+            return ctx.Planes.CoordinateSystem(frame, out created);
         }
 
         private static Feature? CreateByDefinition(BuildContext ctx, TablePatternRecord r, Seeds seeds, Feature cs, List<Vec3> points, object? point)

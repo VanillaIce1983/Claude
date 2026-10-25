@@ -106,12 +106,16 @@ namespace Spiegelwerk.UI
             // ---- items
             var g2 = (PropertyManagerPageGroup)_page.AddGroupBox(GrpItems, _isAssembly ? "Komponenten" : "Zu spiegelnde Elemente", groupOpts);
             _selItems = (PropertyManagerPageSelectionbox)g2.AddControl2(SelItems, (short)swPropertyManagerPageControlType_e.swControlType_Selectionbox,
-                "Elemente", left, vis, _isAssembly ? "Zu spiegelnde Komponenten" : "Features, Skizzen oder Volumenkörper");
+                "Elemente", left, vis, _isAssembly ? "Zu spiegelnde Komponenten" : "Features, Skizzen, Ebenen, Achsen, Koordinatensysteme oder Volumenkörper");
             _selItems.Mark = ItemMark;
             _selItems.Height = 90;
             _selItems.SetSelectionFilters(_isAssembly
                 ? new[] { (int)swSelectType_e.swSelCOMPONENTS }
-                : new[] { (int)swSelectType_e.swSelBODYFEATURES, (int)swSelectType_e.swSelSKETCHES, (int)swSelectType_e.swSelSOLIDBODIES, (int)swSelectType_e.swSelDATUMPLANES });
+                : new[]
+                {
+                    (int)swSelectType_e.swSelBODYFEATURES, (int)swSelectType_e.swSelSKETCHES, (int)swSelectType_e.swSelSOLIDBODIES,
+                    (int)swSelectType_e.swSelDATUMPLANES, (int)swSelectType_e.swSelDATUMAXES, (int)swSelectType_e.swSelCOORDSYS,
+                });
             g2.AddControl2(LblItems, (short)swPropertyManagerPageControlType_e.swControlType_Label,
                 _isAssembly ? "Teile werden als Gegenstück neu aufgebaut, gespeichert und eingefügt." : "Leer lassen für das ganze Teil.", left, vis, "");
 
