@@ -77,6 +77,25 @@ namespace Spiegelwerk.Core.Records
         public override bool ChangesSolid => false;
     }
 
+    /// <summary>
+    /// Coordinate system. Its mirror image would be left-handed, which SOLIDWORKS does not
+    /// have: the copy keeps X and Y mirrored and takes Z = X × Y, i.e. the mirrored Z reversed
+    /// (<see cref="Geometry.Reflection.ApplyKeepingXY"/>). Points in its XY plane keep their
+    /// coordinates; a coordinate along Z changes sign.
+    /// </summary>
+    public sealed class CoordSysRecord : FeatureRecord
+    {
+        public CoordSysRecord(string name, Frame3 frame) : base(name, "CoordSys")
+        {
+            Frame = frame;
+        }
+
+        /// <summary>Origin and axes in model coordinates (unmirrored).</summary>
+        public Frame3 Frame { get; }
+
+        public override bool ChangesSolid => false;
+    }
+
     /// <summary>Same numbers as swEndConditions_e.</summary>
     public enum EndCondition
     {

@@ -130,6 +130,18 @@ namespace Spiegelwerk.Build.Builders
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
+        public static bool TablePattern(ModelDoc2 doc, Feature f, Action<TablePatternFeatureData> change)
+        {
+            var d = (TablePatternFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool CoordinateSystem(ModelDoc2 doc, Feature f, Action<ICoordinateSystemFeatureData> change)
+        {
+            var d = (ICoordinateSystemFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
         public static bool CurvePattern(ModelDoc2 doc, Feature f, Action<CurveDrivenPatternFeatureData> change)
         {
             var d = (CurveDrivenPatternFeatureData)f.GetDefinition();

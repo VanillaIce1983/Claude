@@ -13,17 +13,20 @@ namespace Spiegelwerk.Build
     /// Provides a reference plane in the target for a given geometric plane, without ever
     /// referencing the original: an existing plane if one coincides, otherwise an offset of a
     /// standard plane, otherwise a plane through three fixed points of a helper 3D sketch.
-    /// Reference axes the same way: on a fixed line of a helper 3D sketch.
+    /// Reference axes the same way: on a fixed line of a helper 3D sketch; coordinate systems
+    /// on a fixed point and two fixed lines of one.
     /// </summary>
     internal sealed class PlaneResolver
     {
         private readonly BuildContext _ctx;
         private readonly List<(Feature feature, Plane3 plane)> _known = new List<(Feature, Plane3)>();
         private readonly List<(Feature feature, Line3 line)> _axes = new List<(Feature, Line3)>();
+        private readonly List<(Feature feature, Frame3 frame)> _coordinateSystems = new List<(Feature, Frame3)>();
         private Feature[]? _standard;
         private int _counter;
         private int _axisCounter;
         private int _anchorCounter;
+        private int _coordinateSystemCounter;
 
         public PlaneResolver(BuildContext ctx)
         {
@@ -195,6 +198,118 @@ namespace Spiegelwerk.Build
             _axes.Add((axis, wanted));
             _ctx.Topology.Invalidate();
             return axis;
+        }
+
+        // ---------------------------------------------------------------- coordinate systems
+
+        /// <summary>Selection marks of InsertCoordinateSystem: origin, X axis, Y axis (example of the API help).</summary>
+        private const int OriginMark = 1, XAxisMark = 2, YAxisMark = 4;
+
+        /// <summary>A coordinate system of this job with the given origin and axes, if there is one.</summary>
+        public Feature? FindCoordinateSystem(Frame3 wanted) =>
+            _coordinateSystems.FirstOrDefault(c => SameFrame(c.frame, wanted)).feature;
+
+        /// <summary>A coordinate system with the given origin and axes: one of this job, otherwise a new helper.</summary>
+        public Feature CoordinateSystem(Frame3 wanted) =>
+            FindCoordinateSystem(wanted) ?? CreateCoordinateSystem(wanted, $"Spiegelwerk-KS {++_coordinateSystemCounter}");
+
+        /// <summary>Rebuilds a coordinate system of the original as an independent one with the given name.</summary>
+        public Feature CreateNamedCoordinateSystem(Frame3 wanted, string name) => CreateCoordinateSystem(wanted, name);
+
+        public static bool SameFrame(Frame3 a, Frame3 b) =>
+            a.Origin.AlmostEquals(b.Origin) && a.XAxis.IsSameDirection(b.XAxis, 1e-6) && a.YAxis.IsSameDirection(b.YAxis, 1e-6);
+
+        /// <summary>
+        /// Coordinate system on a helper 3D sketch: a fixed line from the origin along X and
+        /// one along Y, their common start point the origin – like helper planes and axes it
+        /// depends on nothing else. Whether SOLIDWORKS takes a line's direction from its start
+        /// to its end is not documented: the frame is read back, and an axis that came out
+        /// reversed is flipped (XFlipped/YFlipped).
+        /// </summary>
+        private Feature CreateCoordinateSystem(Frame3 wanted, string name)
+        {
+            ModelDoc2 doc = _ctx.Doc;
+            SketchManager sm = doc.SketchManager;
+            Vec3 o = wanted.Origin, x = o + wanted.XAxis * 0.05, y = o + wanted.YAxis * 0.05;
+
+            SwSelect.Clear(doc);
+            sm.Insert3DSketch(true);
+            SketchLine? xLine, yLine;
+            using (new SketchInputScope(sm))
+            {
+                xLine = sm.CreateLine(o.X, o.Y, o.Z, x.X, x.Y, x.Z) as SketchLine;
+                yLine = sm.CreateLine(o.X, o.Y, o.Z, y.X, y.Y, y.Z) as SketchLine;
+                SketchRelationManager rm = sm.ActiveSketch.RelationManager;
+                foreach (SketchLine? l in new[] { xLine, yLine })
+                {
+                    if (l == null) continue;
+                    rm.AddRelation(new object[] { l }, (int)swConstraintType_e.swConstraintType_FIXED);
+                    rm.AddRelation(new object[] { l.GetStartPoint2() }, (int)swConstraintType_e.swConstraintType_FIXED);
+                    rm.AddRelation(new object[] { l.GetEndPoint2() }, (int)swConstraintType_e.swConstraintType_FIXED);
+                }
+            }
+            sm.Insert3DSketch(true);
+            Feature anchor = doc.Extension.GetLastFeatureAdded();
+            SwDoc.Rename(doc, anchor, $"Spiegelwerk-Anker {++_anchorCounter}");
+            _ctx.RegisterHelper(anchor);
+            if (xLine == null || yLine == null || !(xLine.GetStartPoint2() is SketchPoint origin))
+                throw new InvalidOperationException($"Hilfsskizze für das Koordinatensystem {wanted} konnte nicht erzeugt werden.");
+
+            Feature? cs = InsertCoordinateSystem(origin, xLine, yLine);
+            if (cs == null) throw new InvalidOperationException($"Koordinatensystem {wanted} konnte nicht erzeugt werden.");
+            SwDoc.Rename(doc, cs, name);
+
+            Frame3? actual = SwDoc.CoordinateSystemFrame(doc, _ctx.Math, cs.Name);
+            if (actual.HasValue && !SameFrame(actual.Value, wanted))
+            {
+                bool flipX = actual.Value.XAxis.IsSameDirection(-wanted.XAxis, 1e-6);
+                bool flipY = actual.Value.YAxis.IsSameDirection(-wanted.YAxis, 1e-6);
+                if (flipX || flipY)
+                    Builders.FeatureEdit.CoordinateSystem(doc, cs, d =>
+                    {
+                        if (flipX) d.XFlipped = !d.XFlipped;
+                        if (flipY) d.YFlipped = !d.YFlipped;
+                    });
+                actual = SwDoc.CoordinateSystemFrame(doc, _ctx.Math, cs.Name);
+            }
+            if (!actual.HasValue || !SameFrame(actual.Value, wanted))
+            {
+                Delete(cs);
+                throw new InvalidOperationException($"Koordinatensystem {wanted} lag nach dem Erzeugen falsch ({actual?.ToString() ?? "nicht lesbar"}).");
+            }
+            _ctx.RegisterHelper(cs);
+            _coordinateSystems.Add((cs, wanted));
+            _ctx.Topology.Invalidate();
+            return cs;
+        }
+
+        /// <summary>InsertCoordinateSystem with the marks of the API help; CreateCoordinateSystem (newer versions) as fallback.</summary>
+        private Feature? InsertCoordinateSystem(SketchPoint origin, SketchLine xLine, SketchLine yLine)
+        {
+            ModelDoc2 doc = _ctx.Doc;
+            SwSelect.Clear(doc);
+            Feature? cs = null;
+            try
+            {
+                if (SwSelect.Select(doc, origin, OriginMark, false) &&
+                    SwSelect.Select(doc, xLine, XAxisMark, true) &&
+                    SwSelect.Select(doc, yLine, YAxisMark, true))
+                    cs = doc.FeatureManager.InsertCoordinateSystem(false, false, false);
+            }
+            catch (Exception)
+            {
+                cs = null;
+            }
+            finally
+            {
+                SwSelect.Clear(doc);
+            }
+            if (cs != null) return cs;
+
+            string before = doc.Extension.GetLastFeatureAdded()?.Name ?? "";
+            if (!SwLate.Call(doc.FeatureManager, "CreateCoordinateSystem", origin, new object[] { xLine }, new object[] { yLine }, null!)) return null;
+            Feature? after = doc.Extension.GetLastFeatureAdded();
+            return after != null && after.Name != before && after.GetTypeName2() == "CoordSys" ? after : null;
         }
 
         private Feature? InsertPlane(Func<bool> select, int c1, double v1, int c2, int c3)

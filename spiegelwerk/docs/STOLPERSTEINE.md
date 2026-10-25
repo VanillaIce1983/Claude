@@ -74,7 +74,7 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 
 45. **Gespiegelte Features würden das Original verändern:** Ein verschmelzender Aufsatz verschmilzt mit dem Original, sobald sie sich berühren, ein Schnitt schneidet beide – und am Volumen ist das nicht zu sehen. → Aufsätze entstehen ohne Verschmelzen; Verschmelzen und Feature-Bereich werden in einem Schritt gesetzt, mit den Körpern aus dem zurückgerollten Zustand (vor dem Feature gibt es den gespiegelten Körper noch für sich). Ein Schnitt ohne gespiegelten Körper wird nicht angelegt.
 46. **Ebenen des Originals.** Liegt eine gespiegelte Skizze zufällig auf einer Ebene des Originals, hinge sie wieder am Original. → Nur Standardebenen und eigene Ebenen verwenden.
-47. **Original löschen** kann abhängige Features beschädigen oder Features verlieren, die gar nicht gespiegelt wurden (Achsen, 3D-Skizzen, Koordinatensysteme). → Nur wenn jedes Feature ein fehlerfreies Gegenstück hat und nichts außerhalb der Auswahl vom Original abhängt.
+47. **Original löschen** kann abhängige Features beschädigen oder Features verlieren, die gar nicht gespiegelt wurden (3D-Skizzen und andere nicht unterstützte Features). → Nur wenn jedes Feature ein fehlerfreies Gegenstück hat und nichts außerhalb der Auswahl vom Original abhängt.
 
 ## Add-In und COM
 
@@ -166,6 +166,15 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 109. **Skizzenmuster: `UseCentroid` und `GeometryPattern` kommen beim Anlegen als Flags mit;** der Referenzpunkt nur über die Auswahl (Markierung 32, Drittquelle). → Nach dem Anlegen die beiden Optionen vergleichen (ohne Schwerpunkt mit dem Referenzpunkt zusammen); die Lage der Instanzen zeigt, ob der Referenzpunkt stimmt. Ist der Referenzpunkt der Ursprung, wird der Ursprung des Ziels genommen – nur wenn die Spiegelebene durch ihn geht.
 110. **Die Instanzzahl eines Skizzenmusters** ist nicht die Zahl aller Skizzenpunkte: Endpunkte von Linien und Bögen sind keine Instanzen, eine Layoutskizze hat davon leicht Hunderte – genug, um die Grenze von 400 gelesenen Instanzen zu überschreiten und die Lageprüfung stillschweigend auszuschalten. → Gelesen wird bis zur Zahl der Einzelpunkte plus Bogen- und Ellipsenmittelpunkte.
 
+## Tabellenmuster und Koordinatensysteme
+
+111. **Ein gespiegeltes Koordinatensystem wäre linkshändig** – das gibt es in SOLIDWORKS nicht. → X′ = R(x), Y′ = R(y), Z′ = X′ × Y′. Punkte in der XY-Ebene (die Tabelle eines Tabellenmusters) behalten ihre Koordinaten, ein Z-Wert wechselt das Vorzeichen. Wer das Koordinatensystem für etwas anderes nutzt (Export, Massenträgheit um Z), bekommt eine umgekehrte Z-Achse.
+112. **Lage eines Koordinatensystems:** `GetCoordinateSystemTransformByName` bildet nach üblicher Verwendung Koordinatensystem → Modell ab (Beispiele invertieren sie für Modell → Koordinatensystem). → So gelesen; das neu angelegte Koordinatensystem wird auf dieselbe Weise zurückgelesen und mit der gewünschten Lage verglichen – eine falsche Annahme fiele dort auf.
+113. **Linienrichtung beim Anlegen:** Ob `InsertCoordinateSystem` die Achsrichtung vom Start- zum Endpunkt der gewählten Linie nimmt, ist nicht dokumentiert. → Zurücklesen, verkehrte Achse mit `XFlipped`/`YFlipped` umdrehen, sonst entfernen und melden.
+114. **Tabellenmuster über die Auswahl:** Das Beispiel der Hilfe zu `InsertTableDrivenPattern2` liest eine Tabellendatei; Markierungen und das Format von `PointVar` stehen nicht da. → Zuerst das Datenobjekt (`CoordinateSystem`, `PointArray` – laut Hilfe x/y/z je Punkt –, `ReferencePoint`, Saat); die Auswahl (Koordinatensystem 0, Punkt 32, Saat 4/128/256) nur als Ersatz; die Punkte werden danach verglichen und notfalls neu gesetzt.
+115. **Kein `BodyPattern` beim Tabellenmuster:** Das Datenobjekt hat keine solche Eigenschaft. → Körpermuster ist, was Saat-Körper hat (`GetPatternBodyCount`).
+116. **Das Koordinatensystem ist ein Bezug, keine Skizze:** Wird nur das Muster gewählt, wird es nicht mitgespiegelt (Bezüge werden nicht nachgezogen). → Dann ein Hilfs-Koordinatensystem an gespiegelter Lage, im Bericht genannt.
+
 ## Was beim ersten Test in SOLIDWORKS zu prüfen ist
 
 Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in einer laufenden Sitzung erprobt. Diese Stellen beruhen auf der API-Hilfe und offiziellen Beispielen, wo diese uneindeutig sind; Spiegelwerk fängt sie ab, der Bericht zeigt, welcher Weg genommen wurde:
@@ -195,6 +204,8 @@ Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in eine
 | Elemente nachträglich ändern | `GetNearSideElements` → ändern → `SetNearSideElements` → `ModifyDefinition` | Abweichungen stehen im Bericht |
 | Kurvenmuster | `FeatureCurvePattern` mit Kurve 1, Richtung 2 Markierung 2, Saat 4/128/256; `UseCentroid` = false | `CreateDefinition(swFmCurvePattern)`; Werte danach verglichen, Flags über die Lage der Instanzen |
 | Skizzenmuster | Skizze 64, Referenzpunkt 32, Saat 4/128/256 (Drittquelle) | `CreateDefinition(swFmSketchPattern)`; Lage der Instanzen geprüft |
+| Koordinatensystem | `InsertCoordinateSystem` mit Ursprung 1, X-Achse 2, Y-Achse 4 (Beispiel der Hilfe); Transformation = Koordinatensystem → Modell | `CreateCoordinateSystem` (neuere Versionen, spät gebunden); Lage zurückgelesen, Achsen umgedreht, sonst entfernt |
+| Tabellenmuster | Datenobjekt mit `PointArray` x/y/z je Punkt | `InsertTableDrivenPattern2` mit Auswahl (Koordinatensystem 0, Punkt 32, Saat 4/128/256); Punkte danach verglichen; Lage der Instanzen geprüft |
 | Wandung | offene Flächen mit Markierung 1 (Beispiel eines Drittanbieters), sonst 0; `Direction` 0/1 = innen/außen | Richtung wird nach dem Anlegen verglichen und gesetzt; Alternative für die Prüfung |
 | Flächen-/vollständige Verrundung | Markierungen 2/4 und 512 (API-Hilfe), Optionen für die Normalenrichtung | Flags danach verglichen, Varianten für die Prüfung |
 | Variable Verrundung | Kanten mit Markierung 1, `FeatureFillet3` mit Typ „variabler Radius“ | alle Werte danach über die Feature-Daten |

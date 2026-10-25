@@ -4,13 +4,14 @@ using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Core.Verification;
 using Spiegelwerk.Sw;
 
 namespace Spiegelwerk.Capture
 {
-    /// <summary>Linear, circular, curve and sketch driven patterns: seeds, directions and the placements of the instances.</summary>
+    /// <summary>Linear, circular, curve, sketch and table driven patterns: seeds, directions and the placements of the instances.</summary>
     internal sealed partial class FeatureCapture
     {
         /// <summary>Beyond this many instances the placements are not read (one call each); the mass check remains.</summary>
@@ -153,19 +154,9 @@ namespace Spiegelwerk.Capture
                 };
                 if (!r.UseCentroid)
                 {
-                    object point = d.ReferencePoint;
-                    if (IsOrigin(point))
-                    {
-                        r.ReferenceIsOrigin = true;
-                    }
-                    else
-                    {
-                        if (point is SketchPoint sp && sp.GetSketch() is Sketch owner && owner.Is3D())
-                            throw new NotSupportedException("Referenzpunkt in einer 3D-Skizze wird nicht unterstützt.");
-                        r.ReferencePoint = ToGeometryRef(point);
-                        if (r.ReferencePoint == null || r.ReferencePoint.Kind == GeometryRefKind.Unknown)
-                            throw new NotSupportedException("Referenzpunkt des Musters nicht lesbar (erwartet: Skizzenpunkt, Eckpunkt oder Ursprung).");
-                    }
+                    (GeometryRef? point, bool origin) = ReadReferencePoint(d.ReferencePoint);
+                    r.ReferencePoint = point;
+                    r.ReferenceIsOrigin = origin;
                 }
 
                 ReadSeeds(r, d.BodyPattern, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, null);
@@ -179,6 +170,66 @@ namespace Spiegelwerk.Capture
             {
                 d.ReleaseSelectionAccess();
             }
+        }
+
+        private TablePatternRecord CaptureTablePattern(Feature f, string type, TablePatternFeatureData d)
+        {
+            if (!d.AccessSelections(_doc, null))
+                throw new NotSupportedException("Feature-Definition konnte nicht gelesen werden (AccessSelections).");
+            try
+            {
+                if (!(d.CoordinateSystem is Feature cs))
+                    throw new NotSupportedException("Koordinatensystem des Tabellenmusters nicht lesbar.");
+                Frame3 frame = SwDoc.CoordinateSystemFrame(_doc, _math, cs.Name)
+                               ?? throw new NotSupportedException($"Lage des Koordinatensystems „{cs.Name}“ nicht lesbar.");
+                var r = new TablePatternRecord(f.Name, type, cs.Name, frame)
+                {
+                    UseCentroid = d.UseCentroid,
+                    PropagateVisualProperty = d.PropagateVisualProperty,
+                };
+                r.Points.AddRange(TablePoints.FromArray(Doubles(d.PointArray)));
+                if (r.Points.Count == 0) throw new NotSupportedException("Punkte des Tabellenmusters nicht lesbar.");
+                if (!r.UseCentroid)
+                {
+                    (GeometryRef? point, bool origin) = ReadReferencePoint(d.ReferencePoint);
+                    r.ReferencePoint = point;
+                    r.ReferenceIsOrigin = origin;
+                }
+
+                // No BodyPattern flag on this data object: a body pattern is one with seed bodies.
+                ReadSeeds(r, d.GetPatternBodyCount() > 0, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, d.SkippedItemArray);
+                NoteScope(d, r);
+                r.GeometryPattern = d.GeometryPattern;
+                // Seed plus one instance per table point at most; indices without an instance give nothing.
+                ReadInstances(r, r.Points.Count + 1, d.GetTransform);
+                return r;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+        }
+
+        private static double[] Doubles(object o) => o switch
+        {
+            double[] ds => ds,
+            object[] os => os.Select(Convert.ToDouble).ToArray(),
+            _ => Array.Empty<double>(),
+        };
+
+        /// <summary>
+        /// Chosen reference point of a sketch or table driven pattern: the origin (rebuilt as
+        /// the target's origin where that is right), otherwise a sketch point or vertex.
+        /// </summary>
+        private (GeometryRef? point, bool origin) ReadReferencePoint(object point)
+        {
+            if (IsOrigin(point)) return (null, true);
+            if (point is SketchPoint sp && sp.GetSketch() is Sketch owner && owner.Is3D())
+                throw new NotSupportedException("Referenzpunkt in einer 3D-Skizze wird nicht unterstützt.");
+            GeometryRef? g = ToGeometryRef(point);
+            if (g == null || g.Kind == GeometryRefKind.Unknown)
+                throw new NotSupportedException("Referenzpunkt des Musters nicht lesbar (erwartet: Skizzenpunkt, Eckpunkt oder Ursprung).");
+            return (g, false);
         }
 
         /// <summary>

@@ -43,10 +43,11 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `PlaneClassifier` | Welche Ebene trägt die gespiegelte Skizze: vorhandene, versetzte Standardebene oder Drei-Punkte-Ebene |
 | | `ComponentPlacement` | Platzierung des gespiegelten Teils in der Baugruppe |
 | | `PatternInstances` | Lage der Musterinstanzen spiegeln (R ∘ T ∘ R) und als Mengen vergleichen; Verschiebungen eines Skizzenmusters |
+| | `TablePoints` | Punkte eines Tabellenmusters im gespiegelten Koordinatensystem (x, y, −z) |
 | | `HoleAxis` | Wo eine Bohrungsachse den Körper verlässt (fernseitige Fläche der erweiterten Bohrung) |
 | `Matching` | `EdgeSignature`, `FaceSignature`, `TopologyMatcher` | Fingerabdrücke und deren Zuordnung im neu aufgebauten Teil |
 | `Verification` | `MassState`, `MassComparison` | Volumen und erstes Moment, gespiegelt und verglichen |
-| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs` (linear, kreisförmig, Kurve, Skizze), `HoleRecords.cs` mit der gemeinsamen Basis `PositionedHoleRecord` und der Typzuordnung `HoleTypes`, `AdvancedHoleRecords.cs`, `ShellDraftRecords.cs`, `VariableFilletRecords.cs` mit `EdgeLocation`, `FaceFilletRecords.cs`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
+| `Records` | `FeatureRecord` und Ableitungen (`SweepLoftRecords.cs`, `PatternRecords.cs` (linear, kreisförmig, Kurve, Skizze, Tabelle), `CoordSysRecord` in `FeatureRecords.cs`, `HoleRecords.cs` mit der gemeinsamen Basis `PositionedHoleRecord` und der Typzuordnung `HoleTypes`, `AdvancedHoleRecords.cs`, `ShellDraftRecords.cs`, `VariableFilletRecords.cs` mit `EdgeLocation`, `FaceFilletRecords.cs`), `GeometryRef`, `MirrorOptions`, `MirrorReport` | Erfasste Features samt Flächenproben, Optionen, Bericht |
 
 ### Spiegelwerk (Add-In)
 
@@ -70,10 +71,10 @@ Alles, was sich ohne SOLIDWORKS rechnen lässt, liegt in `Spiegelwerk.Core` (net
 | | `MassCapture` | Volumenänderung und Flächenproben jedes Features über die Rückrollleiste |
 | `Build/` | `MirrorJob` | Der ganze Lauf; neues Teil anlegen, Gleichungen kopieren, Original löschen |
 | | `BuildContext`, `SketchMap` | Zustand des Laufs; Zuordnung alter → neuer Skizzenelemente |
-| | `PlaneResolver` | Liefert für eine Ebene ein Ebenen-Feature im Ziel, für eine Gerade eine Achse |
+| | `PlaneResolver` | Liefert für eine Ebene ein Ebenen-Feature im Ziel, für eine Gerade eine Achse, für einen Rahmen ein Koordinatensystem |
 | | `TopologyFinder` | Findet Kanten, Flächen, Eckpunkte, Achsen und Skizzen im Ziel |
 | | `SketchBuilder` | Schreibt eine gespiegelte Skizze – neu oder in eine vorhandene (Positionsskizze einer Bohrung) |
-| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, variable Verrundung, Flächen- und vollständige Verrundung, Fase, Wandung, Formschräge, Bohrung, erweiterte Bohrung, Muster (linear/kreisförmig, Kurve, Skizze; gemeinsame Bausteine in `PatternSupport`) |
+| | `Builders/*` | Ein Builder je Feature-Typ: Skizze, Ebene, Achse, Extrusion, Rotation, Austragung, Ausformung, Verrundung, variable Verrundung, Flächen- und vollständige Verrundung, Fase, Wandung, Formschräge, Bohrung, erweiterte Bohrung, Muster (linear/kreisförmig, Kurve, Skizze, Tabelle; gemeinsame Bausteine in `PatternSupport`), Koordinatensystem |
 | | `StepVerifier` | Messen (Volumen, Moment, Flächenproben), Varianten probieren |
 | `AssemblyContext/` | `AssemblyMirror` | Komponente spiegeln, speichern, platzieren |
 
@@ -152,6 +153,8 @@ Das **Kurvenmuster** (`CurvePatternBuilder`) folgt demselben Prinzip: Die Kurve 
 
 Das **Skizzenmuster** (`SketchPatternBuilder`) besteht nur aus Verschiebungen vom Referenzpunkt (Schwerpunkt der Saat oder gewählter Punkt) zu den Punkten der Referenzskizze. Referenzskizze und Referenzpunkt werden gespiegelt neu aufgebaut (der Ursprung als Referenzpunkt bleibt Ursprung, wenn die Spiegelebene durch ihn geht), das Muster folgt ihnen; es gibt kein Flag umzuschalten, die gespiegelte Lage der Instanzen dient nur der Prüfung (`PatternInstances.Translations`, Tests in `DrivenPatternTests`). In der Referenzskizze zählt jeder Skizzenpunkt als Instanz: Ersatzpunkte für fehlende externe Bezüge werden dort – wie in der Positionsskizze einer Bohrung – Endpunkte fixierter Konstruktionslinien (`BuildContext.PointSketches`). Angelegt wird mit Auswahl (Skizze 64, Referenzpunkt 32, Saat 4/128/256) und `FeatureSketchDrivenPattern`, ersatzweise über `CreateDefinition(swFmSketchPattern)`.
 
+Das **Tabellenmuster** (`TablePatternBuilder`) setzt seine Punkte in die XY-Ebene eines Koordinatensystems F. Gespiegelt gehört eine Instanz nach R(F(p)). Das Koordinatensystem des Ziels F′ hat X′ = R(x), Y′ = R(y) und – rechtshändig – Z′ = −R(z) (`Reflection.ApplyKeepingXY`); also ist R(F(p)) = F′(p.x, p.y, −p.z): Die Tabelle behält X und Y, nur ein Z-Wert wechselt das Vorzeichen (`TablePoints`, Tests in `TablePatternTests`). F′ ist das mitgespiegelte Koordinatensystem des Originals, wenn der Lauf es aufgebaut hat und es richtig liegt, sonst ein Hilfs-Koordinatensystem („Spiegelwerk-KS“) an gespiegelter Lage. Angelegt wird über das Datenobjekt (`CreateDefinition(swFmTablePattern)` mit Koordinatensystem, `PointArray`, Referenzpunkt und Saat) – dessen Eigenschaften sind dokumentiert; `InsertTableDrivenPattern2` mit Auswahl ist nur Ersatz (das Beispiel der Hilfe nutzt eine Tabellendatei, Markierungen und Punktformat stehen nicht da). Danach werden die Punkte verglichen und bei Abweichung neu gesetzt; die gespiegelte Lage der Instanzen dient wie beim Skizzenmuster als Prüfung.
+
 ### Baugruppe
 
 Original-Komponente: Teilgeometrie x, Platzierung T. Gewünscht ist R_asm(T(x)). Das neue Teil wird als R_part(x) gebaut. Die Platzierung T′ muss T′(R_part(x)) = R_asm(T(x)) erfüllen:
@@ -212,6 +215,8 @@ Eine **Formschräge** neigt Flächen um einen Winkel gegen eine Zugrichtung: die
 2. Ist sie parallel zu einer Standardebene, entsteht eine Versatzebene davon. Die Seite des Versatzes wird nachgemessen und bei Bedarf umgedreht.
 3. Sonst entsteht eine Ebene durch drei fixierte Punkte einer Hilfs-3D-Skizze („Spiegelwerk-Anker“).
 
+**Koordinatensysteme** entstehen ebenso auf einer Hilfs-3D-Skizze: zwei fixierte Linien vom gespiegelten Ursprung aus entlang R(x) und R(y), ihr gemeinsamer Startpunkt der Ursprung, dann `InsertCoordinateSystem` (Ursprung 1, X 2, Y 4). Ein Spiegelbild wäre linkshändig, deshalb ist Z = X × Y – die gespiegelte Z-Achse umgekehrt. Ob SOLIDWORKS die Linienrichtung vom Start zum Ende nimmt, ist nicht dokumentiert: Die Lage wird zurückgelesen (`GetCoordinateSystemTransformByName`, Koordinatensystem → Modell) und eine verkehrte Achse über `XFlipped`/`YFlipped` umgedreht; liegt sie danach nicht richtig, wird das Koordinatensystem wieder entfernt und der Fehler gemeldet.
+
 Die Standardebenen werden über ihre Geometrie gefunden, nicht über den Namen („Ebene vorne“, „Front Plane“ …).
 
 Achsen (Drehachse, Musterrichtung, Extrusionsrichtung) sucht `TopologyFinder.FindLineObject` in dieser Reihenfolge: eine Achse des Laufs, eine neu aufgebaute Skizzenlinie, eine gerade Kante – im selben Teil nur auf den gespiegelten Körpern. Liegt nichts auf der gespiegelten Geraden, legt `PlaneResolver` eine Hilfsachse an: Bezugsachse auf einer fixierten Linie einer Hilfs-3D-Skizze. Referenzachsen des Originals werden auf dieselbe Weise unter ihrem Namen neu angelegt.
@@ -230,7 +235,7 @@ Wird das ganze Teil oder ein Körper im selben Teil gespiegelt, entsteht ein eig
 
 Ebenen des Originals verwendet der `PlaneResolver` im selben Teil nicht: Er kennt nur die Standardebenen und die Ebenen, die der Lauf selbst anlegt.
 
-„Original löschen“ wird nur ausgeführt, wenn jedes Feature ein fehlerfreies Gegenstück hat (`MirrorReport.AllMirrored` – übersprungene Achsen, 3D-Skizzen oder Koordinatensysteme blockieren) und kein anderes Feature vom Original abhängt.
+„Original löschen“ wird nur ausgeführt, wenn jedes Feature ein fehlerfreies Gegenstück hat (`MirrorReport.AllMirrored` – übersprungene oder nicht unterstützte Features wie 3D-Skizzen blockieren) und kein anderes Feature vom Original abhängt.
 
 ## Einen Feature-Typ ergänzen
 

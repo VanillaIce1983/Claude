@@ -158,4 +158,38 @@ namespace Spiegelwerk.Core.Records
         /// </summary>
         public int SketchPointCount { get; set; }
     }
+
+    /// <summary>
+    /// Table driven pattern: instances at points given in the XY plane of a coordinate system,
+    /// placed by moving the reference point (the seed's centroid or a chosen point) there.
+    /// The coordinate system is rebuilt as X' = R(x), Y' = R(y), Z' = X' × Y'; in it the points
+    /// keep X and Y and change the sign of Z (<see cref="Planning.TablePoints"/>).
+    /// </summary>
+    public sealed class TablePatternRecord : PatternRecord
+    {
+        public TablePatternRecord(string name, string typeName, string coordinateSystemName, Frame3 coordinateSystem) : base(name, typeName)
+        {
+            CoordinateSystemName = coordinateSystemName;
+            CoordinateSystem = coordinateSystem;
+        }
+
+        /// <summary>The coordinate system, by original name.</summary>
+        public string CoordinateSystemName { get; }
+
+        /// <summary>Its origin and axes (unmirrored) – for a helper if it is not rebuilt itself.</summary>
+        public Frame3 CoordinateSystem { get; }
+
+        /// <summary>Points of the table in the coordinate system (PointArray, x/y/z per point).</summary>
+        public List<Vec3> Points { get; } = new List<Vec3>();
+
+        public bool UseCentroid { get; set; }
+
+        /// <summary>Chosen reference point (sketch point or vertex) without <see cref="UseCentroid"/>.</summary>
+        public GeometryRef? ReferencePoint { get; set; }
+
+        /// <summary>The chosen reference point is the origin (see <see cref="SketchPatternRecord.ReferenceIsOrigin"/>).</summary>
+        public bool ReferenceIsOrigin { get; set; }
+
+        public bool PropagateVisualProperty { get; set; }
+    }
 }

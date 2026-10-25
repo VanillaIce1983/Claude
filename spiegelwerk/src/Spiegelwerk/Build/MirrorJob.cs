@@ -63,6 +63,7 @@ namespace Spiegelwerk.Build
             new PartOfBuilder(),
             new RefPlaneBuilder(),
             new AxisBuilder(),
+            new CoordSysBuilder(),
             new ExtrudeBuilder(),
             new RevolveBuilder(),
             new SweepBuilder(),
@@ -78,6 +79,7 @@ namespace Spiegelwerk.Build
             new PatternBuilder(),
             new CurvePatternBuilder(),
             new SketchPatternBuilder(),
+            new TablePatternBuilder(),
         };
 
         public MirrorJob(SldWorks sw)

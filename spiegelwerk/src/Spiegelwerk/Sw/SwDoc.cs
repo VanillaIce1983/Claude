@@ -133,6 +133,27 @@ namespace Spiegelwerk.Sw
             return new Line3(a, b - a);
         }
 
+        /// <summary>
+        /// Origin and axes of a coordinate system feature. The transform maps coordinate system
+        /// → model (the usual use inverts it to get coordinates in the system). Null if it is
+        /// not readable or not a right-handed frame.
+        /// </summary>
+        public static Frame3? CoordinateSystemFrame(ModelDoc2 doc, SwMath math, string name)
+        {
+            try
+            {
+                return doc.Extension.GetCoordinateSystemTransformByName(name) is MathTransform t ? math.FrameOf(t) : (Frame3?)null;
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                return null;
+            }
+        }
+
         public static Feature? FeatureByName(ModelDoc2 doc, string name) =>
             doc is PartDoc p ? (Feature)p.FeatureByName(name) : null;
 

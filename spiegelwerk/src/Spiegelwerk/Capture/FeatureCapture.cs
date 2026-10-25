@@ -39,6 +39,9 @@ namespace Spiegelwerk.Capture
                 if (type == "3DProfileFeature") return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);
                 if (type == "RefPlane") return new RefPlaneRecord(f.Name, _math.PlaneOf((RefPlane)f.GetSpecificFeature2()));
                 if (type == "RefAxis") return new RefAxisRecord(f.Name, SwDoc.AxisLine((RefAxis)f.GetSpecificFeature2()));
+                if (type == "CoordSys")
+                    return new CoordSysRecord(f.Name, SwDoc.CoordinateSystemFrame(_doc, _math, f.Name)
+                                                      ?? throw new NotSupportedException("Lage des Koordinatensystems nicht lesbar."));
 
                 object def = f.GetDefinition();
                 switch (def)
@@ -68,6 +71,8 @@ namespace Spiegelwerk.Capture
                         return CaptureCurvePattern(f, type, cdp);
                     case SketchPatternFeatureData sp:
                         return CaptureSketchPattern(f, type, sp);
+                    case TablePatternFeatureData tp:
+                        return CaptureTablePattern(f, type, tp);
                     case WizardHoleFeatureData2 wh:
                         return CaptureHole(f, type, wh);
                     case AdvancedHoleFeatureData ah:
@@ -404,9 +409,9 @@ namespace Spiegelwerk.Capture
             "MirrorPattern" => "Spiegel-Feature im Original: wird bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. " +
                                "Abhilfe: im Original durch die gespiegelten Einzel-Features ersetzen oder nach dem Lauf von Hand spiegeln.",
             // Reached only if the definition does not answer as the pattern's data interface.
-            "CurvePattern" or "SketchPattern" => "Muster: Feature-Daten nicht lesbar.",
-            "TablePattern" or "FillPattern" or "DimPattern" or "VarPattern" =>
-                "Dieses Muster wird nicht unterstützt (nur lineare, kreisförmige, Kurven- und Skizzenmuster).",
+            "CurvePattern" or "SketchPattern" or "TablePattern" => "Muster: Feature-Daten nicht lesbar.",
+            "FillPattern" or "DimPattern" or "VarPattern" =>
+                "Dieses Muster wird nicht unterstützt (nur lineare, kreisförmige, Kurven-, Skizzen- und Tabellenmuster).",
             _ => $"Feature-Typ {type} wird nicht unterstützt.",
         };
     }
