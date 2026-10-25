@@ -50,6 +50,8 @@ namespace Spiegelwerk.Capture
                     // Before the simple fillet: a variable fillet's data might answer to both.
                     case VariableFilletFeatureData2 vf:
                         return CaptureVariableFillet(f, type, vf);
+                    case SimpleFilletFeatureData2 fil when IsFaceFillet(fil):
+                        return CaptureFaceFillet(f, type, fil);
                     case SimpleFilletFeatureData2 fil:
                         return CaptureFillet(f, type, fil);
                     case ChamferFeatureData2 ch:
@@ -228,7 +230,7 @@ namespace Spiegelwerk.Capture
         private FilletRecord CaptureFillet(Feature f, string type, SimpleFilletFeatureData2 d)
         {
             if (d.Type != (int)swSimpleFilletType_e.swConstRadiusFillet)
-                throw new NotSupportedException("Nur Verrundungen mit konstantem Radius werden unterstützt (keine Flächen- oder vollständige Verrundung).");
+                throw new NotSupportedException($"Verrundungstyp {d.Type} wird nicht unterstützt.");
             if (d.ConicTypeForCrossSectionProfile != (int)swFeatureFilletProfileType_e.swFeatureFilletCircular)
                 throw new NotSupportedException("Nur kreisförmige Verrundungsprofile werden unterstützt (kein Kegelschnitt).");
             if (d.AsymmetricFillet)

@@ -140,6 +140,12 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 92. **Variable und einfache Verrundung** könnten beide Datenschnittstellen beantworten. → Die variable zuerst abfragen.
 93. **Verluste, die schon beim Erfassen feststehen** (Feature-Bereich, Rücksprungabstände, Regionen, nicht lesbare Verbinder …), standen bisher nur in den Details, der Eintrag blieb „OK“ – und „Original löschen“ hätte gegriffen. → Jeder Hinweis aus dem Erfassen macht ein sonst fehlerfreies Feature zur Warnung.
 
+## Flächen- und vollständige Verrundung
+
+94. **Eigene Markierungen für jede Flächengruppe:** Gruppe 1 = 2, Gruppe 2 = 4, Mittelflächen einer vollständigen Verrundung = 512; die Benutzeroberfläche verlangt die Reihenfolge Seite 1, Mitte, Seite 2. → Genau so wählen.
+95. **Unvollständige Flächengruppen** ergäben eine Verrundung zwischen anderen Flächen. → Fehlt eine Fläche, keine Verrundung, sondern eine Meldung.
+96. **Normalenrichtung der Gruppen** steuert, auf welcher Seite die Flächenverrundung entsteht. Außennormalen bleiben bei einer Spiegelung außen. → Flags unverändert (als Optionen beim Anlegen und danach geprüft), Gegenrichtung je Gruppe als Variante. Hilfspunkt und Haltelinien aus Trennlinien-Kurven werden nicht übernommen (Hinweis).
+
 ## Was beim ersten Test in SOLIDWORKS zu prüfen ist
 
 Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in einer laufenden Sitzung erprobt. Diese Stellen beruhen auf der API-Hilfe und offiziellen Beispielen, wo diese uneindeutig sind; Spiegelwerk fängt sie ab, der Bericht zeigt, welcher Weg genommen wurde:
@@ -165,6 +171,7 @@ Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in eine
 | Bohrung über Datenobjekt | `CreateDefinition(swFmHoleWzd)` + `InitializeHole` + Fläche am Punkt gewählt + `CreateFeature` (Beispiel der Hilfe) | `HoleWizard5` mit −1 für die typabhängigen Werte |
 | Positionsskizze der neuen Bohrung | 2D-Skizze auf ebener Fläche, über `GetSketchPoints` zu finden, per `EditSketch` beschreibbar | sonst wird die Bohrung entfernt und gemeldet |
 | Wandung | offene Flächen mit Markierung 1 (Beispiel eines Drittanbieters), sonst 0; `Direction` 0/1 = innen/außen | Richtung wird nach dem Anlegen verglichen und gesetzt; Alternative für die Prüfung |
+| Flächen-/vollständige Verrundung | Markierungen 2/4 und 512 (API-Hilfe), Optionen für die Normalenrichtung | Flags danach verglichen, Varianten für die Prüfung |
 | Variable Verrundung | Kanten mit Markierung 1, `FeatureFillet3` mit Typ „variabler Radius“ | alle Werte danach über die Feature-Daten |
 | Lage der Kontrollpunkte | Bruchteil 0–1 oder Prozent, ab Kantenanfang | Prüfung zeigt Abweichungen |
 | Geschlossene Wandung | Körper mit Markierung 1 (sonst 0) wählen | bei genau einem Körper auch ohne Auswahl |
