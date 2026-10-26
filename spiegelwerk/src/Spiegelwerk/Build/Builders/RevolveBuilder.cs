@@ -41,7 +41,7 @@ namespace Spiegelwerk.Build.Builders
             if (axis == null)
                 return Fail("Drehachse im Ziel nicht gefunden.", notes);
 
-            (bool singleDir, EndCondition dir1, double a1, EndCondition dir2, double a2) = Layout(r);
+            (bool singleDir, EndCondition dir1, double a1, EndCondition dir2, double a2) = r.Layout();
             bool reverse = DirectionRules.ReverseFlag(r.Reverse, sketch.Sigma);
             List<object>? contours = MapContours(r.Contours, sketch, notes);
 
@@ -114,26 +114,6 @@ namespace Spiegelwerk.Build.Builders
                 if (f != null) return f;
             }
             return null;
-        }
-
-        /// <summary>swRevolveType_e → parameters of FeatureRevolve2.</summary>
-        private static (bool singleDir, EndCondition dir1, double a1, EndCondition dir2, double a2) Layout(RevolveRecord r)
-        {
-            const double full = 2 * Math.PI;
-            switch ((swRevolveType_e)r.RevolveType)
-            {
-                case swRevolveType_e.swRevolveTypeMidPlane:
-                    return (true, EndCondition.MidPlane, r.Angle1, EndCondition.Blind, 0);
-                case swRevolveType_e.swRevolveTypeTwoDirection:
-                case swRevolveType_e.swRevolveTypeTwoDirection360Degrees:
-                    return (false, EndCondition.Blind, r.Angle1, EndCondition.Blind, r.Angle2);
-                case swRevolveType_e.swRevolveTypeOneDirection360Degrees:
-                    return (true, EndCondition.Blind, full, EndCondition.Blind, 0);
-                case swRevolveType_e.swRevolveTypeMidPlane360Degrees:
-                    return (true, EndCondition.MidPlane, full, EndCondition.Blind, 0);
-                default:
-                    return (true, EndCondition.Blind, r.Angle1, EndCondition.Blind, 0);
-            }
         }
     }
 }

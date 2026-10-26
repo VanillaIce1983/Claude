@@ -4,6 +4,7 @@ using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Verification;
 
@@ -159,14 +160,44 @@ namespace Spiegelwerk.Sw
 
         public static bool HasFeatureNamed(ModelDoc2 doc, string name) => FeatureByName(doc, name) != null;
 
-        /// <summary>Renames, avoiding clashes by appending " (2)", " (3)" ...</summary>
+        /// <summary>Renames, avoiding clashes by appending " (2)", " (3)" ... (the feature's own name is no clash).</summary>
         public static string Rename(ModelDoc2 doc, Feature f, string wanted)
         {
-            if (f.Name == wanted) return wanted;
-            string name = wanted;
-            for (int i = 2; HasFeatureNamed(doc, name); i++) name = $"{wanted} ({i})";
+            string current = f.Name;
+            string name = FeatureNames.Free(wanted, current, n => HasFeatureNamed(doc, n));
+            if (name == current) return current;
             f.Name = name;
             return f.Name;
+        }
+
+        /// <summary>Gives a dimension a name; false if it keeps its old one (name taken in its feature or sketch).</summary>
+        public static bool TryRename(Dimension d, string name)
+        {
+            if (d.Name == name) return true;
+            try
+            {
+                d.Name = name;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // Name already taken; the old one stays.
+            }
+            return d.Name == name;
+        }
+
+        /// <summary>The feature's own display dimensions (depth, radius, spacing ...), not those of its sketches.</summary>
+        public static List<DisplayDimension> OwnDimensions(Feature f)
+        {
+            var result = new List<DisplayDimension>();
+            for (object? o = f.GetFirstDisplayDimension(); o is DisplayDimension dd; o = f.GetNextDisplayDimension(dd))
+                if (dd.GetDimension2(0)?.GetFeatureOwner() is Feature owner && owner.Name == f.Name) result.Add(dd);
+            return result;
+        }
+
+        public static NamedDimension Named(DisplayDimension dd)
+        {
+            Dimension d = dd.GetDimension2(0);
+            return new NamedDimension(d.Name, d.SystemValue, dd.Type2);
         }
 
         public static string IdOf(SketchPoint p) => "P" + string.Join("-", (int[])p.GetID());

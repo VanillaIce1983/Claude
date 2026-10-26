@@ -5,7 +5,10 @@ using Spiegelwerk.Core.Records;
 
 namespace Spiegelwerk.UI
 {
-    /// <summary>Result list after a run: one line per feature with status, message and check.</summary>
+    /// <summary>
+    /// Result list after a run: one line per feature with status, message and check. Shown
+    /// without blocking SOLIDWORKS, owned by its main window.
+    /// </summary>
     internal sealed class ReportForm : Form
     {
         public ReportForm(MirrorReport report)
@@ -13,7 +16,10 @@ namespace Spiegelwerk.UI
             Text = "Spiegelwerk – Ergebnis";
             Width = 980;
             Height = 560;
-            StartPosition = FormStartPosition.CenterParent;
+            // CenterParent works for modal dialogs only.
+            StartPosition = FormStartPosition.CenterScreen;
+            ShowInTaskbar = false;
+            MinimizeBox = false;
             Font = SystemFonts.MessageBoxFont;
 
             var header = new Label
@@ -57,7 +63,8 @@ namespace Spiegelwerk.UI
             }
 
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 40, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6) };
-            var close = new Button { Text = "Schließen", DialogResult = DialogResult.OK, AutoSize = true };
+            var close = new Button { Text = "Schließen", AutoSize = true };
+            close.Click += (s, a) => Close();
             var copy = new Button { Text = "Als Text kopieren", AutoSize = true };
             copy.Click += (s, a) => Clipboard.SetText(report.ToText());
             buttons.Controls.Add(close);
@@ -70,7 +77,7 @@ namespace Spiegelwerk.UI
         }
     }
 
-    /// <summary>Lets a WinForms dialog use the SOLIDWORKS main window as owner.</summary>
+    /// <summary>Lets a WinForms window use the SOLIDWORKS main window as owner.</summary>
     internal sealed class WindowWrapper : IWin32Window
     {
         public WindowWrapper(IntPtr handle) => Handle = handle;

@@ -27,8 +27,16 @@ namespace Spiegelwerk.Build
 
         public static string Verify(BuildContext ctx, FeatureRecord record, BuildResult result, MassState before)
         {
-            if (!ctx.Options.VerifySteps || !record.ChangesSolid || record.ExpectedChange == null || !result.Success)
+            // Original also changed other bodies: nothing to compare with, so no variant search either.
+            if (!ctx.Options.VerifySteps || !record.ChangesSolid || record.OtherBodies.Count > 0 || !result.Success)
                 return "";
+            // MassCapture could not roll the original back to this feature: say so instead of a silent OK.
+            if (record.ExpectedChange == null)
+            {
+                result.Notes.Add("Nicht geprüft: Das Original ließ sich für die Messung nicht bis zu diesem Feature zurückrollen.");
+                if (result.Status == ReportStatus.Ok) result.Status = ReportStatus.Warning;
+                return "nicht geprüft";
+            }
 
             MassState expected = record.ExpectedChange.Value.Mirror(ctx.Mirror);
             List<Vec3> samples = record.FaceSamples.Select(ctx.Mirror.Apply).ToList();
@@ -52,9 +60,19 @@ namespace Spiegelwerk.Build
                         if (!chosen.Remove(part)) chosen.Add(part);
                     if (o.Passes) break;
                 }
+                else if (!alt.Toggle())
+                {
+                    // Not taken back: the feature stays in this variant, so that is what is measured and reported.
+                    ctx.Doc.EditRebuild3();
+                    ctx.Topology.Invalidate();
+                    best = Measure(ctx, expected, before, feature, samples);
+                    foreach (string part in alt.Parts)
+                        if (!chosen.Remove(part)) chosen.Add(part);
+                    result.Notes.Add($"„{alt.Description}“ ließ sich nach der Messung nicht zurücknehmen und bleibt; weitere Varianten wurden nicht probiert.");
+                    break;
+                }
                 else
                 {
-                    alt.Toggle();
                     ctx.Doc.EditRebuild3();
                 }
             }

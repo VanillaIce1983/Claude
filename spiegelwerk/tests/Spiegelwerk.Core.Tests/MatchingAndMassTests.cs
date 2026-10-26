@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Matching;
@@ -47,6 +48,36 @@ namespace Spiegelwerk.Core.Tests
             var longer = new EdgeSignature(CurveKind.Line, new Vec3(0, 0, 0), new Vec3(0.03, 0, 0), new Vec3(0.015, 0, 0), 0.03) { Axis = Vec3.UnitX };
             Assert.True(line.DistanceTo(reversed) < 1e-12);
             Assert.True(double.IsPositiveInfinity(line.DistanceTo(longer)));
+        }
+
+        [Fact]
+        public void Open_splines_with_the_same_ends_are_told_apart_on_the_curve()
+        {
+            // Two arcs standing in for splines: same ends, same length, bulging to opposite sides.
+            const double R = 0.0425;
+            var upCentre = new Vec3(0.02, -0.0375, 0);
+            var downCentre = new Vec3(0.02, 0.0375, 0);
+            Vec3 OnUp(double x) => new Vec3(x, upCentre.Y + Math.Sqrt(R * R - (x - 0.02) * (x - 0.02)), 0);
+            Vec3 OnDown(double x) => new Vec3(x, downCentre.Y - Math.Sqrt(R * R - (x - 0.02) * (x - 0.02)), 0);
+            Vec3 a = Vec3.Zero, b = new Vec3(0.04, 0, 0);
+
+            var wanted = new EdgeSignature(CurveKind.Other, a, b, OnUp(0.02), 0.0416);
+            var candidates = new[]
+            {
+                new EdgeSignature(CurveKind.Other, a, b, OnDown(0.02), 0.0416),
+                // Run the other way, and the kernel's middle parameter is not the geometric middle.
+                new EdgeSignature(CurveKind.Other, b, a, OnUp(0.026), 0.0416),
+            };
+            Vec3[] centres = { downCentre, upCentre };
+
+            // Without the kernel only ends and length count: both pass.
+            Assert.Equal(2, TopologyMatcher.FindEdge(wanted, candidates).Candidates);
+
+            // Stands in for the kernel: distance of a point to candidate curve i.
+            double OnCurve(int i, Vec3 p) => Math.Abs(p.DistanceTo(centres[i]) - R);
+            MatchResult m = TopologyMatcher.FindEdge(wanted, candidates, null, OnCurve);
+            Assert.Equal(1, m.Index);
+            Assert.False(m.Ambiguous);
         }
 
         [Fact]
@@ -103,6 +134,29 @@ namespace Spiegelwerk.Core.Tests
             Assert.False(wrong.Passes);
             Near(0.01, wrong.CentroidError, 1e-12);
             Assert.True(MassComparison.Compare(up, up).Score < wrong.Score);
+        }
+
+        [Fact]
+        public void Report_text_names_the_volume_and_centroid_deviation()
+        {
+            // 10 % too much volume, centroid 10 mm off.
+            var expected = new MassState(1e-6, new Vec3(0, 0, 0.005) * 1e-6);
+            var actual = new MassState(1.1e-6, new Vec3(0, 0, 0.015) * 1e-6);
+            MassComparison cmp = MassComparison.Compare(expected, actual);
+            Assert.False(cmp.Passes);
+            Assert.False(cmp.NoNetVolume);
+
+            CultureInfo saved = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+                Assert.Equal("Abweichung: Volumen 10.000 %, Schwerpunkt 10 mm", cmp.ToString());
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = saved;
+            }
+            Assert.Equal("Volumen und Schwerpunkt stimmen", MassComparison.Compare(expected, expected).ToString());
         }
 
         [Fact]

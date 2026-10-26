@@ -137,8 +137,17 @@ namespace Spiegelwerk.Build.Builders
                 if (best == 0) break;
             }
             // Back to the best combination seen (undo the toggles applied after it).
-            for (int i = applied - 1; i >= bestAt; i--) toggles[i]();
+            int at = applied;
+            while (at > bestAt && toggles[at - 1]()) at--;
             ctx.Topology.Invalidate();
+            if (at != bestAt)
+            {
+                // A toggle could not be taken back: the pattern stays as it is now, so judge that.
+                List<Affine>? now = read();
+                best = now == null ? int.MaxValue : PatternInstances.Unmatched(wanted, now);
+                bestAt = at;
+                notes.Add("Eine probeweise umgekehrte Musterrichtung ließ sich nicht zurücknehmen und bleibt.");
+            }
 
             if (best == 0)
             {

@@ -52,6 +52,9 @@ namespace Spiegelwerk.Core.Records
         public string TargetName { get; set; } = "";
         public bool Aborted { get; set; }
 
+        /// <summary>Stopped by the user (Esc), not by an error: an assembly run mirrors no further component.</summary>
+        public bool Cancelled { get; set; }
+
         public ReportEntry Add(FeatureRecord r, ReportStatus status, string message)
         {
             var e = new ReportEntry(r.Name, r.TypeName, status, message);
@@ -60,10 +63,14 @@ namespace Spiegelwerk.Core.Records
             return e;
         }
 
-        /// <summary>Merges the report of one component into an assembly-level report.</summary>
+        /// <summary>
+        /// Merges the report of one component into an assembly-level report. Its target (the
+        /// saved part) goes into its heading line; <see cref="TargetName"/> stays the assembly's.
+        /// </summary>
         public void Append(MirrorReport other, string heading)
         {
-            General.Add($"— {heading}: {other.Summary}");
+            string target = other.TargetName.Length > 0 ? $" → {other.TargetName}" : "";
+            General.Add($"— {heading}{target}: {other.Summary}");
             General.AddRange(other.General.Select(g => "   " + g));
             foreach (ReportEntry e in other.Entries)
             {
@@ -72,7 +79,7 @@ namespace Spiegelwerk.Core.Records
                 Entries.Add(copy);
             }
             Aborted |= other.Aborted;
-            if (TargetName.Length == 0) TargetName = other.TargetName;
+            Cancelled |= other.Cancelled;
         }
 
         public int Count(ReportStatus s) => Entries.Count(e => e.Status == s);

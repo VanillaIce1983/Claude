@@ -35,6 +35,19 @@ namespace Spiegelwerk.Core.Records
         /// </summary>
         public List<Vec3> FaceSamples { get; } = new List<Vec3>();
 
+        /// <summary>
+        /// Bodies of the original this feature also changed that the copy does not have
+        /// (Planning.BodyScope). Its change in the original is then no reference: neither
+        /// measured nor compared.
+        /// </summary>
+        public List<string> OtherBodies { get; } = new List<string>();
+
+        /// <summary>
+        /// The feature's own dimensions in the original (not those of its sketches). The copy's
+        /// get these names back (<see cref="DimensionMatcher"/>), so copied equations find them.
+        /// </summary>
+        public List<NamedDimension> OwnDimensions { get; } = new List<NamedDimension>();
+
         /// <summary>Does this feature add or remove material? Sketches and planes do not.</summary>
         public virtual bool ChangesSolid => true;
 
@@ -138,6 +151,25 @@ namespace Spiegelwerk.Core.Records
         public static bool NeedsReference(EndCondition c) =>
             c == EndCondition.UpToVertex || c == EndCondition.UpToSurface || c == EndCondition.OffsetFromSurface ||
             c == EndCondition.UpToBody || c == EndCondition.UpToSelection;
+
+        /// <summary>
+        /// Up to / offset from a plane parallel to the sketch plane has a fixed depth: the blind
+        /// depth that can stand in when the reference is not found. Null for anything else.
+        /// </summary>
+        public double? BlindEquivalent(Plane3 sketchPlane)
+        {
+            if (End != EndCondition.UpToSurface && End != EndCondition.OffsetFromSurface) return null;
+            Plane3? refPlane = Reference?.Kind switch
+            {
+                GeometryRefKind.Plane => Reference.Plane,
+                GeometryRefKind.Face when Reference.Face!.Kind == SurfaceKind.Plane => new Plane3(Reference.Face.Sample, Reference.Face.Normal),
+                _ => (Plane3?)null,
+            };
+            if (refPlane == null || !refPlane.Value.IsParallelTo(sketchPlane)) return null;
+            double depth = System.Math.Abs(refPlane.Value.SignedDistance(sketchPlane.Origin));
+            if (End == EndCondition.OffsetFromSurface) depth += OffsetReverse ? Depth : -Depth;
+            return depth > Tol.Length ? depth : (double?)null;
+        }
     }
 
     /// <summary>Boss-Extrude, Cut-Extrude, thin variants.</summary>
@@ -195,7 +227,7 @@ namespace Spiegelwerk.Core.Records
         public bool IsCut { get; set; }
         public bool IsThin { get; set; }
 
-        /// <summary>swRevolveType_e.</summary>
+        /// <summary>swRevolveType_e (<see cref="RevolveTypes"/>).</summary>
         public int RevolveType { get; set; }
 
         public double Angle1 { get; set; }
@@ -212,8 +244,36 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Selected contours (segment id sets). Empty: whole sketch.</summary>
         public List<List<string>> Contours { get; } = new List<List<string>>();
 
-        /// <summary>Only a one-direction revolve below 360° has a direction that matters.</summary>
-        public bool DirectionMatters => (RevolveType == 0 && Angle1 < 2 * System.Math.PI - 1e-9) || RevolveType == 2;
+        /// <summary>Only a one-direction revolve below 360° and a two-direction one have a direction that matters.</summary>
+        public bool DirectionMatters =>
+            (RevolveType == RevolveTypes.OneDirection && Angle1 < 2 * System.Math.PI - 1e-9) || RevolveType == RevolveTypes.TwoDirection;
+
+        /// <summary><see cref="RevolveType"/> → parameters of FeatureRevolve2.</summary>
+        public (bool singleDir, EndCondition dir1, double a1, EndCondition dir2, double a2) Layout()
+        {
+            const double full = 2 * System.Math.PI;
+            switch (RevolveType)
+            {
+                case RevolveTypes.MidPlane:
+                    return (true, EndCondition.MidPlane, Angle1, EndCondition.Blind, 0);
+                case RevolveTypes.TwoDirection:
+                case RevolveTypes.TwoDirection360Degrees:
+                    return (false, EndCondition.Blind, Angle1, EndCondition.Blind, Angle2);
+                case RevolveTypes.OneDirection360Degrees:
+                    return (true, EndCondition.Blind, full, EndCondition.Blind, 0);
+                case RevolveTypes.MidPlane360Degrees:
+                    return (true, EndCondition.MidPlane, full, EndCondition.Blind, 0);
+                default:
+                    return (true, EndCondition.Blind, Angle1, EndCondition.Blind, 0);
+            }
+        }
+    }
+
+    /// <summary>Same numbers as swRevolveType_e.</summary>
+    public static class RevolveTypes
+    {
+        public const int OneDirection = 0, MidPlane = 1, TwoDirection = 2;
+        public const int OneDirection360Degrees = 3, MidPlane360Degrees = 4, TwoDirection360Degrees = 5;
     }
 
     public sealed class FilletItem

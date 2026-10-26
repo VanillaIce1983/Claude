@@ -12,6 +12,9 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Only to check the swconst numbers Core copies (SwConstTests). 32.1.0 is netstandard2.0;
+         27.3.0 counts as a .NET Framework package here (NU1701). The numbers are the same. -->
+    <PackageReference Include="SolidWorks.Interop.swconst" Version="32.1.0" />
   </ItemGroup>
 
   <ItemGroup>

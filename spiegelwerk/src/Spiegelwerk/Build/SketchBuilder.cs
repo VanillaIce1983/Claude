@@ -581,6 +581,7 @@ namespace Spiegelwerk.Build
 
                 Dimension d = dd.GetDimension2(0);
                 bool isDriven = d.DrivenState == (int)swDimensionDrivenState_e.swDimensionDriven;
+                bool same = true;
                 if (dim.Driven && !isDriven)
                 {
                     d.DrivenState = (int)swDimensionDrivenState_e.swDimensionDriven;
@@ -589,15 +590,27 @@ namespace Spiegelwerk.Build
                 {
                     // SOLIDWORKS made it a reference dimension because it would over-define the copy.
                     notes.Add($"{what} ist in der Kopie getrieben (überbestimmend); Gleichungen darauf wirken nicht.");
+                    same = false;
                 }
                 else if (!dim.Driven)
                 {
                     int status = d.SetSystemValue3(dim.Value, (int)swSetValueInConfiguration_e.swSetValue_InAllConfigurations, null);
                     if (status != (int)swSetValueReturnStatus_e.swSetValue_Successful)
+                    {
                         notes.Add($"{what}: Wert konnte nicht gesetzt werden ({(swSetValueReturnStatus_e)status}).");
+                        same = false;
+                    }
                 }
-                TryRename(d, dim.Name);
-                if (dim.Name.Length > 0) map.Dimensions[dim.Name] = dd;
+                if (dim.Name.Length == 0) continue;
+                // Equations name it so; a name taken in this sketch stays with the other dimension.
+                if (!SwDoc.TryRename(d, dim.Name))
+                {
+                    notes.Add($"{what}: Originalname nicht wiederhergestellt, in der Kopie heißt sie „{d.Name}“" +
+                              (_ctx.CopiesEquations ? "; Gleichungen darauf werden nicht übernommen." : "."));
+                    same = false;
+                }
+                map.Dimensions[dim.Name] = dd;
+                if (same) _ctx.KnownDimensions.Add($"{dim.Name}@{map.Source.Name}");
             }
         }
 
@@ -633,16 +646,10 @@ namespace Spiegelwerk.Build
                 if (!(created is DisplayDimension dd)) continue;
 
                 double measured = dd.GetDimension2(0).SystemValue;
-                if (Matches(dim, measured)) return dd;
+                if (dim.Matches(measured)) return dd;
                 DeleteDimension(dd);
             }
             return null;
-        }
-
-        private static bool Matches(SkDimension dim, double measured)
-        {
-            double tol = dim.Kind == DimensionKind.Angular ? 1e-6 : Math.Max(1e-7, Math.Abs(dim.Value) * 1e-6);
-            return Math.Abs(measured - dim.Value) <= tol;
         }
 
         private Vec3 DefaultTextPosition(SketchMap map, SkDimension dim)
@@ -658,19 +665,6 @@ namespace Spiegelwerk.Build
             ((Annotation)dd.GetAnnotation()).Select3(false, null);
             _doc.EditDelete();
             SwSelect.Clear(_doc);
-        }
-
-        private static void TryRename(Dimension d, string name)
-        {
-            if (string.IsNullOrEmpty(name) || d.Name == name) return;
-            try
-            {
-                d.Name = name;
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                // Name already taken in this sketch; keep the generated one.
-            }
         }
 
         private static string Format(SkDimension d) =>
