@@ -1,0 +1,332 @@
+{
+ "groups": [
+  {
+   "key": "delete-and-bodies",
+   "results": [
+    {
+     "id": "cc-1",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Planning/BodyScope.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Capture/FeatureCollector.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/MirrorJob.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/BodyScopeTests.cs"
+     ],
+     "what": "Confirmed: DeleteOriginals only checked GetChildren, so Boss1+Cut1 pulled in via B1 were deleted and B2 vanished. New pure rule BodyScope.Of in Core (Planning). For each solid body it takes the features from IBody2.GetFeatures, minus sketches, reference geometry, system features and anything outside the tree walk, sorted in creation order. UnselectedBodies lists every body that is not selected, not a seed body and not touched by a feature the user selected himself (that last case covers the instances of a selected body pattern), together with the rebuilt features it is made of. FeatureCollector.Collect now has an extra out BodyScope. It is computed only when bodies are selected or seed bodies were pulled in. Selected body names are read before any AccessSelections; seed body names are read in AddSeeds. DeleteOriginals refuses deletion completely, never partially, when any original builds such a body, and adds one report line per body: Original nicht gelöscht: Der nicht gewählte Körper \"X\" entsteht auch aus \"Boss1\", \"Cut1\". Partial deletion was rejected on purpose: it would leave a half original of the selected body and break parent/sketch links. Limitation: a seed body is matched by its name from before the pattern. If a later feature renamed it, it counts as not selected, which errs on the cautious side. 7 new xUnit tests."
+    },
+    {
+     "id": "crit-cfg",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/MirrorJob.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/UI/MirrorPage.cs"
+     ],
+     "what": "Verified as real. Capture reads only the active configuration (IsSuppressed() without a configuration, dimension values). SketchBuilder sets dimensions with swSetValue_InAllConfigurations, and new features are active in every configuration. DeleteSelection2 removes the originals from all configurations, so the values and suppression states of the other configurations were lost without a warning. DeleteOriginals now checks ModelDoc2.GetConfigurationCount() (present in interop 27.3) first. With more than one configuration nothing is deleted, and the report says: Original nicht gelöscht: Das Teil hat N Konfigurationen. Die Kopie übernimmt Maße und Unterdrückung nur aus der aktiven (\"Name\"); was die anderen abweichend festlegen, ginge mit dem Original verloren. The PropertyManager tooltip of 'Original löschen' now reads: Nur wenn alles fehlerfrei gespiegelt wurde, nichts anderes vom Original abhängt und das Teil nur eine Konfiguration hat. The checkbox stays enabled so the report can explain why nothing was deleted. Detecting configuration-specific dimensions or suppression during capture (the critic's second suggestion, gap-06) was not part of this assignment and was not done."
+    },
+    {
+     "id": "cc-2",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Planning/BodyScope.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Records/FeatureRecords.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/MirrorJob.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Capture/MassCapture.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/StepVerifier.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/BodyScopeTests.cs"
+     ],
+     "what": "Confirmed. Detection happens at capture time with BodyScope.OtherBodiesChanged. A rebuilt feature is marked for a body when that body (final state, GetFeatures in creation order) has a feature that is not rebuilt before it. In that case the copy has no counterpart of the body as the original feature saw it. The split case from cc-1 is deliberately not marked: the other half consists only of rebuilt features, the copy reproduces it, and the whole-document mass comparison stays valid. A feature not rebuilt that comes after does not spoil earlier features. The rule applies whenever bodies are selected or seed bodies were pulled in, so also for a new part with selected bodies, which has the same root cause. New FeatureRecord.OtherBodies, filled in MirrorJob.MarkOtherBodies after capture. MassCapture skips such records (no ExpectedChange, no face samples). StepVerifier.Verify returns early for them, so there is no comparison and no variant search. The record gets the note: Das Original verändert auch Körper, die nicht mitgespiegelt werden (\"B2\"). Die Kopie wirkt nur auf die gespiegelten Körper und wurde deshalb nicht mit dem Original verglichen. Through the existing rule in BuildOne, a record note turns OK into Warning, so 'Original löschen' is also blocked. Restricting the measurement to the selected bodies was not attempted: body identity does not hold across rollback states."
+    }
+   ],
+   "doc_notes": "ARCHITEKTUR.md (Ablauf, Abschnitt zu „Original löschen“ und zur Schrittprüfung):\n- „Original löschen“ hat zwei neue Sperren zusätzlich zu „alles fehlerfrei gespiegelt“ und „nichts hängt vom Original ab“. Erstens: Hat das Teil mehr als eine Konfiguration, wird nie gelöscht. Spiegelwerk liest nur die aktive Konfiguration, die Kopie gilt mit deren Maßen und Unterdrückungen in allen Konfigurationen, und das Löschen würde die abweichenden Werte der anderen Konfigurationen verwerfen. Diese Sperre wird zuerst geprüft. Zweitens: Bei gewählten Körpern oder Saat-Körpern eines gewählten Körpermusters wird nicht gelöscht, wenn ein Original-Feature auch einen Körper aufbaut, der weder gewählt noch Saat-Körper ist. Ein Beispiel ist ein Schnitt, der einen Block in zwei Körper teilt, von denen nur einer gewählt ist. Der Bericht nennt jeden solchen Körper mit den Features, aus denen er entsteht. Körper, an denen ein vom Anwender selbst gewähltes Feature mitwirkt (etwa die Instanzen eines gewählten Körpermusters), gelten als gewählt. Gelöscht wird wie bisher alles oder nichts.\n- Neue Core-Regel Planning/BodyScope (Körperverlauf aus IBody2.GetFeatures in Erstellungsreihenfolge, ohne Skizzen und Bezugsgeometrie). FeatureCollector liefert sie nur bei gewählten Körpern oder Saat-Körpern.\n- Schrittprüfung: Ein über Körper mitgenommenes Feature, das im Original auch einen Körper verändert hat, den die Kopie nicht bekommt (der Körper hat vor diesem Feature ein nicht mitgespiegeltes Feature, z. B. ein Schnitt durch einen gewählten und einen nicht gewählten Körper), wird beim Erfassen markiert (FeatureRecord.OtherBodies). Für solche Features gibt es keine Massen- und Flächenmessung, keinen Vergleich und keine Variantensuche. Stattdessen bekommen sie einen Hinweis, sind damit Status „Hinweis“ und sperren „Original löschen“. Ein Körper, der nur aus mitgespiegelten Features besteht (die andere Hälfte eines geteilten Blocks), wird in der Kopie mit aufgebaut. Die Prüfung über das ganze Dokument bleibt dafür gültig. Das gilt auch beim Spiegeln gewählter Körper in ein neues Teil.\nSTOLPERSTEINE.md: neue Einträge, oder Nr. 47 („Original löschen“) erweitern. (a) Features, die mehrere Körper aufbauen oder teilen, stehen in GetFeatures aller dieser Körper. Gewählte Körper ziehen sie mit, das Löschen würde nicht gewählte Körper zerstören. (b) Massenprüfung bei gewählten Körpern: Die Änderung des Originals umfasst auch nicht gewählte Körper und ist dann keine Referenz. (c) Mehrere Konfigurationen: Die Kopie trägt die Werte der aktiven Konfiguration in alle, deshalb wird das Original in einem Teil mit mehreren Konfigurationen nie gelöscht. (d) Saat-Körper werden beim Zugriff auf die Musterauswahl im zurückgerollten Zustand gelesen. Körper heißen nach ihrem letzten Feature, ein später veränderter Saat-Körper wird deshalb nicht wiedererkannt und gilt vorsichtshalber als nicht gewählt.\nREADME.md (Bedienung/Optionen, nicht der Abschnitt „Bauen und installieren“): Bei „Original löschen“ ergänzen: nur bei einer einzigen Konfiguration, und nicht, wenn aus den Original-Features auch nicht gewählte Körper entstehen. Neuer Tooltip-Text: „Nur wenn alles fehlerfrei gespiegelt wurde, nichts anderes vom Original abhängt und das Teil nur eine Konfiguration hat“.",
+   "build_ok": true,
+   "tests": "dotnet test tests/Spiegelwerk.Core.Tests -c Release: 114 bestanden, 0 fehlgeschlagen, davon 7 neue in BodyScopeTests. Beide Add-in-Builds (Interop 27.3.0 und 32.1.0) ohne Warnungen und ohne Fehler."
+  },
+  {
+   "key": "job-robustness",
+   "results": [
+    {
+     "id": "cc-3",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/MirrorJob.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/BuildContext.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/PlaneResolver.cs"
+     ],
+     "what": "Confirmed: the catch in BuildOne only set Failed, so a feature created before the exception stayed in the model, unregistered and outside the original-body guard. Remembering only the last feature was not enough: the step's feature usually absorbs the sketch built just before it, so that sketch is no longer at the top level. BuildOne now saves the names of the top-level features before each build. In the catch, the new RemoveLeftovers deletes every new top-level feature that is not a system folder. It deletes with option 0, so absorbed sketches from earlier steps stay; they were at the top level before. A second round removes this step's own sketches if the deletion freed them instead of deleting them, e.g. a hole's position sketch. Before deleting, the new BuildContext.Forget(names) drops Created and Sketches entries that point at these features, including new sub-features. The new PlaneResolver.Forget drops cached planes, axes and coordinate systems. Without this, later steps would reuse deleted helpers and IsOwnBody and WithdrawParts would see wrong data. Report notes: 'Bis zum Fehler angelegt und wieder entfernt: …', or 'Bis zum Fehler angelegt und nicht wieder entfernt: … – bitte prüfen und von Hand löschen.'. If the cleanup itself throws: 'Aufräumen nach dem Fehler nicht möglich (…) – bitte das Modell prüfen.'. Cost: one name walk of the top level per step; cheap next to creating, rebuilding and measuring the feature."
+    },
+    {
+     "id": "cc-7",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/StepVerifier.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/Builders/PatternSupport.cs"
+     ],
+     "what": "Confirmed in both places. StepVerifier: if alt.Toggle() fails when a rejected variant is switched back, the variant now counts as kept. The verifier rebuilds and measures again (best = the real state), enters the parts in chosen, adds the note '„X“ ließ sich nach der Messung nicht zurücknehmen und bleibt; weitere Varianten wurden nicht probiert.' and ends the variant search. PatternSupport.MatchPlacements: switching back stops at the first toggle that fails. If it did not get back to bestAt, it reads the placements again, judges that state (best and bestAt), and adds the note 'Eine probeweise umgekehrte Musterrichtung ließ sich nicht zurücknehmen und bleibt.'. After that it reports as before: corrected or checked, or 'N von M Instanzen …'."
+    },
+    {
+     "id": "crit-start",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/MirrorJob.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/StepVerifier.cs"
+     ],
+     "what": "Verified (it came from the critic): only the rollback bar was checked. SketchBuilder's InsertSketch(true) would close an open user sketch. If EditRollback in MassCapture failed, ExpectedChange stayed null and StepVerifier returned \"\", so the status stayed OK without a check. Fix 1: MirrorJob.Run refuses to start while a sketch is open, before the rollback check, in the same style: 'Es ist noch eine Skizze zur Bearbeitung geöffnet. Bitte die Skizze schließen und erneut spiegeln.'. This also covers each component part in AssemblyMirror. Fix 2: StepVerifier, when VerifySteps is on, the record changes solids, has no OtherBodies and the build succeeded but ExpectedChange is null, now adds the note 'Nicht geprüft: Das Original ließ sich für die Messung nicht bis zu diesem Feature zurückrollen.'. It raises OK to Warning ('Hinweis') and returns 'nicht geprüft' for the 'Prüfung' column. As a Warning, the step also blocks 'Original löschen', which is deliberately conservative."
+    },
+    {
+     "id": "cc-6",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Planning/FeatureNames.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Sw/SwDoc.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/FeatureNamesTests.cs"
+     ],
+     "what": "Confirmed: PlaneResolver renamed to 'X (2)', then Register renamed again with the same wish. HasFeatureNamed also found the feature itself, so the result was 'X (3)'. The pure rule now lives in Core: FeatureNames.Free(wanted, current, taken). It returns the wanted name, or ' (2)', ' (3)' …; the feature's own current name ends the search and does not count as a clash. SwDoc.Rename uses it and only writes f.Name when the name changes. 4 new xUnit tests in FeatureNamesTests: free name, first free number, renaming a second time keeps '(2)', and a name that already matches stays."
+    }
+   ],
+   "doc_notes": "STOLPERSTEINE.md:\n- Nr. 4 (Rückrollleiste) ergänzen, oder einen neuen Eintrag anlegen: Spiegelwerk verweigert den Start auch, wenn noch eine Skizze zur Bearbeitung geöffnet ist („Es ist noch eine Skizze zur Bearbeitung geöffnet …“). Grund: In einer offenen Skizze scheitert das Zurückrollen für die Messung. Außerdem würde das erste InsertSketch die Skizze des Anwenders schließen, statt eine neue zu öffnen.\n- Neuer Eintrag zur Messung: Lässt sich das Original für ein Feature nicht zurückrollen, gibt es keine Referenz. Der Schritt erscheint dann mit „Prüfung: nicht geprüft“ und Status „Hinweis“ statt still als OK. Als Hinweis verhindert er auch „Original löschen“.\n- Nr. 15 (Halbe Skizzen) erweitern, oder einen neuen Eintrag „Ausnahme nach dem Anlegen“ anlegen: MirrorJob merkt sich vor jedem Schritt die Namen der Features auf oberster Ebene. Wirft ein Builder, löscht MirrorJob alles, was der Schritt neu angelegt hat: das Feature, Hilfsebenen, -achsen, -KS und Ankerskizzen. Gelöscht wird ohne absorbierte Features. Skizzen früherer Schritte bleiben deshalb, eigene Skizzen des Schritts (z. B. die Positionsskizze einer Bohrung) gehen in einer zweiten Runde mit. Registrierung, Skizzenzuordnung und der Cache von PlaneResolver vergessen die gelöschten Features. Der Bericht nennt, was wieder entfernt wurde und was gegebenenfalls nicht. Damit bleibt kein unregistriertes Feature stehen, das schon in den Originalkörper geschnitten hat.\n- Nr. 17 (Varianten): Lässt sich eine verworfene Variante nicht zurückschalten (ModifyDefinition abgelehnt), bleibt sie. Sie wird neu gemessen und im Bericht genannt, die Variantensuche endet mit einem Hinweis. Für die Musterrichtung in MatchPlacements gilt dasselbe: Die Lage der Instanzen wird im tatsächlichen Zustand neu gelesen.\n- Nr. 36 (Namenskollisionen) präzisieren: Bei einer Kollision bekommt das Feature „ (2)“. Ein zweites Umbenennen mit demselben Wunschnamen zählt den eigenen Namen nicht als Kollision (Ebenen, Achsen und KS werden von PlaneResolver und von Register benannt). Die Regel steht in Core (Planning/FeatureNames, Tests in FeatureNamesTests).\nARCHITEKTUR.md:\n- In der Tabelle der Core-Bausteine Planning/FeatureNames ergänzen (freier Feature-Name mit „ (n)“, der eigene Name zählt nicht als Kollision).\n- Im Abschnitt Prüfen/StepVerifier und im Ablauf einen Satz ergänzen: „nicht geprüft“, wenn die Messung im Original scheiterte, und eine Variante, die sich nicht zurückschalten lässt, wird behalten und gemessen.\n- Bei MirrorJob ergänzen: Startprüfung auf offene Skizze und Rückrollleiste, Aufräumen nach einer Ausnahme im Builder.\nREADME.md (nicht im Abschnitt „Bauen und installieren“): Neben „Die Rückrollleiste muss am Ende des Feature-Baums stehen.“ (Zeile 51) ergänzen, dass keine Skizze zur Bearbeitung geöffnet sein darf.",
+   "build_ok": true,
+   "tests": "dotnet test tests/Spiegelwerk.Core.Tests -c Release: 118 passed, 0 failed (including 4 new FeatureNamesTests). Add-in builds with SwInteropVersion 27.3.0 and 32.1.0: 0 warnings, 0 errors."
+  },
+  {
+   "key": "helper-geometry",
+   "results": [
+    {
+     "id": "cc-4",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/PlaneResolver.cs"
+     ],
+     "what": "Confirmed: CreateThreePoint and CreateAxis registered the anchor sketch before creating the plane or axis. On failure they threw without deleting the anchor or a misplaced plane or axis, and nothing remembered the failed place. Fixed the same way as CreateCoordinateSystem. CreateThreePoint now wraps InsertRefPlane and the position check in try/catch: a misplaced plane and the anchor are deleted, the topology cache is invalidated, the exception is rethrown, and the anchor is registered only after success. The anchor comes back through an out parameter. Create catches every failure, offset planes included, and records the plane in the new _failedPlanes list. Resolve checks that list before creating and throws InvalidOperationException \"Hilfsebene für {wanted} ließ sich schon zuvor nicht erzeugen.\" CreateAxis works the same way: the line goes into _failedAxes, then a misplaced axis and the anchor are deleted, and the anchor is registered only after success. Axis checks _failedAxes and throws \"Achse auf {wanted} ließ sich schon zuvor nicht erzeugen.\", which TopologyFinder.HelperAxis and DraftBuilder.PullAxis already catch. CreateNamed and CreateNamedAxis also record failures but do not check the lists, as with CreateNamedCoordinateSystem."
+    },
+    {
+     "id": "cc-5",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/PlaneResolver.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/MirrorJob.cs"
+     ],
+     "what": "Confirmed: only the table pattern removed its own helper coordinate system. Helper planes and axes that Planes.Resolve or Planes.Axis made while resolving references stayed after RemoveAgain or after a builder returned Fail. Deviation from the suggested per-builder out-bool: helpers are made inside TopologyFinder.Resolve, behind BuilderSupport.Find, which about 12 builders call about 30 times, plus SketchBuilder and DraftBuilder.PullAxis. Wiring a 'created' flag through all of them and every Fail path would be large and easy to get wrong, so the bookkeeping is per step in PlaneResolver. Changes: (1) _known and _axes now also store the anchor sketch per entry, as _coordinateSystems does (null for standard and offset planes). (2) Resolve and Axis add a helper to _stepHelpers only when they create it; cache hits and existing planes are never added. (3) BeginStep() clears the list. RemoveStepHelpers() works newest first: it skips a helper that something still depends on (HasDependents via IFeature.GetChildren, ignoring system features), otherwise takes it out of _known/_axes before deleting it and its anchor, then clears the list and invalidates the topology cache. (4) Forget, added by cc-3, also drops forgotten names from _stepHelpers, so RemoveLeftovers and RemoveStepHelpers never touch a deleted feature. (5) MirrorJob.BuildOne calls ctx.Planes.BeginStep() before builder.Build and ctx.Planes.RemoveStepHelpers() when result.Feature == null (refused or failed after resolving references; after an exception RemoveLeftovers has already cleaned up and the list is empty). RemoveAgain calls ctx.Planes.RemoveStepHelpers() after result.RemoveHelpers. A helper from an earlier step is never removed, and none is removed after the step ends, so no later feature can lose one. The TablePattern coordinate-system path is unchanged. No Core rule was worth extracting: everything depends on SOLIDWORKS features. All APIs used (IFeature.GetChildren, Select2, DeleteSelection2) are in interop 27.3.0 and are already used elsewhere in the code."
+    }
+   ],
+   "doc_notes": "ARCHITEKTUR.md, Abschnitt „Selbes Teil“, Satz „Ein abgelehntes Feature wird geprüft, bevor seine Bezüge aufgelöst werden – so bleiben keine Hilfsebenen oder -achsen zurück.“ ergänzen: Der PlaneResolver merkt sich je Schritt die Hilfsebenen und -achsen, die er für das Feature neu anlegt (BeginStep). Entsteht kein Feature, weil es nach dem Auflösen der Bezüge abgelehnt wird oder scheitert, oder entfernt die Prüfung der Originalkörper das Feature wieder (RemoveAgain), entfernt MirrorJob diese Hilfsgeometrie samt Ankerskizze (RemoveStepHelpers). Wiederverwendete, schon vorhandene Ebenen und Achsen bleiben stehen, ebenso eine Hilfsgeometrie, auf der noch etwas aufbaut (Kinder laut GetChildren). Wo ARCHITEKTUR Hilfsebenen und -achsen beschreibt (PlaneResolver, Absatz zu FindLineObject und Hilfsachse), ergänzen: Lässt sich eine Drei-Punkt-Ebene oder eine Hilfsachse nicht oder nur an falscher Stelle anlegen, bleiben weder Ebene bzw. Achse noch Ankerskizze zurück. Wie bei Koordinatensystemen wird dieselbe Lage nicht noch einmal versucht; das gilt auch für Versatzebenen. Weitere Anfragen scheitern sofort mit „Hilfsebene für … ließ sich schon zuvor nicht erzeugen.“ bzw. „Achse auf … ließ sich schon zuvor nicht erzeugen.“. STOLPERSTEINE: Nr. 117 (bisher nur Hilfs-Koordinatensystem des Tabellenmusters) auf Hilfsebenen und -achsen jedes Features verallgemeinern oder einen neuen Eintrag anlegen. Inhalt: Hilfsgeometrie eines abgelehnten, gescheiterten oder wieder entfernten Features wird samt Ankerskizze entfernt, aber nur die für dieses Feature neu angelegte und nur, wenn nichts mehr darauf aufbaut. Eine Drei-Punkt-Ebene oder Hilfsachse, die sich nicht richtig anlegen lässt, hinterlässt keine Ankerskizze und wird an derselben Lage nicht noch einmal versucht. In der Tabelle die Zeile „Hilfsachse | InsertAxis2 … | Lage wird nachgemessen, sonst Fehler mit Hinweis“ ergänzen um „; Achse und Ankerskizze werden wieder gelöscht, die Lage wird nicht noch einmal versucht“. Ebenso die Zeile „Versatzebene“ bzw. eine neue Zeile „Ebene durch drei Punkte | InsertRefPlane auf drei fixierten 3D-Skizzenpunkten | Lage wird nachgemessen, sonst Ebene und Ankerskizze gelöscht und Lage gesperrt“.",
+   "build_ok": true,
+   "tests": "Both builds succeed with 0 warnings and 0 errors: the add-in against interop 27.3.0 and against 32.1.0 (Release, SwInteropFromNuGet). dotnet test tests/Spiegelwerk.Core.Tests: 118 passed, 0 failed, 0 skipped. No new tests, because no Core code changed."
+  },
+  {
+   "key": "equations",
+   "results": [
+    {
+     "id": "crit-eq",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/MirrorJob.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/SketchBuilder.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/BuildContext.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Sw/SwDoc.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Records/FeatureRecords.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Matching/DimensionMatcher.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Planning/EquationText.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/EquationTests.cs"
+     ],
+     "what": "Confirmed against the code. CopyEquations ran after EditRebuild3 and after every step check, used Add2(-1, eq, true) without any check, and nothing was rebuilt or compared afterwards. TryRename in SketchBuilder failed silently. Feature dimensions were never renamed. Angle unit, Disabled, Suppression and AutomaticSolveOrder were not copied. All four exist on IEquationMgr in interop 27.3.0 (checked by reflection on the DLL).\n\nFixes, in the order of the task:\n\n(1) Check after copying. CopyEquations measures SwDoc.MassOf(target) before the first equation is added. After adding, it calls EditRebuild3 and compares the two with MassComparison.Compare(Empty, after-before, before), the same rule as OriginalUntouched. A comparison against the mirrored original would not be sound with a partial selection or with skipped features. This before/after comparison is: in the original, the equations produce exactly the values the copy already has. If they pass, the report says \"Gleichungen: k von n übernommen, Volumen und Schwerpunkt bleiben damit unverändert.\" If they deviate, a line \"Achtung: Mit den Gleichungen ändert sich die Kopie (Volumen ±x %, Schwerpunkt um y mm verschoben) … Bitte prüfen.\" is added.\n\nThe main fix is a check before Add2 (EquationProblem). Every quoted name of the form \"D@Owner\" must pass four tests, otherwise the equation is not added and is listed as \"nicht übernommen: <eq> – <Grund>\":\n- the owner was mirrored and has the same name in the copy (ctx.Created);\n- the dimension is in the new ctx.KnownDimensions, meaning it was positively identified;\n- the copy's dimension of that name has the original's SystemValue (source.Parameter vs target.Parameter).\nA global variable whose equation was not copied takes the equations that use it out as well (\"nutzt „X“, das nicht übernommen wurde\").\n\n(2) Sketch dimensions. TryRename moved to SwDoc and now returns whether the name took, checked by reading it back. If not, SketchBuilder adds the note \"Bemaßung D3: Originalname nicht wiederhergestellt, in der Kopie heißt sie „D1“ (; Gleichungen darauf werden nicht übernommen)\". The sketch is then a warning, as with every sketch note. Sketch dimensions with their name restored, a value that could be set and the same driven state count as known.\n\n(3) Feature dimensions. At capture, each non-sketch, non-reference-geometry record stores its feature's own display dimensions (owner from GetFeatureOwner; name, SystemValue, Type2) in FeatureRecord.OwnDimensions. Reference planes, axes and coordinate systems are left out because they are rebuilt on other references; the variable-pattern capture already treats planes the same way. In BuildOne, after the step check and after a possible RemoveAgain, RestoreDimensionNames runs the Core rule DimensionMatcher.Match:\n- a counterpart has the same name, kind and value;\n- otherwise it is the only one left with that kind and value, provided the original also has only one left with them;\n- equal values that cannot be told apart stay unmatched.\nRenames go through temporary names, so two dimensions can swap theirs. A copy dimension without an original that holds a wanted name moves to a free \"D<n>\" that no original dimension uses. Matched dimensions become known. Unmatched ones and failed renames are noted on the feature (no status change). Equations that name them are therefore not copied and are reported, so equations on unmatched feature dimensions are never inserted unchecked.\n\n(4) AngularEquationUnits and AutomaticSolveOrder are set on the target before adding. Disabled and suppressed equations are added with Solve=false, so they do not first set their value, and are then switched with set_Disabled / set_Suppression on the returned index. If the original's equations are linked to a file (LinkToFile), a note says the copy takes them without the link.\n\n(5) Same part: NoteEquationDrivenDimensions adds one General note. It lists active equations whose left side is a dimension of a mirrored feature (up to 5 names plus „und n weitere“) and says they are not transferred and are fixed values in the copy. It never stops the run.\n\nCore: EquationText (Names / Driven / Dimension), DimensionMatcher (+ NamedDimension, DimensionMatch), 10 xUnit tests in EquationTests.cs.\n\nNot changed (outside this group): with \"Original löschen\" in the same part, DeleteOriginals does not check whether equations name the deleted originals; such equations stay behind broken."
+    }
+   ],
+   "doc_notes": "README.md line 11 (Teil → neues Teil): \\\"Feature-Namen und Bemaßungsnamen bleiben erhalten\\\" needs qualifying, e.g. „Feature-Namen und Bemaßungsnamen werden übernommen; Gleichungen kommen nur mit, wenn jede Bemaßung, die sie nennen, in der Kopie sicher dieselbe ist (Name zurückgegeben, gleicher Wert). Die übrigen nennt der Bericht.“ Also mention: angle unit, automatic solve order and disabled/suppressed state are copied, and a link to an external equation file is not (the copy has no external reference).\n\ndocs/STOLPERSTEINE.md no. 37: Skizzenbemaßungen get their name via Dimension.Name. A failed rename (name taken) is now reported. Feature dimensions (depth, radius, spacing …) are named by SOLIDWORKS in creation order, which differs when a feature is created in steps (extrude with provisional end conditions). They therefore get their original names after each step: same name+kind+value, else the only remaining dimension with that kind (IDisplayDimension.Type2) and value, via temporary names (swaps). Equal values that cannot be told apart stay unmatched. Reference planes, axes and coordinate systems keep their own dimensions because they measure from other references. An equation is copied only if every dimension it names is identified like this, has the same value in the copy, and its feature has the same name there; otherwise „nicht übernommen – Grund“. Global variables that were not copied pull the equations that use them along. After copying: rebuild and compare volume/centroid before and after. In the original the equations produce exactly the copy's values, so any deviation is reported as „Achtung …“. Disabled/suppressed equations are added unsolved (Add2 Solve=false), otherwise they would set their value first.\n\nNew pitfall (STOLPERSTEINE): IEquationMgr.Disabled/Suppression are indexed properties (get_/set_ in C#). Disabled and suppressed equations must be added with Solve=false.\n\nSame part: equations are not transferred. The report names the mirrored dimensions that equations drive in the original, and in the copy these are fixed values (a later change of a global variable moves only the original half). Fits with crit-ui-opts (UI group).\n\ndocs/SKIZZEN.md (line 124): add that a name that cannot be restored is in the report, and that equations on such a dimension are not copied.\n\ndocs/ARCHITEKTUR.md: MirrorJob row: „Gleichungen prüfen und kopieren, Bemaßungsnamen der Features zurückgeben“. Core: new Matching/DimensionMatcher.cs (Gegenstücke von Feature-Bemaßungen) and Planning/EquationText.cs (Namen in Gleichungen). FeatureRecord.OwnDimensions, BuildContext.KnownDimensions. In the sequence diagram, „Gleichungen“ becomes „Gleichungen prüfen, übernehmen, Neuaufbau + Massenvergleich“.",
+   "build_ok": true,
+   "tests": "dotnet test tests/Spiegelwerk.Core.Tests -c Release: 128 passed, 0 failed (10 new in EquationTests.cs). Add-in builds with SwInteropVersion 27.3.0 and 32.1.0: 0 warnings, 0 errors."
+  },
+  {
+   "key": "ui-report-assembly",
+   "results": [
+    {
+     "id": "crit-ui-opts",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/UI/MirrorPage.cs"
+     ],
+     "what": "Confirmed. UpdateState now also greys out options that do nothing in the current mode. 'Werkstoff übernehmen' and 'Gleichungen übernehmen' are only active for a new part, which includes the assembly, since it always makes new parts. 'Namenszusatz' (label and text box) is only active for the same part or in an assembly. 'Original löschen' is only active for the same part, as before. The temporary-plane combo is disabled while a plane is selected, and the offset box only works when the combo is enabled and a helper plane is chosen. A shared helper, Enable(control, bool), does the casts. The tooltips for material and equations now say 'in das neue Teil'. The 'equations frozen in the same part' half of the finding was already handled by the equations group (NoteEquationDrivenDimensions), so nothing more was needed there."
+    },
+    {
+     "id": "crit-ui-reject",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/UI/MirrorPage.cs"
+     ],
+     "what": "Confirmed. OnSubmitSelection now asks a new Refusal(id, selection), which returns the reason or null, and shows that reason in the page message (SetMessage3, title 'Auswahl nicht übernommen'). Reasons covered: a non-planar face as mirror plane, every reason from AssemblyMirror.CheckComponent (suppressed, virtual, assembly, now also sub-assembly), and in a part anything that is not a feature or body, such as temporary axes. The next accepted selection puts the intro text back. The intro text is now the constant Intro, and PageMessage() wraps the SetMessage3 call."
+    },
+    {
+     "id": "crit-report",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/UI/MirrorPage.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/UI/ReportForm.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/AssemblyContext/AssemblyMirror.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Records/MirrorReport.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/ReportTextTests.cs"
+     ],
+     "what": "Confirmed. (1) The report is now non-modal: form.Show(owner) with the SOLIDWORKS main window as owner, no 'using', because a non-modal form disposes itself on Close. ReportForm: the Close button calls Close() and no longer uses DialogResult; StartPosition is CenterScreen, because CenterParent only works for modal dialogs; ShowInTaskbar and MinimizeBox are off. (2) Assembly: the overall report gets the assembly title as TargetName. After a successful SaveAs, AssemblyMirror sets the part report's TargetName to the saved file name. MirrorReport.Append no longer copies the first component's TargetName; instead each heading line shows that component's target ('— Halter-1 → Halter_gespiegelt.SLDPRT: …'), so every component is listed. If the part was not saved (run aborted or save failed), the heading shows the title of the part that stays open, which is correct. A Core test was added. (3) Writing the report to a file was skipped: optional, and a new part has no path."
+    },
+    {
+     "id": "crit-units",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Records/ReportText.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/MirrorJob.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/AssemblyContext/AssemblyMirror.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/ReportTextTests.cs"
+     ],
+     "what": "Confirmed: the line came from Plane3/Vec3.ToString in metres with InvariantCulture. New Core helper ReportText.Plane(plane, culture = null) writes 'Ebene durch (52,5|0|0) mm, Normale (1|0|0)': the point of the plane closest to the origin, in mm, in the current culture, with '|' between values because the decimal separator may be a comma (same style as SketchBuilder's notes), and no '-0'. Used for the 'Spiegelebene:' line in MirrorJob and the assembly line, which now reads 'Teil gespiegelt an seiner Ebene durch … mm'; the doubled word 'Ebene' is gone. Plane3/Vec3.ToString are unchanged. Inch support was not built. Tests added for both cultures, closest point, negative zero and normal precision."
+    },
+    {
+     "id": "crit-asm",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/AssemblyContext/AssemblyMirror.cs"
+     ],
+     "what": "Confirmed. CheckComponent now rejects a part whose IComponent2.GetParent() is not null (it is null for top-level components; checked in interop 27.3.0) with 'Komponente \"…\" liegt in der Unterbaugruppe \"…\"; gespiegelt werden nur Teile der obersten Ebene.' That reason shows at selection time (crit-ui-reject) and in Run. Inserting into the sub-assembly was not done: it would mean opening, changing and saving the sub-assembly and converting the placement into its coordinates, which is not simple. Lightweight restore: Run reads GetSuppression2 first, resolves the component, runs the old body (now the private method Mirror) inside try, and in finally calls SetSuppression2(swComponentLightweight) if the component was Lightweight or FullyLightweight, also when the run fails or aborts. Re-runs that create '_gespiegelt_2.SLDPRT' are unchanged, as instructed."
+    },
+    {
+     "id": "crit-material",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Planning/BodyMaterials.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/MirrorJob.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/ReportTextTests.cs"
+     ],
+     "what": "Confirmed: only the part material was copied. The new note is added before building, by MirrorJob.NoteBodyMaterials. It reads IBody2.GetMaterialPropertyName(activeConfig, out db) for the selected bodies, or for all solid bodies, and compares it with IPartDoc.GetMaterialPropertyName2 for the same configuration. The Core rule BodyMaterials.Note counts a body only if its material is non-empty and differs from the part's (ignoring case), so it works whether a body without its own material reports nothing or the part material. It names up to 5 bodies plus 'und n weitere', then says what the mirrored bodies get: the part's material or none. The note is only added where something is actually lost: new part with 'Werkstoff übernehmen', or same part with a body of its own. If reading fails, no note. Nothing is copied. Tests added."
+    },
+    {
+     "id": "gap-01",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Planning/UnsupportedFeatures.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Capture/FeatureCapture.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/ReportTextTests.cs"
+     ],
+     "what": "Confirmed. The unsupported-type texts moved unchanged from FeatureCapture.UnsupportedReason into the Core class UnsupportedFeatures.Reason, so they can be tested; FeatureCapture now calls it. Two own texts added in the MirrorPattern style. MirrorSolid: 'Körper spiegeln im Original: wird bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. Abhilfe: die Körper nach dem Lauf im Ziel von Hand spiegeln.' MirrorStock: 'Teil spiegeln im Original: Das Teil ist von einem Ausgangsteil gespiegelt abgeleitet und wird bewusst nicht nachgebaut … Abhilfe: Das Ausgangsteil ist bis auf die Lage selbst das Gegenstück.' Type names were checked against the GetTypeName2 table (MirrorSolid → IMirrorSolidFeatureData, MirrorStock → IMirrorPartFeatureData). Status stays Failed (ChangesSolid=true). Actually rebuilding these features (R_M∘R_P as a rigid motion) is out of scope."
+    },
+    {
+     "id": "gap-02",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Planning/UnsupportedFeatures.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/ReportTextTests.cs"
+     ],
+     "what": "Confirmed. UnsupportedFeatures.IsSheetMetal lists the sheet-metal type names from the 'Sheet Metal' section of the IFeature.GetTypeName2 API help: SheetMetal, SMBaseFlange, EdgeFlange, SMMiteredFlange, Hem, Jog, SketchBend, SM3dBend, OneBend, ToroidalBend, LoftedBend, FlatPattern, FlattenBends, ProcessBends, Fold, UnFold, BreakCorner, CornerTrim, CrossBreak, SMGusset, NormalCut, SolidToSheetMetal, FormToolInstance, TemplateSheetMetal. Also included: Rip (IRipFeatureData) and the flat-pattern folder TemplateFlatPattern. All of these get 'Blech wird nicht unterstützt: Blech-Features werden nicht nachgebaut.' instead of the generic text. The swconst swFeatureNameID_e entries swFmSheetMetal, swFmBaseFlange, swFmEdgeFlange, swFmSketchBend, swFmFlattenBends, swFmProcessBends, swFmCrossBreak, swFmSM3dBend and swFmSMGusset confirm the feature families. 'Bending' (Flex) is not sheet metal and keeps the generic text. A FlatPattern that is suppressed is still listed as skipped by FeatureCollector, as before."
+    }
+   ],
+   "doc_notes": "README.md: 'Noch nicht' row: add Blech: sheet-metal parts are not supported; every sheet-metal feature (Basislasche, Kantenlasche, Abwicklung, Biegungen, Ecken …) is reported as 'fehlgeschlagen' with 'Blech wird nicht unterstützt', and the features after it usually fail too. Mirror features in the original are reported each with its own message: Features spiegeln (MirrorPattern), Körper spiegeln (MirrorSolid: mirror by hand in the target after the run), Teil spiegeln (MirrorStock: the base part is itself the counterpart, apart from its position). 'Was es tut', row 'Teil → neues Teil': add that materials of single bodies (multi-body parts) are not carried over and the report names them. Same for 'Teil → selbes Teil' when a body of its own is created (the copy gets the part material). 'Bedienung': options that do nothing in the current mode are greyed out (Werkstoff/Gleichungen only for a new part and in assemblies, Namenszusatz only for the same part and in assemblies, Original löschen only for the same part); the temporary-plane combo is disabled while a plane is selected; a rejected selection shows its reason in the message at the top of the PropertyManager page. Report: it now opens non-modal next to SOLIDWORKS, the model stays usable, and it stays open until 'Schließen'. It is still not written to a file; only 'Als Text kopieren'. The mirror-plane line is in mm with the Windows decimal separator, through the point of the plane closest to the origin (e.g. 'Ebene durch (52,5|0|0) mm, Normale (1|0|0)'). Like all values in the report it is always mm, also in inch documents. Assembly report: the header names the assembly; each component gets a line '— Komponente → gespeicherte Datei: Zusammenfassung'. 'Baugruppe' row: only parts at the top level of the assembly; parts inside a sub-assembly are rejected with a reason. Mirroring the same component again creates 'Name_gespiegelt_2.SLDPRT' and inserts it as well; the old counterpart stays in the assembly and is not replaced or updated (please delete it by hand). docs/STOLPERSTEINE.md No. 41 must now say: lightweight components are resolved for the run and set back to lightweight afterwards (also on error); suppressed, virtual, sub-assemblies and parts inside sub-assemblies are rejected when selected, with the reason in the page message; the counterpart is always inserted into the top-level assembly; re-runs create '_2' files. Possible new STOLPERSTEINE entries: (a) a non-modal WinForms window in SOLIDWORKS does not get CenterParent, so the report uses CenterScreen; (b) IBody2.GetMaterialPropertyName may return the part material for a body without its own material, so body materials are compared with the part material. docs/ARCHITEKTUR.md: new Core types: Planning/UnsupportedFeatures (report texts for unsupported GetTypeName2 types including the sheet-metal list; moved out of FeatureCapture.UnsupportedReason, so the section 'Einen Feature-Typ ergänzen' should point there), Planning/BodyMaterials (note on body materials), Records/ReportText (plane in mm/current culture for report lines). MirrorReport.Append no longer takes TargetName from the first component. AssemblyMirror.Run restores the lightweight state in finally (the rest is now the private method Mirror).",
+   "build_ok": true,
+   "tests": "dotnet test tests/Spiegelwerk.Core.Tests -c Release: 150 passed, 0 failed, 0 skipped (22 of them new in ReportTextTests.cs). Builds with SwInteropVersion=27.3.0 and 32.1.0 (SwInteropFromNuGet=true, Release): 0 warnings, 0 errors."
+  },
+  {
+   "key": "progress",
+   "results": [
+    {
+     "id": "crit-perf",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Sw/RunProgress.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Planning/RunSteps.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Records/MirrorReport.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/MirrorJob.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Capture/MassCapture.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/UI/MirrorPage.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/RunStepsTests.cs"
+     ],
+     "what": "The finding is real. The run had no progress display and no Esc check, and UpdateFreeze covered only the build loop on the target. All rollbacks of FeatureCollector/AccessSelections, FeatureCapture and MassCapture ran on an unfrozen original.\n\nChanges:\n- New Sw/RunProgress (IDisposable) wraps ISldWorks.GetUserProgressBar with Start, UpdateTitle, UpdateProgress and End. All four exist in interop 27.3.0 and 32.1.0; I checked by reflection that GetUserProgressBar takes an out parameter.\n- Esc: UpdateProgress returns swUpdateProgressError_UserCancel (=2, 'User pressed the Esc key', per the official API docs). I check it only at feature boundaries. Before stopping, a SendMsgToUser2 Yes/No dialog asks 'Spiegeln hier abbrechen? Was bis jetzt aufgebaut wurde, bleibt erhalten.' This follows the official/codestack pattern and keeps a reflexive Esc (used to deselect) from killing the run. After the last step nothing is asked.\n- If no bar is available or a bar call throws, the run continues without a bar.\n- MirrorJob.Run is now a wrapper `using (var progress = new RunProgress(_sw)) return Run(req, progress);`, so End always runs in finally.\n- The bar is started after FeatureCollector with Total = features x (3 with step check, otherwise 2). The title reads 'Spiegelwerk – Erfassen/Vermessen/Aufbauen: <Feature>', and 'Spiegelwerk – Abschließen' before the final rebuild, equations and deleting the original.\n- Esc during capture or measurement: report.Aborted and report.Cancelled are set, a note is added, and the result is MirrorJobResult(report, null). Nothing has been built and no new part has been created at that point.\n- Esc during the build: handled like StopOnError. It sets Aborted and Cancelled, adds a note naming the last feature and how many were not built, and breaks the loop. The finish phase then runs as usual (rebuild, equations, and DeleteOriginals, which refuses via AllMirrored).\n- MassCapture.Measure takes the progress object and returns false on Esc. The rollback bar still goes to the end in finally. The per-feature body moved unchanged into MeasureOne, including the other group's OtherBodies check.\n- UpdateFreeze(source) now wraps Collect, Capture, CaptureOnItsOwn, CaptureDimensions and MassCapture. This is safe in the same way as the build: capture uses no graphics- or tree-dependent API (no screen selection, no TreeControlItem), and the build already runs AccessSelections and SelectByID2 under the freeze. Early returns and exceptions restore through using. With 'Im selben Teil' the two freezes run one after the other.\n- MirrorReport.Cancelled is new and is merged in Append. The MirrorPage assembly loop now also breaks on part.Cancelled, so Esc stops the remaining components too. For the cancelled component, AssemblyMirror leaves the part unsaved and does not insert it, as with any abort.\n- Pure rules are in Core Planning/RunSteps: step count, 'no Esc after the last step', title text and the two German cancel notes. Tested in RunStepsTests (8 tests, including the Cancelled merge)."
+    }
+   ],
+   "doc_notes": "README (Bedienung, NICHT der Abschnitt \"Bauen und installieren\"): Während des Laufs zeigt die SOLIDWORKS-Statusleiste einen Fortschrittsbalken mit Phase und Feature-Namen („Spiegelwerk – Erfassen/Vermessen/Aufbauen: <Feature>“, zum Schluss „Abschließen“). Mit Esc lässt sich der Lauf zwischen zwei Features abbrechen; nach einer Rückfrage („Spiegeln hier abbrechen?“) hält er an wie bei „Beim ersten Fehler abbrechen“: Bereits Aufgebautes bleibt, der Bericht nennt das letzte Feature und wie viele nicht mehr aufgebaut wurden; beim Erfassen/Vermessen abgebrochen wird nichts aufgebaut und kein neues Teil angelegt. Das Original wird dann nicht gelöscht; in der Baugruppe werden keine weiteren Komponenten gespiegelt, die abgebrochene bleibt ungespeichert offen.\nARCHITEKTUR: MirrorJob.Run läuft in einem RunProgress (Sw/RunProgress.cs, IUserProgressBar über ISldWorks.GetUserProgressBar; End immer im finally über using). Schrittzählung, Titel und Abbruchhinweise liegen in Core Planning/RunSteps (ein Schritt je Feature in Erfassen, Vermessen [nur mit Schrittprüfung], Aufbauen). MassCapture.Measure meldet Esc (Rückgabe false). MirrorReport.Cancelled kennzeichnet Abbruch durch den Anwender und wird in Append übernommen. Erfassung samt FeatureCollector und MassCapture läuft unter UpdateFreeze(Original), der Aufbau wie bisher unter UpdateFreeze(Ziel).\nSTOLPERSTEINE: Nr. 55 präzisieren: Baum und Grafik des Originals sind während Erfassen und Vermessen eingefroren (die Rückrollungen von AccessSelections, ReadSketch, Wandung/Formschräge, erweiterter Bohrung und MassCapture), die des Ziels während des Aufbaus; der Abschluss (EditRebuild3, Gleichungen, Original löschen) läuft ungefroren. Neuer Eintrag: IUserProgressBar.UpdateProgress meldet Esc als swUpdateProgressError_UserCancel (2) – nur wenn es aufgerufen wird, daher Abfrage an jeder Feature-Grenze, nicht während eines Features; Rückfrage vor dem Abbruch, weil Anwender Esc auch zum Abwählen drücken; nach dem letzten Schritt wird nicht mehr gefragt. SOLIDWORKS’ eigene Fortschrittsmeldungen (Neuaufbau) können den Titel kurz überschreiben. Ohne Fortschrittsbalken (API liefert keinen) läuft der Lauf unverändert, nur ohne Abbruchmöglichkeit.",
+   "build_ok": true,
+   "tests": "dotnet build Release with SwInteropVersion=27.3.0: 0 warnings, 0 errors; with 32.1.0: 0 warnings, 0 errors; dotnet test tests/Spiegelwerk.Core.Tests -c Release: 158 passed, 0 failed (8 new in RunStepsTests)."
+  },
+  {
+   "key": "tests",
+   "results": [
+    {
+     "id": "test-1",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/GeometryRefTests.cs"
+     ],
+     "what": "Neue GeometryRefTests: Theory über alle GeometryRefKind-Werte (alle Fabrikmethoden). Jede Art wird an einer schrägen Ebene, die nicht durch den Ursprung geht, gespiegelt; Point/Face/Edge/Plane/Axis werden gegen direkt gespiegelte Geometrie geprüft, Namen/Ids bleiben, das Original bleibt unverändert. Plane und Axis werden nur bei passender Art gespiegelt; ohne diese Prüfung würde die leere Ebene (Normale null) beim Normieren werfen (Mutation geprüft: 24 Tests schlagen fehl). Zweimal gespiegelt ergibt die Ausgangsgeometrie. Reflection.Apply(Line3): Zufallstest (gespiegelte Punkte liegen auf der gespiegelten Achse, Richtung = ApplyVector, Rückweg) und Sonderfälle: Achse senkrecht zur Ebene bleibt dieselbe Gerade, dreht aber um; Achse in der Ebene behält ihre Richtung."
+    },
+    {
+     "id": "test-2",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/SketchMirrorTests.cs"
+     ],
+     "what": "Neuer Test External_references_are_mirrored_and_local_ids_kept: Grabstein-Skizze mit Beziehungen zu ModelEdge, Plane, OtherSketchPoint, OtherSketchSegment, Unknown und einer Bemaßung zu ModelVertex. Geprüft wird: Kantensignatur, Ebene, Punktlage und Eckpunkt sind gespiegelt; Skizzenname, Id und Beschreibung bleiben; lokale Ids bleiben; die Quelle ist unverändert. Außerdem gelten die Beziehungen nach dem Spiegeln weiter: Der gespiegelte p1 liegt auf der gespiegelten Ebene und am Kantenanfang, der fremde Skizzenpunkt fällt auf den gespiegelten Mittelpunkt c, und der Eckpunktabstand ist weiter 20 mm."
+    },
+    {
+     "id": "test-3",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/SketchMirrorTests.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/ReviewRegressionTests.cs"
+     ],
+     "what": "Diagonal_mirror_swaps_horizontal_and_vertical und Oblique_axes_... verwenden jetzt eine Skizze mit zusätzlichen HorizontalPoints/VerticalPoints-Beziehungen (Helfer TombstoneWithPointRelations). Diagonal: Die Beziehungen werden getauscht, und die gespiegelten Punkte erfüllen sie (gleiches X bzw. Y). Schräg: Beide entfallen, jetzt 7 Warnungen. Neuer Regressionstest Target_plane_that_fits_at_its_origin_but_not_at_a_distant_point_is_rejected: Das Ziel liegt 0,999 µm daneben und ist um 5e-9 rad gekippt. Es besteht die Ebenenprüfung; ein Punkt 0,5 m weiter draußen liegt aber 1,0015 µm daneben und löst die Prüfung je Punkt aus ('Punkt far liegt ...'). Ein Punkt am Ursprung allein geht durch."
+    },
+    {
+     "id": "test-4",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/RecordRulesTests.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Records/FeatureRecords.cs"
+     ],
+     "what": "Neue RecordRulesTests mit Theories:\n- ExtrudeSide.NeedsReference über alle 11 EndCondition-Werte.\n- RevolveRecord.DirectionMatters: knapp unter und genau 360°, MidPlane, TwoDirection, alle 360°-Typen.\n- SweepRecord.HasTwist: alle Verdrehungsarten; Winkel nur in Richtung 2; Verdrehung 0 bei ConstantTwist; Restwinkel bei FollowPath.\n- LoftRecord.HasSide über alle Tangency-Werte.\n- HoleTypes.IsSlot über alle 9 allgemeinen Typen.\nDie festen Zahlen 0 und 2 in DirectionMatters sind durch neue Konstanten RevolveTypes ersetzt (wie swRevolveType_e, gegen swconst geprüft, siehe test-8). Der Doku-Kommentar von DirectionMatters ist korrigiert: Er nennt jetzt auch die beidseitige Rotation."
+    },
+    {
+     "id": "test-5",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Records/FeatureRecords.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Records/GeometryRef.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Sketch/SketchModel.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/Builders/ExtrudeBuilder.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/Builders/RevolveBuilder.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/Builders/BuilderSupport.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk/Build/SketchBuilder.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/RecordRulesTests.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/GeometryRefTests.cs"
+     ],
+     "what": "Vier reine Regeln unverändert nach Core verschoben, die Aufrufer im Add-In angepasst:\n- ExtrudeBuilder.BlindEquivalent wird ExtrudeSide.BlindEquivalent(Plane3 sketchPlane). Tests: Ebene über und unter der Skizze; OffsetFromSurface mit und ohne OffsetReverse; Versatz bis zur Skizze und darüber hinaus ergibt null; schräge Ebene, Zylinderfläche, Eckpunkt, UpToBody, fehlender Bezug und Ebene in der Skizzenebene ergeben null.\n- RevolveBuilder.Layout wird RevolveRecord.Layout() mit den Core-Konstanten RevolveTypes statt swRevolveType_e. Getestet sind alle 6 Typen und ein unbekannter Typ.\n- SketchBuilder.Matches wird SkDimension.Matches(double). Getestet sind die relative Toleranz, die Untergrenze von 0,1 µm und Winkel 1e-6 rad, wobei der Nebenwinkel abgelehnt wird.\n- BuilderSupport.ReferenceDirection(GeometryRef) wird GeometryRef.Direction; FlagForReference nimmt original?.Direction. Getestet sind alle Arten und dass die Richtung des gespiegelten Bezugs gleich R(Richtung) ist.\nNicht verschoben: FlagForReference braucht ein SOLIDWORKS-Zielobjekt, sein reiner Teil DirectionRules ist schon getestet. Die Mathematik von MirroredStagger liegt schon in FillPatternRules (Core, getestet). Plane3.Flipped war toter Code ohne Aufrufer und ist entfernt."
+    },
+    {
+     "id": "test-6",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/ReportTextTests.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/MatchingAndMassTests.cs"
+     ],
+     "what": "Neuer Test Assembly_report_carries_over_flags_entries_and_checks. Teil A hat einen OK-Eintrag mit Prüfung und einen übersprungenen mit HasEquivalent. Teil B ist abgebrochen und vom Benutzer gestoppt (Aborted, Cancelled) und hat einen Fehler mit Notiz und einen Hinweis. Geprüft wird:\n- AllMirrored und HasProblems nach dem ersten Append (HasEquivalent übernommen);\n- danach Aborted und Cancelled (OR), AllMirrored, Blocking, NotMirrored, Count und Summary;\n- jede Zeile von ToText: Überschrift mit Ziel, eingerückte General-Zeilen, [OK]/[Übersprungen]/[Fehler]/[Hinweis] (StatusText), 'Prüfung:' und Details.\nNeuer Test für MassComparison.ToString bei Abweichung, unter InvariantCulture exakt: 'Abweichung: Volumen 10.000 %, Schwerpunkt 10 mm'; außerdem der Text, wenn alles stimmt."
+    },
+    {
+     "id": "test-7",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/MatchingAndMassTests.cs",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/GeometryTests.cs",
+      "/home/user/Claude/spiegelwerk/src/Spiegelwerk.Core/Geometry/Plane3.cs"
+     ],
+     "what": "EdgeSignature.DistanceTo bei offenen Kurven (CurveKind.Other): zwei Bögen als Spline-Ersatz mit gleichen Enden und gleicher Länge, nach entgegengesetzten Seiten gewölbt; ein Kandidat läuft andersherum und hat einen anderen Mittelparameter. Ohne Kernabstand bestehen beide; mit Kernabstand (Abstand zum Kreis) wird eindeutig der richtige gewählt, obwohl dessen Mid nicht der gesuchte Punkt ist.\nFrame3.FromAxes: Achsen, die keine Einheitsvektoren sind, werden angenommen; linkshändige Achsen lösen eine ArgumentException aus.\nAffine.FromSwArray: Der Maßstab wirkt nur auf die Drehung; Maßstab 0 zählt als 1; ein zu kurzes Array wirft. Die Methode wird im Add-In nicht benutzt, bleibt aber als öffentliche Core-API und ist jetzt getestet.\nVec3.Equals/GetHashCode: exakt, auch geboxt; gleiche Werte haben gleiche Hashes; AlmostEquals ist die tolerante Variante.\nPlane3.Flipped (tot) ist entfernt."
+    },
+    {
+     "id": "test-8",
+     "status": "fixed",
+     "files": [
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/Spiegelwerk.Core.Tests.csproj",
+      "/home/user/Claude/spiegelwerk/tests/Spiegelwerk.Core.Tests/SwConstTests.cs"
+     ],
+     "what": "Das Testprojekt referenziert jetzt SolidWorks.Interop.swconst 32.1.0 (netstandard2.0, keine Abhängigkeiten, kein NU1701). Die Zahlen habe ich vorher per Reflection gegen 27.3.0 und 32.1.0 verglichen; sie sind identisch.\nNeue SwConstTests prüfen per Namen. Enums: EndCondition, StartCondition, Tangency (MinimumTwist ↔ swMinimumTwist), TwistControl, DraftKind, jeweils vollständig; FaceFilletKind gegen swSimpleFilletType_e und swFeatureFilletType_e als Teilmenge. Konstanten-Klassen: HoleTypes, AdvancedHoleTypes, RevolveTypes, jeweils vollständig.\nGenericOf wird über alle 81 Werte von swWzdHoleTypes_e anhand des Namens geprüft (Slot, CounterBore, Tap, PipeTap, Hole, alte Typen ohne Blind/Thru). Für jeden Wert gilt außerdem: IsSlot(GenericOf) ist genau dann wahr, wenn der Name 'Slot' enthält. Mutation geprüft: Typ 70 falsch zugeordnet wird erkannt."
+    }
+   ],
+   "doc_notes": "Docs nicht angefasst. Was die Docs-Gruppe nachziehen sollte:\n\n1) docs/SKIZZEN.md, Codebeispiel bei „Jede Bemaßung wird nachgemessen“ (ca. Zeile 120): `if (Matches(dim, measured)) return dd;` wird zu `if (dim.Matches(measured)) return dd;`. Die Toleranzregel liegt jetzt in Core als `SkDimension.Matches`: Winkel auf 1e-6 rad, Längen auf 1e-6 relativ, mindestens 0,1 µm. Tests in `RecordRulesTests`; Satz ggf. ergänzen.\n\n2) docs/ARCHITEKTUR.md:\n- Formschräge-Absatz: `BuilderSupport.FlagForReference` nimmt die Richtung des Originalbezugs jetzt aus `GeometryRef.Direction` (Core: Normale einer Ebene oder ebenen Fläche, Richtung einer Achse, sonst keine). Tests in `GeometryRefTests`.\n- Austragung: Wird der Bezug von „bis Fläche“ oder „Abstand von Fläche“ nicht gefunden und ist es eine zur Skizze parallele Ebene oder ebene Fläche, ersetzt `ExtrudeSide.BlindEquivalent` (Core) ihn durch eine Blind-Tiefe. Die Tiefe ist der Abstand; bei „Abstand von Fläche“ wird der Versatz abgezogen, mit „Versatz umkehren“ addiert; bleibt nichts übrig, gibt es keinen Ersatz. Tests in `RecordRulesTests`.\n- Rotation: Die Zuordnung swRevolveType_e → Parameter von FeatureRevolve2 liegt jetzt in Core: `RevolveRecord.Layout()` mit den Konstanten `RevolveTypes`. Die 360°-Typen drehen voll, unabhängig vom gelesenen Winkel. Ebenso `DirectionMatters`: Nur eine einseitige Rotation unter 360° und eine zweiseitige bekommen die Variante „Drehrichtung umgekehrt“.\n- Absatz „Alles, was sich ohne SOLIDWORKS rechnen lässt …“: Core kopiert swconst-Zahlen, damit es ohne SOLIDWORKS baut: EndCondition, StartCondition, Tangency, TwistControl, DraftKind, FaceFilletKind, HoleTypes, AdvancedHoleTypes, RevolveTypes. `SwConstTests` prüft sie per Namen gegen SolidWorks.Interop.swconst 32.1.0. Das Testprojekt referenziert das Paket nur dafür. 27.3.0 ließe sich unter net8.0 nur mit NoWarn NU1701 laden; die Zahlen sind in beiden Versionen gleich. `HoleTypes.GenericOf` wird zusätzlich über alle 81 Werte von swWzdHoleTypes_e am Namen geprüft (neben den Stichproben in `HoleTests`).\n- Wo Testklassen genannt werden, ggf. ergänzen: Feature-Bezüge spiegeln → `GeometryRefTests`; externe Skizzenbezüge (Modellkante, Ebene, Punkt/Segment einer anderen Skizze, Eckpunkt) → `SketchMirrorTests`.\n\n3) README „Aufbau“: Die Zeile `tests/Spiegelwerk.Core.Tests xUnit` könnte ergänzt werden um „(prüft auch die aus swconst kopierten Zahlen)“.\n- Der Satz „Tests der Spiegelmathematik laufen auf jedem System“ im Abschnitt „Bauen und installieren“ bleibt richtig; nicht ändern. `dotnet test` lädt jetzt zusätzlich das NuGet-Paket SolidWorks.Interop.swconst 32.1.0 (nur Enums, netstandard2.0).\n\n4) Plane3.Flipped ist entfernt; die Docs erwähnen es nirgends.",
+   "build_ok": true,
+   "tests": "246 bestanden, 0 fehlgeschlagen (vorher 158; +88 neu oder erweitert). Build: dotnet build src/Spiegelwerk/Spiegelwerk.csproj -c Release -p:SwInteropFromNuGet=true mit SwInteropVersion=27.3.0 und 32.1.0, jeweils auch mit --no-incremental: 0 Warnungen, 0 Fehler. dotnet test tests/Spiegelwerk.Core.Tests -c Release: grün, ohne Warnungen (auch kein NU1701). Gegenprobe mit sechs vorübergehend eingebauten Fehlern: Kind-Prüfung in GeometryRef.Mirror entfernt, SkRef-Ebene nicht gespiegelt, HorizontalPoints nicht getauscht, Prüfung je Punkt entfernt, Bohrungstyp 70 falsch, Append ohne HasEquivalent. Jeder Fehler wurde von den neuen Tests erkannt; die Dateien sind danach byte-gleich wiederhergestellt."
+  }
+ ],
+ "docs": null
+}
