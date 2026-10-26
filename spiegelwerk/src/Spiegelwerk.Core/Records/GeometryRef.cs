@@ -49,6 +49,15 @@ namespace Spiegelwerk.Core.Records
         public static GeometryRef ToSketch(string sketch) => new GeometryRef(GeometryRefKind.Sketch) { SketchName = sketch };
         public static GeometryRef Unknown(string description) => new GeometryRef(GeometryRefKind.Unknown) { Description = description };
 
+        /// <summary>The direction the reference stands for: plane or planar-face normal, line direction; null for anything else.</summary>
+        public Vec3? Direction => Kind switch
+        {
+            GeometryRefKind.Plane => Plane.Normal,
+            GeometryRefKind.Face when Face!.Kind == SurfaceKind.Plane => Face.Normal,
+            GeometryRefKind.Axis => Axis.Direction,
+            _ => (Vec3?)null,
+        };
+
         public GeometryRef Mirror(Reflection r)
         {
             var m = (GeometryRef)MemberwiseClone();

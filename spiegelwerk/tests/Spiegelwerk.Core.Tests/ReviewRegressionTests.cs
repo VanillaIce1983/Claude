@@ -136,6 +136,23 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Target_plane_that_fits_at_its_origin_but_not_at_a_distant_point_is_rejected()
+        {
+            // 0.999 µm off and tilted by 5e-9 rad: within both tolerances where the plane check
+            // looks, but a point 0.5 m out lands 1.0015 µm beside the target sketch.
+            var s = new SketchModel { Frame = Front };
+            s.Points.Add(new SkPoint("near", 0, 0));
+            double offset = 0.999e-6, tilt = 5e-9;
+            var target = new Frame3(new Vec3(0, 0, -offset), new Vec3(Math.Cos(tilt), 0, Math.Sin(tilt)), Vec3.UnitY);
+            var r = new Reflection(Plane3.RightYZ);
+            SketchMirror.Mirror(s, r, target);
+
+            s.Points.Add(new SkPoint("far", 0.5, 0));
+            ArgumentException e = Assert.Throws<ArgumentException>(() => SketchMirror.Mirror(s, r, target));
+            Assert.StartsWith("Punkt far liegt", e.Message);
+        }
+
+        [Fact]
         public void Two_planes_meet_in_a_line_on_both()
         {
             var rnd = new Random(31);

@@ -225,6 +225,13 @@ namespace Spiegelwerk.Core.Sketch
 
         public bool HasExternal => Refs.Any(r => !r.IsLocal);
 
+        /// <summary>A dimension placed in the copy measures this one's value: angles within 1e-6 rad, lengths within 1e-6 relative (at least 0.1 µm).</summary>
+        public bool Matches(double measured)
+        {
+            double tol = Kind == DimensionKind.Angular ? 1e-6 : Math.Max(1e-7, Math.Abs(Value) * 1e-6);
+            return Math.Abs(measured - Value) <= tol;
+        }
+
         public override string ToString() => $"{Kind} {Name} = {Value} ({string.Join(", ", Refs)})";
     }
 

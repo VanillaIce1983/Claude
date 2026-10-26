@@ -84,16 +84,10 @@ namespace Spiegelwerk.Build.Builders
                 : null;
         }
 
-        /// <summary>The direction a reference of the original stands for: plane or planar-face normal, line direction.</summary>
-        public static Vec3? ReferenceDirection(GeometryRef? g) => g?.Kind switch
-        {
-            GeometryRefKind.Plane => g.Plane.Normal,
-            GeometryRefKind.Face when g.Face!.Kind == SurfaceKind.Plane => g.Face.Normal,
-            GeometryRefKind.Axis => g.Axis.Direction,
-            _ => (Vec3?)null,
-        };
-
-        /// <summary>The same for an object of the target, as SOLIDWORKS orients it; null if it has none.</summary>
+        /// <summary>
+        /// The direction an object of the target stands for, as SOLIDWORKS orients it (the
+        /// counterpart of <see cref="GeometryRef.Direction"/>); null if it has none.
+        /// </summary>
         public static Vec3? ReferenceDirection(BuildContext ctx, object? o)
         {
             switch (o)
@@ -130,7 +124,7 @@ namespace Spiegelwerk.Build.Builders
         /// </summary>
         public static bool FlagForReference(BuildContext ctx, GeometryRef? original, object? target, bool flag)
         {
-            Vec3? a = ReferenceDirection(original), b = ReferenceDirection(ctx, target);
+            Vec3? a = original?.Direction, b = ReferenceDirection(ctx, target);
             return a.HasValue && b.HasValue ? DirectionRules.ReverseFlag(flag, DirectionRules.Sigma(a.Value, ctx.Mirror, b.Value)) : flag;
         }
 

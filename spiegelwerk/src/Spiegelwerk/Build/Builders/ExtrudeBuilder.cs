@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
-using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
@@ -238,7 +237,7 @@ namespace Spiegelwerk.Build.Builders
             object? target = Safe(ctx.Topology.Resolve(side.Reference.Mirror(ctx.Mirror), notes));
             if (target != null) return target;
 
-            double? blind = BlindEquivalent(side, sketch);
+            double? blind = side.BlindEquivalent(sketch.Source.Frame.Plane);
             if (blind.HasValue)
             {
                 cond = EndCondition.Blind;
@@ -246,24 +245,6 @@ namespace Spiegelwerk.Build.Builders
                 notes.Add($"Endbedingung {side.End} ohne Bezug im Ziel, ersetzt durch Blind {depth * 1000:0.###} mm.");
             }
             return null;
-        }
-
-        /// <summary>Up to / offset from a plane parallel to the sketch plane has a fixed depth.</summary>
-        private static double? BlindEquivalent(ExtrudeSide side, SketchMap sketch)
-        {
-            if (side.End != EndCondition.UpToSurface && side.End != EndCondition.OffsetFromSurface) return null;
-            Plane3 sketchPlane = sketch.Source.Frame.Plane;
-            Plane3? refPlane = side.Reference?.Kind switch
-            {
-                GeometryRefKind.Plane => side.Reference.Plane,
-                GeometryRefKind.Face when side.Reference.Face!.Kind == Core.Matching.SurfaceKind.Plane =>
-                    new Plane3(side.Reference.Face.Sample, side.Reference.Face.Normal),
-                _ => (Plane3?)null,
-            };
-            if (refPlane == null || !refPlane.Value.IsParallelTo(sketchPlane)) return null;
-            double depth = Math.Abs(refPlane.Value.SignedDistance(sketchPlane.Origin));
-            if (side.End == EndCondition.OffsetFromSurface) depth += side.OffsetReverse ? side.Depth : -side.Depth;
-            return depth > Tol.Length ? depth : (double?)null;
         }
 
         private static void AddAlternatives(BuildResult result, BuildContext ctx, Feature f, ExtrudeRecord r)

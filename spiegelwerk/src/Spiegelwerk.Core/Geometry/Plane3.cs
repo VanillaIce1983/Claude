@@ -31,8 +31,6 @@ namespace Spiegelwerk.Core.Geometry
 
         public bool IsParallelTo(Plane3 o) => Normal.IsParallelTo(o.Normal);
 
-        public Plane3 Flipped() => new Plane3(Origin, -Normal);
-
         /// <summary>The line where two planes meet; null if they are parallel.</summary>
         public Line3? IntersectWith(Plane3 o)
         {

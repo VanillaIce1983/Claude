@@ -44,16 +44,35 @@ namespace Spiegelwerk.AssemblyContext
                 : string.Equals(Path.GetExtension(c.GetPathName() ?? ""), ".sldasm", StringComparison.OrdinalIgnoreCase);
             if (isAssembly)
                 return $"Komponente \"{c.Name2}\" ist eine Baugruppe; gespiegelt werden nur Teile.";
+            // The counterpart is inserted into the top-level assembly; in a sub-assembly it would end up elsewhere.
+            if (c.GetParent() is Component2 parent)
+                return $"Komponente \"{c.Name2}\" liegt in der Unterbaugruppe \"{parent.Name2}\"; gespiegelt werden nur Teile der obersten Ebene.";
             return null;
         }
 
         public MirrorJobResult Run(AssemblyDoc asm, Component2 component, Plane3 assemblyPlane, MirrorOptions options)
         {
-            var asmDoc = (ModelDoc2)asm;
             string? problem = CheckComponent(component);
             if (problem != null) throw new InvalidOperationException(problem);
-            if (component.GetSuppression2() != (int)swComponentSuppressionState_e.swComponentFullyResolved)
+            // Resolved for the run; a lightweight component is made lightweight again afterwards.
+            int state = component.GetSuppression2();
+            bool lightweight = state == (int)swComponentSuppressionState_e.swComponentLightweight ||
+                               state == (int)swComponentSuppressionState_e.swComponentFullyLightweight;
+            if (state != (int)swComponentSuppressionState_e.swComponentFullyResolved)
                 component.SetSuppression2((int)swComponentSuppressionState_e.swComponentFullyResolved);
+            try
+            {
+                return Mirror(asm, component, assemblyPlane, options);
+            }
+            finally
+            {
+                if (lightweight) component.SetSuppression2((int)swComponentSuppressionState_e.swComponentLightweight);
+            }
+        }
+
+        private MirrorJobResult Mirror(AssemblyDoc asm, Component2 component, Plane3 assemblyPlane, MirrorOptions options)
+        {
+            var asmDoc = (ModelDoc2)asm;
             if (!(component.GetModelDoc2() is PartDoc) || !(component.GetModelDoc2() is ModelDoc2 part))
                 throw new InvalidOperationException($"Komponente \"{component.Name2}\" ließ sich nicht als Teil laden.");
 
@@ -108,8 +127,9 @@ namespace Spiegelwerk.AssemblyContext
                 result.Report.General.Add($"Neues Teil konnte nicht gespeichert werden (Fehler {err}); es bleibt offen und wird nicht eingefügt.");
                 return result;
             }
+            result.Report.TargetName = Path.GetFileName(newPath);
             result.Report.General.Add($"Gespeichert: {newPath}");
-            result.Report.General.Add($"Teil gespiegelt an seiner Ebene {partPlane}, Platzierung gleicht das aus.");
+            result.Report.General.Add($"Teil gespiegelt an seiner {ReportText.Plane(partPlane)}, Platzierung gleicht das aus.");
 
             if (options.InsertIntoAssembly)
             {

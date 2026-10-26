@@ -4,6 +4,7 @@ using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
 
@@ -86,7 +87,7 @@ namespace Spiegelwerk.Capture
                     case DraftFeatureData2 dr:
                         return CaptureDraft(f, type, dr);
                 }
-                return new UnsupportedRecord(f.Name, type, UnsupportedReason(type), ChangesSolid(type));
+                return new UnsupportedRecord(f.Name, type, UnsupportedFeatures.Reason(type), ChangesSolid(type));
             }
             catch (NotSupportedException ex)
             {
@@ -404,17 +405,6 @@ namespace Spiegelwerk.Capture
         {
             "RefAxis", "RefPoint", "CoordSys", "3DProfileFeature", "ProfileFeature", "RefPlane", "Helix", "CompositeCurve",
             "ReferenceCurve", "CurveInFile", "SplitLine", "CosmeticThread", "Attribute",
-        };
-
-        private static string UnsupportedReason(string type) => type switch
-        {
-            // Reached only if the definition does not answer as IAdvancedHoleFeatureData.
-            "AdvHoleWzd" or "AdvancedHole" => "Erweiterte Bohrung: Feature-Daten nicht lesbar.",
-            "MirrorPattern" => "Spiegel-Feature im Original: wird bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. " +
-                               "Abhilfe: im Original durch die gespiegelten Einzel-Features ersetzen oder nach dem Lauf von Hand spiegeln.",
-            // Reached only if the definition does not answer as the pattern's data interface.
-            "CurvePattern" or "SketchPattern" or "TablePattern" or "FillPattern" or "DimPattern" or "VarPattern" => "Muster: Feature-Daten nicht lesbar.",
-            _ => $"Feature-Typ {type} wird nicht unterstützt.",
         };
     }
 }

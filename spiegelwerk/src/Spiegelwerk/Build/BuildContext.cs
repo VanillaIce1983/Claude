@@ -83,6 +83,9 @@ namespace Spiegelwerk.Build
 
         public bool SamePart => Options.Target == MirrorTarget.SamePart;
 
+        /// <summary>New part with "copy equations": dimension names decide which equations come along.</summary>
+        public bool CopiesEquations => !SamePart && Options.CopyEquations;
+
         public Dictionary<string, SketchMap> Sketches { get; } = new Dictionary<string, SketchMap>(StringComparer.Ordinal);
 
         /// <summary>Sketch of a hole (original name) → its hole (original name).</summary>
@@ -96,6 +99,12 @@ namespace Spiegelwerk.Build
 
         /// <summary>Original feature name → new feature.</summary>
         public Dictionary<string, Feature> Created { get; } = new Dictionary<string, Feature>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Dimensions of the original ("D1@Skizze1") that the copy has under their original name,
+        /// identified as the same one: the only ones a copied equation may name.
+        /// </summary>
+        public HashSet<string> KnownDimensions { get; } = new HashSet<string>(StringComparer.Ordinal);
 
         private readonly HashSet<string> _createdNames = new HashSet<string>(StringComparer.Ordinal);
 
@@ -123,6 +132,20 @@ namespace Spiegelwerk.Build
         {
             Sketches.Remove(originalName);
             Unregister(originalName);
+        }
+
+        /// <summary>
+        /// Features of a failed step about to be deleted again: neither registered (as feature or
+        /// sketch map) nor known to the plane resolver any more.
+        /// </summary>
+        public void Forget(ICollection<string> names)
+        {
+            List<string> keys = Created.Where(kv => names.Contains(kv.Value.Name)).Select(kv => kv.Key)
+                .Concat(Sketches.Where(kv => names.Contains(kv.Value.Feature.Name)).Select(kv => kv.Key))
+                .Distinct().ToList();
+            foreach (string key in keys) ForgetSketch(key);
+            Planes.Forget(names);
+            Topology.Invalidate();
         }
 
         /// <summary>Helper features (planes, anchor sketches) also count as "ours".</summary>

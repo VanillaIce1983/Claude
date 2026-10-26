@@ -19,10 +19,15 @@ namespace Spiegelwerk.Build
     internal sealed class PlaneResolver
     {
         private readonly BuildContext _ctx;
-        private readonly List<(Feature feature, Plane3 plane)> _known = new List<(Feature, Plane3)>();
-        private readonly List<(Feature feature, Line3 line)> _axes = new List<(Feature, Line3)>();
+        private readonly List<(Feature feature, Plane3 plane, Feature? anchor)> _known = new List<(Feature, Plane3, Feature?)>();
+        private readonly List<(Feature feature, Line3 line, Feature anchor)> _axes = new List<(Feature, Line3, Feature)>();
         private readonly List<(Feature feature, Frame3 frame, Feature anchor)> _coordinateSystems = new List<(Feature, Frame3, Feature)>();
+        private readonly List<Plane3> _failedPlanes = new List<Plane3>();
+        private readonly List<Line3> _failedAxes = new List<Line3>();
         private readonly List<Frame3> _failedCoordinateSystems = new List<Frame3>();
+
+        /// <summary>Helper planes and axes made on demand for the feature being built (see <see cref="RemoveStepHelpers"/>).</summary>
+        private readonly List<Feature> _stepHelpers = new List<Feature>();
         private Feature[]? _standard;
         private int _counter;
         private int _axisCounter;
@@ -44,16 +49,24 @@ namespace Spiegelwerk.Build
             if (_standard != null) return;
             _standard = SwDoc.StandardPlanes(_ctx.Doc, _ctx.Math);
             Plane3[] geometry = { Plane3.FrontXY, Plane3.TopXZ, Plane3.RightYZ };
-            for (int i = 0; i < 3; i++) _known.Add((_standard[i], geometry[i]));
+            for (int i = 0; i < 3; i++) _known.Add((_standard[i], geometry[i], null));
         }
 
-        /// <summary>A plane feature coinciding with <paramref name="wanted"/> (either normal orientation).</summary>
+        /// <summary>
+        /// A plane feature coinciding with <paramref name="wanted"/> (either normal orientation):
+        /// a known one, otherwise a new helper. A place where creating one has failed before is
+        /// not tried again.
+        /// </summary>
         public Feature Resolve(Plane3 wanted)
         {
             Init();
             PlaneMatch m = PlaneClassifier.Classify(wanted, _known.Select(k => k.plane).ToList(), StandardGeometry);
             if (m.Kind == PlaneMatchKind.Existing) return _known[m.Index].feature;
-            return Create(wanted, m, $"Spiegelwerk-Ebene {++_counter}");
+            if (_failedPlanes.Any(p => p.IsCoplanarWith(wanted)))
+                throw new InvalidOperationException($"Hilfsebene für {wanted} ließ sich schon zuvor nicht erzeugen.");
+            Feature f = Create(wanted, m, $"Spiegelwerk-Ebene {++_counter}");
+            _stepHelpers.Add(f);
+            return f;
         }
 
         /// <summary>Only an existing plane, never creates one (for relations to planes).</summary>
@@ -79,12 +92,23 @@ namespace Spiegelwerk.Build
 
         private Feature Create(Plane3 wanted, PlaneMatch m, string name)
         {
-            Feature f = m.Kind == PlaneMatchKind.OffsetFromStandard
-                ? CreateOffset(wanted, _standard![m.Index], m.Offset)
-                : CreateThreePoint(wanted);
+            Feature f;
+            Feature? anchor = null;
+            try
+            {
+                f = m.Kind == PlaneMatchKind.OffsetFromStandard
+                    ? CreateOffset(wanted, _standard![m.Index], m.Offset)
+                    : CreateThreePoint(wanted, out anchor);
+            }
+            catch (Exception)
+            {
+                // Every further attempt at this place would end the same way.
+                _failedPlanes.Add(wanted);
+                throw;
+            }
             SwDoc.Rename(_ctx.Doc, f, name);
             _ctx.RegisterHelper(f);
-            _known.Add((f, wanted));
+            _known.Add((f, wanted, anchor));
             // A new feature means a rebuild: cached faces and edges are stale now.
             _ctx.Topology.Invalidate();
             return f;
@@ -107,7 +131,8 @@ namespace Spiegelwerk.Build
             throw new InvalidOperationException($"Versatzebene für {wanted} konnte nicht erzeugt werden.");
         }
 
-        private Feature CreateThreePoint(Plane3 wanted)
+        /// <summary>Plane through three fixed points of a helper 3D sketch (<paramref name="anchor"/>); a failure leaves neither behind.</summary>
+        private Feature CreateThreePoint(Plane3 wanted, out Feature anchor)
         {
             ModelDoc2 doc = _ctx.Doc;
             SketchManager sm = doc.SketchManager;
@@ -127,22 +152,33 @@ namespace Spiegelwerk.Build
                 }
             }
             sm.Insert3DSketch(true);
-            Feature anchor = doc.Extension.GetLastFeatureAdded();
+            anchor = doc.Extension.GetLastFeatureAdded();
             SwDoc.Rename(doc, anchor, $"Spiegelwerk-Anker {++_anchorCounter}");
-            _ctx.RegisterHelper(anchor);
 
-            Feature? f = InsertPlane(() =>
-                {
-                    bool ok = true;
-                    for (int i = 0; i < 3; i++) ok &= SwSelect.Select(doc, created[i], i, i > 0);
-                    return ok;
-                },
-                (int)swRefPlaneReferenceConstraints_e.swRefPlaneReferenceConstraint_Coincident,
-                0,
-                (int)swRefPlaneReferenceConstraints_e.swRefPlaneReferenceConstraint_Coincident,
-                (int)swRefPlaneReferenceConstraints_e.swRefPlaneReferenceConstraint_Coincident);
-            if (f == null || !PlaneOf(f).IsCoplanarWith(wanted))
-                throw new InvalidOperationException($"Ebene durch drei Punkte für {wanted} konnte nicht erzeugt werden.");
+            Feature? f = null;
+            try
+            {
+                f = InsertPlane(() =>
+                    {
+                        bool ok = true;
+                        for (int i = 0; i < 3; i++) ok &= SwSelect.Select(doc, created[i], i, i > 0);
+                        return ok;
+                    },
+                    (int)swRefPlaneReferenceConstraints_e.swRefPlaneReferenceConstraint_Coincident,
+                    0,
+                    (int)swRefPlaneReferenceConstraints_e.swRefPlaneReferenceConstraint_Coincident,
+                    (int)swRefPlaneReferenceConstraints_e.swRefPlaneReferenceConstraint_Coincident);
+                if (f == null || !PlaneOf(f).IsCoplanarWith(wanted))
+                    throw new InvalidOperationException($"Ebene durch drei Punkte für {wanted} konnte nicht erzeugt werden.");
+            }
+            catch (Exception)
+            {
+                if (f != null) Delete(f);
+                Delete(anchor);
+                _ctx.Topology.Invalidate();
+                throw;
+            }
+            _ctx.RegisterHelper(anchor);
             return f;
         }
 
@@ -151,15 +187,28 @@ namespace Spiegelwerk.Build
         /// <summary>An axis of this job on the given line (either direction), if there is one.</summary>
         public Feature? FindAxis(Line3 wanted) => _axes.FirstOrDefault(a => a.line.IsSameLine(wanted)).feature;
 
-        /// <summary>An axis on the line: one of this job, otherwise a new helper axis.</summary>
-        public Feature Axis(Line3 wanted) => FindAxis(wanted) ?? CreateAxis(wanted, $"Spiegelwerk-Achse {++_axisCounter}");
+        /// <summary>
+        /// An axis on the line: one of this job, otherwise a new helper axis. A line where
+        /// creating one has failed before is not tried again.
+        /// </summary>
+        public Feature Axis(Line3 wanted)
+        {
+            Feature? existing = FindAxis(wanted);
+            if (existing != null) return existing;
+            if (_failedAxes.Any(l => l.IsSameLine(wanted)))
+                throw new InvalidOperationException($"Achse auf {wanted} ließ sich schon zuvor nicht erzeugen.");
+            Feature axis = CreateAxis(wanted, $"Spiegelwerk-Achse {++_axisCounter}");
+            _stepHelpers.Add(axis);
+            return axis;
+        }
 
         /// <summary>Rebuilds a reference axis of the original as an independent axis with the given name.</summary>
         public Feature CreateNamedAxis(Line3 wanted, string name) => CreateAxis(wanted, name);
 
         /// <summary>
         /// Reference axis on a line of a helper 3D sketch, the line and its ends fixed: like the
-        /// three-point planes it depends on nothing else, least of all on the original.
+        /// three-point planes it depends on nothing else, least of all on the original. If it
+        /// cannot be made right, nothing stays behind – neither the axis nor its helper sketch.
         /// </summary>
         private Feature CreateAxis(Line3 wanted, string name)
         {
@@ -186,17 +235,29 @@ namespace Spiegelwerk.Build
             sm.Insert3DSketch(true);
             Feature anchor = doc.Extension.GetLastFeatureAdded();
             SwDoc.Rename(doc, anchor, $"Spiegelwerk-Anker {++_anchorCounter}");
-            _ctx.RegisterHelper(anchor);
 
-            SwSelect.Clear(doc);
-            bool ok = line != null && SwSelect.Select(doc, line, 0, false) && doc.InsertAxis2(true);
-            SwSelect.Clear(doc);
-            Feature? axis = ok ? doc.Extension.GetLastFeatureAdded() : null;
-            if (axis == null || !(axis.GetSpecificFeature2() is RefAxis refAxis) || !SwDoc.AxisLine(refAxis).IsSameLine(wanted))
-                throw new InvalidOperationException($"Achse auf {wanted} konnte nicht erzeugt werden.");
+            Feature? axis = null;
+            try
+            {
+                SwSelect.Clear(doc);
+                bool ok = line != null && SwSelect.Select(doc, line, 0, false) && doc.InsertAxis2(true);
+                SwSelect.Clear(doc);
+                axis = ok ? doc.Extension.GetLastFeatureAdded() : null;
+                if (axis == null || !(axis.GetSpecificFeature2() is RefAxis refAxis) || !SwDoc.AxisLine(refAxis).IsSameLine(wanted))
+                    throw new InvalidOperationException($"Achse auf {wanted} konnte nicht erzeugt werden.");
+            }
+            catch (Exception)
+            {
+                _failedAxes.Add(wanted);
+                if (axis != null) Delete(axis);
+                Delete(anchor);
+                _ctx.Topology.Invalidate();
+                throw;
+            }
             SwDoc.Rename(doc, axis, name);
+            _ctx.RegisterHelper(anchor);
             _ctx.RegisterHelper(axis);
-            _axes.Add((axis, wanted));
+            _axes.Add((axis, wanted, anchor));
             _ctx.Topology.Invalidate();
             return axis;
         }
@@ -241,6 +302,47 @@ namespace Spiegelwerk.Build
             Delete(anchor);
             _ctx.Topology.Invalidate();
         }
+
+        /// <summary>Planes, axes and coordinate systems deleted with a failed step are not offered again.</summary>
+        public void Forget(ICollection<string> names)
+        {
+            _known.RemoveAll(k => names.Contains(k.feature.Name));
+            _axes.RemoveAll(a => names.Contains(a.feature.Name));
+            _coordinateSystems.RemoveAll(c => names.Contains(c.feature.Name));
+            _stepHelpers.RemoveAll(h => names.Contains(h.Name));
+        }
+
+        /// <summary>A new feature is about to be built: helper planes and axes made from now on are made for it.</summary>
+        public void BeginStep() => _stepHelpers.Clear();
+
+        /// <summary>
+        /// Removes the helper planes and axes made for the current feature, each with its helper
+        /// sketch – for a feature that came to nothing or that the job removed again. Planes and
+        /// axes it found already there were not made for it and stay; so does a helper something
+        /// else still builds on.
+        /// </summary>
+        public void RemoveStepHelpers()
+        {
+            bool removed = false;
+            for (int i = _stepHelpers.Count - 1; i >= 0; i--)
+            {
+                Feature helper = _stepHelpers[i];
+                if (HasDependents(helper)) continue;
+                string name = helper.Name;
+                Feature? anchor = _known.FirstOrDefault(k => k.feature.Name == name).anchor ?? _axes.FirstOrDefault(a => a.feature.Name == name).anchor;
+                _known.RemoveAll(k => k.feature.Name == name);
+                _axes.RemoveAll(a => a.feature.Name == name);
+                Delete(helper);
+                if (anchor != null) Delete(anchor);
+                removed = true;
+            }
+            _stepHelpers.Clear();
+            if (removed) _ctx.Topology.Invalidate();
+        }
+
+        /// <summary>Whether something still builds on the feature: a sketch on the plane, a feature using it as a reference …</summary>
+        private static bool HasDependents(Feature f) =>
+            f.GetChildren() is object[] children && children.OfType<Feature>().Any(c => !SwDoc.IsSystemFeature(c));
 
         public static bool SameFrame(Frame3 a, Frame3 b) =>
             a.Origin.AlmostEquals(b.Origin) && a.XAxis.IsSameDirection(b.XAxis, 1e-6) && a.YAxis.IsSameDirection(b.YAxis, 1e-6);

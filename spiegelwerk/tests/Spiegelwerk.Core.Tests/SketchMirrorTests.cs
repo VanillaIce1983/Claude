@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Sketch;
 using Xunit;
 using static Spiegelwerk.Core.Tests.TestGeometry;
@@ -90,26 +91,44 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal(1, res.Sketch.Segment("A1").Direction);
         }
 
+        /// <summary>The tombstone with horizontal and vertical relations between points: p5–p3 level, p1–p5 above each other.</summary>
+        private static SketchModel TombstoneWithPointRelations(Frame3 frame)
+        {
+            SketchModel s = Tombstone(frame);
+            s.Relations.Add(new SkRelation(RelationKind.HorizontalPoints, new[] { SkRef.LocalPoint("p5"), SkRef.LocalPoint("p3") }));
+            s.Relations.Add(new SkRelation(RelationKind.VerticalPoints, new[] { SkRef.LocalPoint("p1"), SkRef.LocalPoint("p5") }));
+            return s;
+        }
+
         [Fact]
         public void Diagonal_mirror_swaps_horizontal_and_vertical()
         {
-            SketchModel src = Tombstone(Front);
+            SketchModel src = TombstoneWithPointRelations(Front);
             var r = new Reflection(new Plane3(Vec3.Zero, new Vec3(1, -1, 0)));
             SketchMirrorResult res = SketchMirror.Mirror(src, r, Front);
 
             Assert.Equal(AxisImage.PlusY, res.Map.X);
             Assert.Equal(AxisImage.PlusX, res.Map.Y);
-            Assert.Equal(new[] { RelationKind.Vertical, RelationKind.Horizontal, RelationKind.Horizontal, RelationKind.Tangent, RelationKind.Coincident },
+            Assert.Equal(new[]
+                {
+                    RelationKind.Vertical, RelationKind.Horizontal, RelationKind.Horizontal, RelationKind.Tangent, RelationKind.Coincident,
+                    RelationKind.VerticalPoints, RelationKind.HorizontalPoints,
+                },
                 res.Sketch.Relations.Select(x => x.Kind));
             Assert.Equal(new[] { DimensionKind.Vertical, DimensionKind.Horizontal, DimensionKind.Radial },
                 res.Sketch.Dimensions.Select(x => x.Kind));
             Assert.Empty(res.Warnings);
+
+            // The converted relations hold for the mirrored points.
+            SketchModel m = res.Sketch;
+            Near(m.Point("p5").X, m.Point("p3").X);
+            Near(m.Point("p1").Y, m.Point("p5").Y);
         }
 
         [Fact]
         public void Oblique_axes_drop_horizontal_and_vertical_with_a_warning()
         {
-            SketchModel src = Tombstone(Front);
+            SketchModel src = TombstoneWithPointRelations(Front);
             double a = Math.PI / 6;
             var r = new Reflection(new Plane3(Vec3.Zero, new Vec3(Math.Cos(a), Math.Sin(a), 0)));
             SketchMirrorResult res = SketchMirror.Mirror(src, r, Front);
@@ -117,8 +136,63 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal(AxisImage.Oblique, res.Map.X);
             Assert.Equal(new[] { RelationKind.Tangent, RelationKind.Coincident }, res.Sketch.Relations.Select(x => x.Kind));
             Assert.Equal(new[] { DimensionKind.Radial }, res.Sketch.Dimensions.Select(x => x.Kind));
-            Assert.Equal(5, res.Warnings.Count);
+            Assert.Equal(7, res.Warnings.Count);
             Assert.True(SketchMirror.MaxDistortion(src, res.Sketch) < 1e-12);
+        }
+
+        [Fact]
+        public void External_references_are_mirrored_and_local_ids_kept()
+        {
+            SketchModel src = Tombstone(Front);
+            var edge = new EdgeSignature(CurveKind.Line, new Vec3(0.01, 0, 0), new Vec3(0.05, 0, 0), new Vec3(0.03, 0, 0), 0.04) { Axis = Vec3.UnitX };
+            src.Relations.Add(new SkRelation(RelationKind.Collinear, new[] { SkRef.LocalSegment("L1"), SkRef.ModelEdge(edge) }));
+            src.Relations.Add(new SkRelation(RelationKind.Coincident, new[] { SkRef.LocalPoint("p1"), SkRef.Plane(new Plane3(new Vec3(0.01, 0, 0), Vec3.UnitX), "Ebene1") }));
+            src.Relations.Add(new SkRelation(RelationKind.Coincident, new[] { SkRef.LocalPoint("c"), SkRef.OtherSketchPoint("Skizze2", "p4", new Vec3(0.03, 0.02, 0)) }));
+            src.Relations.Add(new SkRelation(RelationKind.Parallel, new[] { SkRef.LocalSegment("L2"), SkRef.OtherSketchSegment("Skizze2", "L9") }));
+            src.Relations.Add(new SkRelation(RelationKind.Tangent, new[] { SkRef.LocalSegment("L4"), SkRef.Unknown("Silhouettenkante") }));
+            src.Dimensions.Add(new SkDimension(DimensionKind.Aligned, new[] { SkRef.LocalPoint("p3"), SkRef.ModelVertex(new Vec3(0.07, 0.02, 0)) }, 0.02) { Name = "D4" });
+
+            SketchMirrorResult res = SketchMirror.Mirror(src, new Reflection(Plane3.RightYZ), Front);
+            SketchModel m = res.Sketch;
+            Assert.Empty(res.Warnings);
+            SkRelation[] rels = m.Relations.Skip(5).ToArray();
+            Assert.All(rels, rel => Assert.True(rel.HasExternal));
+
+            // Local entities keep their ids.
+            Assert.Equal(new[] { "L1", "p1", "c", "L2", "L4" }, rels.Select(rel => rel.Entities[0].Id));
+            Assert.All(rels, rel => Assert.True(rel.Entities[0].IsLocal));
+
+            // Model edge: the fingerprint is mirrored and still lies on the mirrored line L1.
+            EdgeSignature me = rels[0].Entities[1].Edge!;
+            Near(new Vec3(-0.01, 0, 0), me.Start);
+            Near(new Vec3(-0.05, 0, 0), me.End);
+            Near(new Vec3(-0.03, 0, 0), me.Mid);
+            Near(-Vec3.UnitX, me.Axis);
+            Assert.Equal(0.04, me.Length);
+            Near(m.ToModel(m.Point("p1")), me.Start);
+            Near(new Vec3(0.01, 0, 0), edge.Start);   // the source is not changed
+
+            // Plane: mirrored, name kept; the mirrored p1 lies on it.
+            SkRef plane = rels[1].Entities[1];
+            Assert.Equal(SkRefKind.Plane, plane.Kind);
+            Assert.Equal("Ebene1", plane.Description);
+            Near(-Vec3.UnitX, plane.PlaneGeometry.Normal);
+            Assert.True(plane.PlaneGeometry.Contains(m.ToModel(m.Point("p1")), 1e-12));
+
+            // Point of another sketch: position mirrored, sketch and id kept; it still meets the mirrored c.
+            SkRef other = rels[2].Entities[1];
+            Assert.Equal(("Skizze2", "p4"), (other.SketchName, other.Id));
+            Near(new Vec3(-0.03, 0.02, 0), other.Position);
+            Near(m.ToModel(m.Point("c")), other.Position);
+
+            // Segment of another sketch and unknown references carry no geometry: unchanged.
+            Assert.Equal((SkRefKind.OtherSketchSegment, "Skizze2", "L9"), (rels[3].Entities[1].Kind, rels[3].Entities[1].SketchName, rels[3].Entities[1].Id));
+            Assert.Equal((SkRefKind.Unknown, "Silhouettenkante"), (rels[4].Entities[1].Kind, rels[4].Entities[1].Description));
+
+            // Model vertex of a dimension: mirrored, the dimension still measures the same.
+            SkDimension d4 = m.Dimensions.Single(d => d.Name == "D4");
+            Near(new Vec3(-0.07, 0.02, 0), d4.Refs[1].Position);
+            Near(0.02, m.ToModel(m.Point("p3")).DistanceTo(d4.Refs[1].Position));
         }
 
         [Fact]

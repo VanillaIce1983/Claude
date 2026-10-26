@@ -45,6 +45,12 @@ namespace Spiegelwerk.UI
         private PropertyManagerPageCheckbox? _chkDelete, _chkInsert;
         private PropertyManagerPageCheckbox _chkMaterial = null!, _chkEquations = null!, _chkVerify = null!, _chkFix = null!, _chkStop = null!;
         private PropertyManagerPageTextbox _txtSuffix = null!;
+        private PropertyManagerPageLabel _lblSuffix = null!;
+
+        private const string Intro = "Baut die gewählten Features gespiegelt als eigenständige Features neu auf – ohne Spiegel-Feature und ohne Bezug zum Original.";
+
+        /// <summary>The page message shows why a selection was refused instead of <see cref="Intro"/>.</summary>
+        private bool _showsRefusal;
 
         // Harvested in OnClose.
         private bool _accepted;
@@ -82,10 +88,7 @@ namespace Spiegelwerk.UI
             short left = (short)swPropertyManagerPageControlLeftAlign_e.swControlAlign_LeftEdge;
             int groupOpts = (int)(swAddGroupBoxOptions_e.swGroupBoxOptions_Visible | swAddGroupBoxOptions_e.swGroupBoxOptions_Expanded);
 
-            _page.SetMessage3(
-                "Baut die gewählten Features gespiegelt als eigenständige Features neu auf – ohne Spiegel-Feature und ohne Bezug zum Original.",
-                (int)swPropertyManagerPageMessageVisibility.swMessageBoxVisible,
-                (int)swPropertyManagerPageMessageExpanded.swMessageBoxExpand, "Spiegelwerk");
+            PageMessage(Intro, "Spiegelwerk");
 
             // ---- mirror plane
             var g1 = (PropertyManagerPageGroup)_page.AddGroupBox(GrpPlane, "Spiegelebene", groupOpts);
@@ -131,15 +134,16 @@ namespace Spiegelwerk.UI
                 _optSame = (PropertyManagerPageOption)g3.AddControl2(OptSamePart, (short)swPropertyManagerPageControlType_e.swControlType_Option,
                     "Im selben Teil", left, vis, "Die gespiegelten Features im aktuellen Teil anlegen");
                 _optNew.Checked = true;
-                _chkDelete = Check(g3, ChkDelete, "Original löschen", "Nur wenn alles fehlerfrei gespiegelt wurde und nichts anderes vom Original abhängt", false);
+                _chkDelete = Check(g3, ChkDelete, "Original löschen",
+                    "Nur wenn alles fehlerfrei gespiegelt wurde, nichts anderes vom Original abhängt und das Teil nur eine Konfiguration hat", false);
             }
             else
             {
                 _chkInsert = Check(g3, ChkInsert, "In Baugruppe einfügen", "Gespiegeltes Teil an der gespiegelten Lage einfügen", true);
             }
-            _chkMaterial = Check(g3, ChkMaterial, "Werkstoff übernehmen", "", true);
-            _chkEquations = Check(g3, ChkEquations, "Gleichungen übernehmen", "Globale Variablen und Gleichungen kopieren", true);
-            g3.AddControl2(LblSuffix, (short)swPropertyManagerPageControlType_e.swControlType_Label, "Namenszusatz:", left, vis, "");
+            _chkMaterial = Check(g3, ChkMaterial, "Werkstoff übernehmen", "Werkstoff des Teils in das neue Teil übernehmen", true);
+            _chkEquations = Check(g3, ChkEquations, "Gleichungen übernehmen", "Globale Variablen und Gleichungen in das neue Teil kopieren", true);
+            _lblSuffix = (PropertyManagerPageLabel)g3.AddControl2(LblSuffix, (short)swPropertyManagerPageControlType_e.swControlType_Label, "Namenszusatz:", left, vis, "");
             _txtSuffix = (PropertyManagerPageTextbox)g3.AddControl2(TxtSuffix, (short)swPropertyManagerPageControlType_e.swControlType_Textbox,
                 "Zusatz", left, vis, "Wird an Feature-Namen (selbes Teil) bzw. Dateinamen (Baugruppe) angehängt");
             _txtSuffix.Text = _options.NameSuffix;
@@ -162,15 +166,34 @@ namespace Spiegelwerk.UI
             return c;
         }
 
-        /// <summary>OK only with a mirror plane (and, in an assembly, at least one component).</summary>
+        /// <summary>
+        /// OK only with a mirror plane (and, in an assembly, at least one component). Options
+        /// that have no effect in the chosen mode are disabled.
+        /// </summary>
         private void UpdateState()
         {
-            bool hasPlane = _selPlane.ItemCount > 0 || _cmbHelper.CurrentSelection > 0;
+            bool planeSelected = _selPlane.ItemCount > 0;
+            bool hasPlane = planeSelected || _cmbHelper.CurrentSelection > 0;
             bool hasItems = !_isAssembly || _selItems.ItemCount > 0;
             _page.EnableButton((int)swPropertyManagerPageButtons_e.swPropertyManagerPageButton_Ok, hasPlane && hasItems);
-            if (_chkDelete != null && _optSame != null) ((PropertyManagerPageControl)_chkDelete).Enabled = _optSame.Checked;
-            ((PropertyManagerPageControl)_numOffset).Enabled = _cmbHelper.CurrentSelection > 0;
+            // A selected plane wins over the temporary one.
+            Enable(_cmbHelper, !planeSelected);
+            Enable(_numOffset, !planeSelected && _cmbHelper.CurrentSelection > 0);
+            // Material and equations go into a new part only (an assembly always makes new parts);
+            // the suffix names features in the same part and files in an assembly.
+            bool samePart = _optSame != null && _optSame.Checked;
+            if (_chkDelete != null) Enable(_chkDelete, samePart);
+            Enable(_chkMaterial, !samePart);
+            Enable(_chkEquations, !samePart);
+            Enable(_lblSuffix, samePart || _isAssembly);
+            Enable(_txtSuffix, samePart || _isAssembly);
         }
+
+        private static void Enable(object control, bool enabled) => ((PropertyManagerPageControl)control).Enabled = enabled;
+
+        private void PageMessage(string text, string caption) =>
+            _page.SetMessage3(text, (int)swPropertyManagerPageMessageVisibility.swMessageBoxVisible,
+                (int)swPropertyManagerPageMessageExpanded.swMessageBoxExpand, caption);
 
         // ---------------------------------------------------------------- closing
 
@@ -215,7 +238,8 @@ namespace Spiegelwerk.UI
                 MirrorReport report;
                 if (_isAssembly)
                 {
-                    report = new MirrorReport();
+                    // Each component's saved part goes into its heading line.
+                    report = new MirrorReport { TargetName = _doc.GetTitle() };
                     var asm = new AssemblyMirror(_sw);
                     foreach (Component2 c in _components)
                     {
@@ -225,7 +249,8 @@ namespace Spiegelwerk.UI
                         {
                             MirrorReport part = asm.Run((AssemblyDoc)_doc, c, _plane.Value, _options).Report;
                             report.Append(part, name);
-                            if (part.Aborted && _options.StopOnError) break;
+                            // Esc stops the whole run, not only this component.
+                            if (part.Aborted && (_options.StopOnError || part.Cancelled)) break;
                         }
                         catch (Exception ex)
                         {
@@ -306,11 +331,12 @@ namespace Spiegelwerk.UI
             }
         }
 
+        /// <summary>Not modal: the model stays usable to look at what the report names. The form disposes itself when closed.</summary>
         private void ShowReport(MirrorReport report)
         {
             var frame = (SolidWorks.Interop.sldworks.Frame)_sw.Frame();
-            using var form = new ReportForm(report);
-            form.ShowDialog(new WindowWrapper(new IntPtr(frame.GetHWndx64())));
+            var form = new ReportForm(report);
+            form.Show(new WindowWrapper(new IntPtr(frame.GetHWndx64())));
         }
 
         private void Message(string text, swMessageBoxIcon_e icon) =>
@@ -320,14 +346,35 @@ namespace Spiegelwerk.UI
 
         public bool OnSubmitSelection(int Id, object Selection, int SelType, ref string ItemText)
         {
+            string? refusal = Refusal(Id, Selection);
+            if (refusal != null)
+            {
+                // Otherwise nothing at all happens on the click.
+                PageMessage(refusal, "Auswahl nicht übernommen");
+                _showsRefusal = true;
+                return false;
+            }
+            if (_showsRefusal)
+            {
+                PageMessage(Intro, "Spiegelwerk");
+                _showsRefusal = false;
+            }
+            return true;
+        }
+
+        /// <summary>Why a selection is refused, or null.</summary>
+        private string? Refusal(int id, object selection)
+        {
             // Only planar faces make a mirror plane.
-            if (Id == SelPlane && Selection is Face2 f) return TopologyCapture.PlaneOfFace(f).HasValue;
-            // Sub-assemblies, virtual and suppressed components cannot be mirrored: refuse them right away.
-            if (Id == SelItems && Selection is Component2 c) return AssemblyMirror.CheckComponent(c) == null;
+            if (id == SelPlane && selection is Face2 f)
+                return TopologyCapture.PlaneOfFace(f).HasValue ? null : "Die Fläche ist nicht eben. Spiegelebene kann nur eine Referenzebene oder ebene Fläche sein.";
+            // Sub-assemblies, parts inside them, virtual and suppressed components cannot be mirrored: refuse them right away.
+            if (id == SelItems && selection is Component2 c) return AssemblyMirror.CheckComponent(c);
             // In a part only what ReadItems takes over: a temporary axis, for one, is no feature
             // and would be dropped – with nothing else selected the whole part would be mirrored.
-            if (Id == SelItems && !_isAssembly) return Selection is Feature || Selection is Body2;
-            return true;
+            if (id == SelItems && !_isAssembly && !(selection is Feature || selection is Body2))
+                return "Nur Features, Skizzen, Ebenen, Achsen, Koordinatensysteme oder Volumenkörper lassen sich spiegeln, keine temporären Achsen.";
+            return null;
         }
 
         public void OnSelectionboxListChanged(int Id, int Count) => UpdateState();
