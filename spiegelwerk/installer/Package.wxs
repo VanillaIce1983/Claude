@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Spiegelwerk installer: one per-machine x64 MSI for SOLIDWORKS desktop and 3DEXPERIENCE SOLIDWORKS.
+
+  Both read the same add-in keys (HKLM\SOFTWARE\SolidWorks\Addins\{CLSID}, HKCU\...\AddInsStartup),
+  which name neither a version nor a variant, and the add-in lives in its own folder – so one
+  registration serves every SOLIDWORKS 2019+ on the machine, wherever it is installed. The MSI writes
+  the COM registration itself (the values RegAsm /codebase would write); RegAsm never runs and the
+  add-in's ComRegisterFunction is only used by scripts\install.cmd (development).
+
+  Never change: UpgradeCode, the CLSID and the ProgId – a new one would show up as a second add-in.
+  Title and Description must match SpiegelwerkAddin.cs.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <?define Clsid = "{8A3C6F2E-5B1D-4E7A-9C3F-6D2E1B0A4F57}" ?>
+  <?define ClassName = "Spiegelwerk.Addin.SpiegelwerkAddin" ?>
+  <?define AsmName = "Spiegelwerk, Version=!(bind.FileVersion.SpiegelwerkDll), Culture=neutral, PublicKeyToken=null" ?>
+
+  <Package Name="Spiegelwerk"
+           Manufacturer="VanillaIce1983"
+           Version="!(bind.FileVersion.SpiegelwerkDll)"
+           UpgradeCode="FCC65754-E34A-4C7D-93EB-8AE281077AFA"
+           Language="1031"
+           Codepage="1252"
+           Scope="perMachine">
+
+    <SummaryInformation Description="Spiegelwerk – SOLIDWORKS-Add-In zum unabhängigen Spiegeln" />
+
+    <!-- afterInstallInitialize: a failed upgrade rolls back the removal of the old version.
+         AllowSameVersionUpgrades: two builds with the same version are one product. -->
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Eine neuere Version von Spiegelwerk ist bereits installiert." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <PropertyRef Id="WIX_IS_NETFRAMEWORK_48_OR_LATER_INSTALLED" />
+    <Launch Condition="Installed OR WIX_IS_NETFRAMEWORK_48_OR_LATER_INSTALLED"
+            Message="Spiegelwerk benötigt .NET Framework 4.8." />
+
+    <!-- Installed SOLIDWORKS versions: SldWorks.Application.NN with NN = year − 1992 (2019 = 27).
+         Desktop and 3DEXPERIENCE register these alike. Only for the closing message – nothing
+         in the package depends on SOLIDWORKS, so it also installs before SOLIDWORKS. -->
+    <Property Id="SW27"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.27\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW28"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.28\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW29"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.29\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW30"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.30\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW31"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.31\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW32"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.32\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW33"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.33\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW34"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.34\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW35"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.35\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW36"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.36\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW37"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.37\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW38"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.38\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW39"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.39\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="SW40"><RegistrySearch Root="HKLM" Key="SOFTWARE\Classes\SldWorks.Application.40\CLSID" Type="raw" Bitness="always64" /></Property>
+    <!-- The exe in its usual places: 3DEXPERIENCE under Dassault Systemes\SOLIDWORKS 3DEXPERIENCE[ R20xxx]\SOLIDWORKS,
+         desktop under SOLIDWORKS Corp\SOLIDWORKS. -->
+    <Property Id="SW3DXEXE">
+      <DirectorySearch Id="DassaultRoot" Path="[ProgramFiles64Folder]Dassault Systemes" Depth="2">
+        <FileSearch Name="sldworks.exe" />
+      </DirectorySearch>
+    </Property>
+    <Property Id="SWDESKTOPEXE">
+      <DirectorySearch Id="SolidWorksCorpRoot" Path="[ProgramFiles64Folder]SOLIDWORKS Corp" Depth="1">
+        <FileSearch Name="sldworks.exe" />
+      </DirectorySearch>
+    </Property>
+
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT"
+              Value="Spiegelwerk ist für alle SOLIDWORKS-Installationen dieses Rechners eingetragen (Desktop und 3DEXPERIENCE). SOLIDWORKS neu starten; das Add-In steht unter Extras › Zusatzanwendungen." />
+    <SetProperty Id="WIXUI_EXITDIALOGOPTIONALTEXT" After="AppSearch" Sequence="ui"
+                 Condition="NOT (SW27 OR SW28 OR SW29 OR SW30 OR SW31 OR SW32 OR SW33 OR SW34 OR SW35 OR SW36 OR SW37 OR SW38 OR SW39 OR SW40 OR SW3DXEXE OR SWDESKTOPEXE)"
+                 Value="Kein SOLIDWORKS ab 2019 gefunden. Spiegelwerk ist trotzdem installiert und erscheint, sobald SOLIDWORKS (Desktop oder 3DEXPERIENCE) installiert ist." />
+
+    <!-- Apps list: no "Change" (nothing to choose), "Repair" restores the registry, e.g. after a
+         3DEXPERIENCE clean reinstall that deleted HKLM\SOFTWARE\SolidWorks. -->
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Spiegelwerk" />
+    </StandardDirectory>
+
+    <Feature Id="Main">
+      <ComponentGroupRef Id="AddinFiles" />
+      <ComponentRef Id="AddinStartupUser" />
+    </Feature>
+
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="Lizenz.rtf" />
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="AddinFiles" Directory="INSTALLFOLDER">
+      <Component>
+        <File Source="Spiegelwerk.Core.dll" />
+      </Component>
+
+      <Component>
+        <File Id="SpiegelwerkDll" Source="Spiegelwerk.dll" KeyPath="yes" />
+
+        <!-- A registration left by scripts\install.cmd (RegAsm) or an old version: clean before writing,
+             and the whole tree on uninstall, version subkeys included. -->
+        <RemoveRegistryKey Id="ClsidClean" Action="removeOnInstall" Root="HKCR" Key="CLSID\$(Clsid)" />
+        <RemoveRegistryKey Id="ClsidRemove" Action="removeOnUninstall" Root="HKCR" Key="CLSID\$(Clsid)" />
+
+        <!-- What RegAsm /codebase writes for a .NET class: mscoree as server, the class and assembly
+             under InprocServer32 and once more under the assembly version. -->
+        <Class Id="$(Clsid)" Context="InprocServer32" Description="$(ClassName)" ThreadingModel="both"
+               ForeignServer="mscoree.dll" Advertise="no">
+          <ProgId Id="Spiegelwerk.Addin" Description="$(ClassName)" />
+        </Class>
+        <RegistryKey Root="HKCR" Key="CLSID\$(Clsid)\InprocServer32">
+          <RegistryValue Name="Class" Value="$(ClassName)" Type="string" />
+          <RegistryValue Name="Assembly" Value="$(AsmName)" Type="string" />
+          <RegistryValue Name="RuntimeVersion" Value="v4.0.30319" Type="string" />
+          <RegistryValue Name="CodeBase" Value="file:///[#SpiegelwerkDll]" Type="string" />
+        </RegistryKey>
+        <RegistryKey Root="HKCR" Key="CLSID\$(Clsid)\InprocServer32\!(bind.FileVersion.SpiegelwerkDll)">
+          <RegistryValue Name="Class" Value="$(ClassName)" Type="string" />
+          <RegistryValue Name="Assembly" Value="$(AsmName)" Type="string" />
+          <RegistryValue Name="RuntimeVersion" Value="v4.0.30319" Type="string" />
+          <RegistryValue Name="CodeBase" Value="file:///[#SpiegelwerkDll]" Type="string" />
+        </RegistryKey>
+        <RegistryKey Root="HKCR" Key="CLSID\$(Clsid)\Implemented Categories\{62C8FE65-4EBB-45e7-B440-6E39B2CDBF29}"
+                     ForceCreateOnInstall="yes" ForceDeleteOnUninstall="yes" />
+
+        <!-- The add-in list of SOLIDWORKS (desktop and 3DEXPERIENCE): 1 = load at start-up. -->
+        <RegistryKey Root="HKLM" Key="SOFTWARE\SolidWorks\Addins\$(Clsid)">
+          <RegistryValue Value="1" Type="integer" />
+          <RegistryValue Name="Title" Value="Spiegelwerk" Type="string" />
+          <RegistryValue Name="Description" Value="Spiegelt Features als eigenständige, unabhängige Features (ohne Spiegel-Feature)." Type="string" />
+        </RegistryKey>
+      </Component>
+    </ComponentGroup>
+
+    <!-- "Start Up" ticked for the installing user. Per-user data in a component of its own
+         (ICE57); other users load it through the HKLM value. -->
+    <Component Id="AddinStartupUser" Directory="INSTALLFOLDER">
+      <RegistryValue Root="HKCU" Key="Software\SolidWorks\AddInsStartup\$(Clsid)" Value="1" Type="integer" KeyPath="yes" />
+    </Component>
+  </Fragment>
+
+</Wix>

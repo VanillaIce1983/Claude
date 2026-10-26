@@ -1,0 +1,20 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <!-- Spiegelwerk as a per-machine x64 MSI for SOLIDWORKS desktop and 3DEXPERIENCE SOLIDWORKS
+       (both read the same add-in keys). WiX 5 is MS-RL; from version 6 on the WiX binaries
+       come under a maintenance-fee EULA. WiX builds MSIs on Windows only, so this project is
+       not part of Spiegelwerk.sln (the core tests run on Linux). -->
+  <PropertyGroup>
+    <OutputName>Spiegelwerk-$(Version)-x64</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <Cultures>de-DE</Cultures>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Netfx.wixext" Version="5.0.2" />
+    <!-- Builds the add-in first; its output folder becomes a bind path for Package.wxs. -->
+    <ProjectReference Include="..\src\Spiegelwerk\Spiegelwerk.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,12 @@
+<Project>
+
+  <!-- One version for the add-in, the core library and the installer: the MSI takes its
+       ProductVersion from the file version of Spiegelwerk.dll. MSI ignores the fourth field,
+       so every release raises major, minor or patch. -->
+  <PropertyGroup>
+    <Version>0.11.0</Version>
+    <Company>VanillaIce1983</Company>
+    <Copyright>Copyright © 2026 VanillaIce1983. Alle Rechte vorbehalten.</Copyright>
+  </PropertyGroup>
+
+</Project>

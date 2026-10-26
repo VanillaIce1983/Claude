@@ -1,12 +1,18 @@
-# Spiegelwerk (SOLIDWORKS-Add-In): Tests der Spiegelmathematik und Skizzen-Umrechnung, dazu die
-# Übersetzungsprüfung des Add-Ins gegen die SOLIDWORKS-API 2019 (älteste unterstützte Stufe) und 2024.
-# Die Interop-Assemblys kommen dafür aus den öffentlichen NuGet-Paketen und werden nicht ausgeliefert;
-# zur Laufzeit verwendet das Add-In die Assemblys der installierten SOLIDWORKS-Version.
+# Spiegelwerk (SOLIDWORKS-Add-In): Tests der Spiegelmathematik und Skizzen-Umrechnung (Linux; unter Windows
+# zusätzlich unter .NET Framework 4.8, auf dem die Core-Bibliothek in SOLIDWORKS läuft), die Übersetzungsprüfung
+# des Add-Ins gegen die SOLIDWORKS-API 2019 (älteste unterstützte Stufe) und 2024 und der Installer: ein MSI für
+# SOLIDWORKS Desktop und 3DEXPERIENCE SOLIDWORKS, das im Lauf installiert, ohne SOLIDWORKS als COM-Objekt erzeugt
+# und wieder deinstalliert wird. Die Interop-Typen sind in Spiegelwerk.dll eingebettet; die Interop-Assemblys
+# kommen nur zum Übersetzen aus den öffentlichen NuGet-Paketen und werden nicht ausgeliefert.
+# Tags spiegelwerk-v* (passend zur Version in spiegelwerk/Directory.Build.props) werden als GitHub-Release
+# veröffentlicht. Ohne eigenen Tag: manuell starten mit „Als Release veröffentlichen“; dann legt der Lauf
+# Tag und Release spiegelwerk-v<Version> an.
 name: spiegelwerk
 
 on:
   push:
     branches: ['**']
+    tags: ['spiegelwerk-v*']
     paths:
       - 'spiegelwerk/**'
       - '.github/workflows/spiegelwerk.yml'
@@ -15,6 +21,11 @@ on:
       - 'spiegelwerk/**'
       - '.github/workflows/spiegelwerk.yml'
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Als Release veröffentlichen (Tag spiegelwerk-v<Version aus Directory.Build.props>)'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,9 +48,15 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
       - name: Tests (Spiegelung, Skizzen, Ebenen, Baugruppen-Platzierung, Zuordnung)
-        run: dotnet test tests/Spiegelwerk.Core.Tests/Spiegelwerk.Core.Tests.csproj -c Release
+        run: dotnet test tests/Spiegelwerk.Core.Tests/Spiegelwerk.Core.Tests.csproj -c Release --logger trx --results-directory TestResults
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: spiegelwerk-testergebnisse
+          path: spiegelwerk/TestResults/*.trx
+          if-no-files-found: ignore
 
   addin:
     name: Add-In gegen SOLIDWORKS-API ${{ matrix.label }}
@@ -57,6 +74,121 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
       - name: Übersetzen (Warnungen gelten als Fehler)
         run: dotnet build src/Spiegelwerk/Spiegelwerk.csproj -c Release -p:SwInteropFromNuGet=true -p:SwInteropVersion=${{ matrix.interop }}
+      - name: Core-Tests unter .NET Framework 4.8
+        if: matrix.label == '2019'
+        run: dotnet test tests/Spiegelwerk.Core.Tests/Spiegelwerk.Core.Tests.csproj -c Release -f net48
+
+  installer:
+    name: Installer (MSI)
+    needs: [core, addin]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Beschreibung wie im Add-In
+        run: |
+          desc=$(sed -n 's/.*const string Description = "\(.*\)";.*/\1/p' src/Spiegelwerk/Addin/SpiegelwerkAddin.cs)
+          test -n "$desc"
+          grep -qF "Value=\"$desc\"" installer/Package.wxs || { echo "::error::Beschreibung in installer/Package.wxs weicht von SpiegelwerkAddin.cs ab: $desc"; exit 1; }
+
+      - name: MSI bauen (API 2019, Interop-Typen eingebettet)
+        run: dotnet build installer/Spiegelwerk.Installer.wixproj -c Release -p:SwInteropFromNuGet=true -p:SwInteropVersion=27.3.0
+
+      - name: Installieren, ohne SOLIDWORKS erzeugen, deinstallieren
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = (Get-ChildItem installer\bin -Recurse -Filter *.msi | Select-Object -First 1).FullName
+          $clsid = '{8A3C6F2E-5B1D-4E7A-9C3F-6D2E1B0A4F57}'
+          $classes = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes"
+          $addins = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\SolidWorks\Addins\$clsid"
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 80; throw "Installation: Exit-Code $($p.ExitCode)" }
+
+          $dir = Join-Path $env:ProgramFiles 'Spiegelwerk'
+          foreach ($f in 'Spiegelwerk.dll', 'Spiegelwerk.Core.dll') { if (-not (Test-Path (Join-Path $dir $f))) { throw "$f fehlt in $dir" } }
+          $ips = Get-ItemProperty "$classes\CLSID\$clsid\InprocServer32"
+          if ($ips.'(default)' -ne 'mscoree.dll') { throw "InprocServer32: $($ips.'(default)')" }
+          if ($ips.CodeBase -notlike '*\Spiegelwerk\Spiegelwerk.dll') { throw "CodeBase: $($ips.CodeBase)" }
+          if ((Get-ItemProperty "$classes\Spiegelwerk.Addin\CLSID").'(default)' -ne $clsid) { throw 'ProgId fehlt' }
+          $a = Get-ItemProperty $addins
+          if ($a.'(default)' -ne 1 -or $a.Title -ne 'Spiegelwerk') { throw 'SolidWorks\Addins-Schlüssel fehlt oder ist falsch' }
+          if ((Get-ItemProperty "Registry::HKEY_CURRENT_USER\Software\SolidWorks\AddInsStartup\$clsid").'(default)' -ne 1) { throw 'AddInsStartup fehlt' }
+
+          # Wie SOLIDWORKS: das Add-In über COM erzeugen. Windows PowerShell (.NET Framework) in einem eigenen
+          # Prozess, damit die geladene DLL die Deinstallation nicht blockiert. Gelingt nur, wenn
+          # Spiegelwerk.dll keine Interop-Assembly braucht (eingebettete Typen).
+          powershell -NoProfile -Command "`$o = New-Object -ComObject Spiegelwerk.Addin; if (-not `$o) { exit 1 }"
+          if ($LASTEXITCODE -ne 0) { throw 'COM-Erzeugung fehlgeschlagen' }
+
+          $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /l*v uninstall.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content uninstall.log -Tail 80; throw "Deinstallation: Exit-Code $($p.ExitCode)" }
+          if (Test-Path "$classes\CLSID\$clsid") { throw 'CLSID nicht entfernt' }
+          if (Test-Path "$classes\Spiegelwerk.Addin") { throw 'ProgId nicht entfernt' }
+          if (Test-Path $addins) { throw 'SolidWorks\Addins-Schlüssel nicht entfernt' }
+          if (Test-Path (Join-Path $dir 'Spiegelwerk.dll')) { throw 'Dateien nicht entfernt' }
+
+      - name: Paket und Prüfsumme
+        run: |
+          mkdir -p paket
+          cp "$(find installer/bin -name '*.msi' | head -1)" paket/
+          cd paket && sha256sum *.msi > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: spiegelwerk-installer
+          path: |
+            spiegelwerk/paket/*
+            spiegelwerk/install.log
+            spiegelwerk/uninstall.log
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: installer
+    if: ${{ !cancelled() && needs.installer.result == 'success' && (startsWith(github.ref, 'refs/tags/spiegelwerk-v') || (github.event_name == 'workflow_dispatch' && inputs.release)) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: spiegelwerk-installer
+          path: download
+
+      - uses: actions/checkout@v7
+        with:
+          path: quelle
+          sparse-checkout: spiegelwerk/Directory.Build.props
+          sparse-checkout-cone-mode: false
+
+      - name: Version bestimmen
+        id: version
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' quelle/spiegelwerk/Directory.Build.props)
+          test -n "$version"
+          if [[ "$GITHUB_REF" == refs/tags/spiegelwerk-v* && "${GITHUB_REF_NAME#spiegelwerk-v}" != "$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME passt nicht zur Version $version in Directory.Build.props"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          mkdir pakete && cp download/paket/* pakete/ && ls -la pakete
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: spiegelwerk-v${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Spiegelwerk ${{ steps.version.outputs.version }}
+          files: pakete/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
