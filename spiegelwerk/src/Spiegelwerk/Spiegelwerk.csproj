@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- SOLIDWORKS add-ins run in-process in SLDWORKS.exe and therefore need .NET Framework
-       and x64. Registration: scripts\install.cmd (RegAsm /codebase). -->
+       and x64. Users install the MSI (installer/); developers register the build output with
+       scripts\install.cmd (RegAsm /codebase). -->
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <LangVersion>9.0</LangVersion>
@@ -15,9 +16,17 @@
     <Product>Spiegelwerk</Product>
     <Description>Unabhängiges Spiegeln von Bauteilen für SOLIDWORKS</Description>
 
-    <!-- Interop assemblies from the local SOLIDWORKS installation. Override with
-         -p:SolidWorksApiDir=... or use the public NuGet packages with -p:SwInteropFromNuGet=true
-         (that is what CI does to check that the code compiles against API 2019 and 2024). -->
+    <!-- Interop types are embedded (No-PIA): Spiegelwerk.dll references no SolidWorks.Interop
+         assembly, so one build loads in SOLIDWORKS 2019+ desktop and 3DEXPERIENCE SOLIDWORKS,
+         whether or not the interop assemblies are in the global assembly cache. Compiled against
+         API 2019 (27.3.0, the public NuGet packages) by default, so no newer member slips in
+         unnoticed; newer members only late-bound (SwLate). CI also compiles against 2024
+         (-p:SwInteropVersion=32.1.0). A local SOLIDWORKS API folder instead:
+         -p:SwInteropFromNuGet=false -p:SolidWorksApiDir=...
+         Deliberately no Microsoft.CSharp reference: with embedded types COM 'object' results
+         would turn into 'dynamic'; without it every such call site is a compile error
+         (CS0656) and gets an explicit (object) cast, so the code stays statically bound. -->
+    <SwInteropFromNuGet Condition="'$(SwInteropFromNuGet)' == ''">true</SwInteropFromNuGet>
     <SwInteropVersion Condition="'$(SwInteropVersion)' == ''">27.3.0</SwInteropVersion>
     <SolidWorksApiDir Condition="'$(SolidWorksApiDir)' == ''">C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiDir>
   </PropertyGroup>
@@ -29,31 +38,40 @@
     <Reference Include="System.Drawing" />
   </ItemGroup>
 
-  <!-- Not copied to the output: at run time the interop assemblies of the installed
-       SOLIDWORKS version are used (global assembly cache), like every other add-in does. -->
-  <ItemGroup Condition="'$(SwInteropFromNuGet)' != 'true'">
-    <Reference Include="SolidWorks.Interop.sldworks">
-      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.sldworks.dll</HintPath>
-      <EmbedInteropTypes>false</EmbedInteropTypes>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="SolidWorks.Interop.swconst">
-      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.swconst.dll</HintPath>
-      <EmbedInteropTypes>false</EmbedInteropTypes>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="SolidWorks.Interop.swpublished">
-      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.swpublished.dll</HintPath>
-      <EmbedInteropTypes>false</EmbedInteropTypes>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
-
-  <!-- Compile check only (CI): 27.3.0 = SOLIDWORKS 2019, the oldest API level the code uses. -->
   <ItemGroup Condition="'$(SwInteropFromNuGet)' == 'true'">
     <PackageReference Include="SolidWorks.Interop.sldworks" Version="$(SwInteropVersion)" ExcludeAssets="runtime" />
     <PackageReference Include="SolidWorks.Interop.swconst" Version="$(SwInteropVersion)" ExcludeAssets="runtime" />
     <PackageReference Include="SolidWorks.Interop.swpublished" Version="$(SwInteropVersion)" ExcludeAssets="runtime" />
   </ItemGroup>
+
+  <ItemGroup Condition="'$(SwInteropFromNuGet)' != 'true'">
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.swconst.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swpublished">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.swpublished.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- PackageReference has no EmbedInteropTypes metadata: set it on the resolved references,
+       for both ways of referencing. -->
+  <Target Name="EmbedSolidWorksInterop" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <ReferencePath Condition="$([System.String]::Copy('%(Filename)').StartsWith('SolidWorks.Interop.'))">
+        <EmbedInteropTypes>true</EmbedInteropTypes>
+      </ReferencePath>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CheckSolidWorksApiDir" BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(SwInteropFromNuGet)' != 'true' and !Exists('$(SolidWorksApiDir)\SolidWorks.Interop.sldworks.dll')">
+    <Error Text="SOLIDWORKS-API nicht gefunden in '$(SolidWorksApiDir)'. -p:SolidWorksApiDir=... angeben oder ohne -p:SwInteropFromNuGet=false bauen (NuGet-Pakete der API 2019)." />
+  </Target>
 
 </Project>
