@@ -36,7 +36,8 @@ namespace Spiegelwerk.Build
             Outcome best = Measure(ctx, expected, before, feature, samples);
             if (best.Passes) return best.ToString();
 
-            // Every alternative kept stays applied; the report names them all.
+            // Every alternative kept stays applied. The toggles are self-inverse and commute, so
+            // what is changed in the end is each single change kept an odd number of times.
             var chosen = new List<string>();
             foreach (Alternative alt in result.Alternatives)
             {
@@ -47,7 +48,8 @@ namespace Spiegelwerk.Build
                 if (o.IsBetterThan(best))
                 {
                     best = o;
-                    chosen.Add(alt.Description);
+                    foreach (string part in alt.Parts)
+                        if (!chosen.Remove(part)) chosen.Add(part);
                     if (o.Passes) break;
                 }
                 else

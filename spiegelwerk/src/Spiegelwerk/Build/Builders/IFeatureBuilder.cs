@@ -20,14 +20,21 @@ namespace Spiegelwerk.Build.Builders
     /// </summary>
     internal sealed class Alternative
     {
-        public Alternative(string description, Func<bool> toggle)
+        /// <param name="parts">
+        /// The single changes this toggle makes, if it makes several that other alternatives
+        /// also make on their own: the report names the changes left in the end, and two kept
+        /// toggles of the same change cancel out. Default: the description.
+        /// </param>
+        public Alternative(string description, Func<bool> toggle, IReadOnlyList<string>? parts = null)
         {
             Description = description;
             Toggle = toggle;
+            Parts = parts ?? new[] { description };
         }
 
         public string Description { get; }
         public Func<bool> Toggle { get; }
+        public IReadOnlyList<string> Parts { get; }
     }
 
     internal sealed class BuildResult

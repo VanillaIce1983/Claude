@@ -89,6 +89,7 @@ namespace Spiegelwerk.Build.Builders
             // ---- exact values, skipped instances, feature scope
             List<string> differing = Read(ctx.Doc, f, d => Differences(d, r, stagger, rotation)) ?? new List<string>();
             bool scopeNeeded = scope && !(Read(ctx.Doc, f, d => (object)(d.FeatureScope && !d.AutoSelect)) is bool set && set);
+            bool skippedSet = false;
             if (differing.Count > 0 || r.SkippedItems.Count > 0 || scopeNeeded)
             {
                 bool ok = FeatureEdit.FillPattern(ctx.Doc, f, d =>
@@ -108,11 +109,12 @@ namespace Spiegelwerk.Build.Builders
                     return Fail("Der Feature-Bereich des Füllmusters ließ sich nicht auf den gespiegelten Körper beschränken; das Muster wurde wieder entfernt.", notes);
                 }
                 if (!ok && r.SkippedItems.Count > 0) notes.Add($"Die {r.SkippedItems.Count} übersprungenen Instanzen ließen sich nicht übernehmen.");
+                skippedSet = ok && r.SkippedItems.Count > 0;
                 differing = Read(ctx.Doc, f, d => Differences(d, r, stagger, rotation)) ?? differing;
             }
             if (differing.Count > 0) notes.Add($"Nicht übernommen: {string.Join(", ", differing)}.");
             // The numbering follows the in-plane frame, which the mirror turns the other way round.
-            if (r.SkippedItems.Count > 0)
+            if (skippedSet)
                 notes.Add($"{r.SkippedItems.Count} übersprungene Instanzen nach Nummer übernommen; die Spiegelung kehrt die Reihenfolge in der Ebene um – bitte prüfen, ob die richtigen fehlen.");
 
             ctx.Register(r.Name, f);
@@ -291,17 +293,21 @@ namespace Spiegelwerk.Build.Builders
             void ToggleRotation(FillPatternFeatureData d) => d.Rotation = Same(d.Rotation, rotation) ? otherRotation : rotation;
             void ToggleFlip(FillPatternFeatureData d) => d.SeedCutFlipShapeDirection = !d.SeedCutFlipShapeDirection;
 
-            int parts = (staggerChoice ? 1 : 0) + (rotationChoice ? 1 : 0) + (r.IsSeedCut ? 1 : 0);
-            if (parts >= 2)
-                result.Alternatives.Add(new Alternative("Ebene der Kopie andersherum (Versatz, Drehung, Schnittrichtung)", () => FeatureEdit.FillPattern(doc, f, d =>
+            const string Flip = "Schnittrichtung umgekehrt", Stagger = "Versatzwinkel nicht gespiegelt", Rotation = "Drehung des Saat-Schnitts nicht gespiegelt";
+            var parts = new List<string>();
+            if (r.IsSeedCut) parts.Add(Flip);
+            if (staggerChoice) parts.Add(Stagger);
+            if (rotationChoice) parts.Add(Rotation);
+            if (parts.Count >= 2)
+                result.Alternatives.Add(new Alternative($"Ebene der Kopie andersherum ({string.Join(", ", parts)})", () => FeatureEdit.FillPattern(doc, f, d =>
                 {
                     if (staggerChoice) ToggleStagger(d);
                     if (rotationChoice) ToggleRotation(d);
                     if (r.IsSeedCut) ToggleFlip(d);
-                })));
-            if (r.IsSeedCut) result.Alternatives.Add(new Alternative("Schnittrichtung umgekehrt", () => FeatureEdit.FillPattern(doc, f, ToggleFlip)));
-            if (staggerChoice) result.Alternatives.Add(new Alternative("Versatzwinkel nicht gespiegelt", () => FeatureEdit.FillPattern(doc, f, ToggleStagger)));
-            if (rotationChoice) result.Alternatives.Add(new Alternative("Drehung des Saat-Schnitts nicht gespiegelt", () => FeatureEdit.FillPattern(doc, f, ToggleRotation)));
+                }), parts));
+            if (r.IsSeedCut) result.Alternatives.Add(new Alternative(Flip, () => FeatureEdit.FillPattern(doc, f, ToggleFlip)));
+            if (staggerChoice) result.Alternatives.Add(new Alternative(Stagger, () => FeatureEdit.FillPattern(doc, f, ToggleStagger)));
+            if (rotationChoice) result.Alternatives.Add(new Alternative(Rotation, () => FeatureEdit.FillPattern(doc, f, ToggleRotation)));
         }
 
         private static string Describe(FillPatternRecord r)

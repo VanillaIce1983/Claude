@@ -91,7 +91,7 @@ namespace Spiegelwerk.Build.Builders
                 {
                     d.set_ReverseFaceNormal(Set1, !d.get_ReverseFaceNormal(Set1));
                     d.set_ReverseFaceNormal(Set2, !d.get_ReverseFaceNormal(Set2));
-                })));
+                }), new[] { "Normale der Flächengruppe 1 umgekehrt", "Normale der Flächengruppe 2 umgekehrt" }));
                 result.Alternatives.Add(new Alternative("Normale der Flächengruppe 1 umgekehrt",
                     () => FeatureEdit.SimpleFillet(doc, f, d => d.set_ReverseFaceNormal(Set1, !d.get_ReverseFaceNormal(Set1)))));
                 result.Alternatives.Add(new Alternative("Normale der Flächengruppe 2 umgekehrt",
