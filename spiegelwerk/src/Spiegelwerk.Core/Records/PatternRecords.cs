@@ -241,8 +241,11 @@ namespace Spiegelwerk.Core.Records
         public double SeedCutInnerRadius { get; set; }
         public bool SeedCutFlip { get; set; }
 
-        /// <summary>Vertex or sketch point where the seed sits; null: the boundary's centre.</summary>
+        /// <summary>Vertex or sketch point where the seed sits; null: the boundary's centre (or <see cref="SeedCenterIsOrigin"/>).</summary>
         public GeometryRef? SeedCenter { get; set; }
+
+        /// <summary>The seed sits at the origin (see <see cref="SketchPatternRecord.ReferenceIsOrigin"/>).</summary>
+        public bool SeedCenterIsOrigin { get; set; }
 
         public bool PropagateVisualProperty { get; set; }
 

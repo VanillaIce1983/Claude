@@ -95,6 +95,12 @@ namespace Spiegelwerk.Build.Builders
             return byValue.Count == 1 ? byValue[0] : null;
         }
 
+        /// <summary>Same column, whether or not one of the names carries "@Document" after it.</summary>
+        private static bool SameColumn(string a, string b) =>
+            Capture.FeatureCapture.SplitColumn(a) is (string, string) x && Capture.FeatureCapture.SplitColumn(b) is (string, string) y
+                ? x.name == y.name && x.owner == y.owner
+                : a == b;
+
         /// <summary>"Name@Owner" as the table names its columns.</summary>
         private static string ColumnName(DisplayDimension dd, Feature owner) => $"{dd.GetDimension2(0).Name}@{owner.Name}";
 
@@ -144,13 +150,13 @@ namespace Spiegelwerk.Build.Builders
             List<string> present = ColumnNames(d);
             foreach (var (dimension, name) in columns)
             {
-                if (present.Contains(name)) continue;
+                if (present.Any(p => SameColumn(p, name))) continue;
                 SwSelect.Clear(doc);
                 bool added = ((Annotation)dimension.GetAnnotation()).Select3(false, null) && d.AddDimension();
                 SwSelect.Clear(doc);
                 if (!added) notes.Add($"Spalte „{name}“ ließ sich nicht anlegen.");
             }
-            foreach (string extra in ColumnNames(d).Where(n => !columns.Any(c => c.name == n)).ToList())
+            foreach (string extra in ColumnNames(d).Where(n => !columns.Any(c => SameColumn(c.name, n))).ToList())
                 if (!d.DeleteDimension(extra)) notes.Add($"Überzählige Spalte „{extra}“ ließ sich nicht entfernen.");
 
             int first = FirstRow(d);
@@ -162,12 +168,15 @@ namespace Spiegelwerk.Build.Builders
                 notes.Add($"Die Kopie hat {d.GetInstanceCount()} statt {r.Rows.Count} Instanzen.");
             first = FirstRow(d);
 
+            // The names as the table reports them (with or without "@Document").
+            List<string> actual = ColumnNames(d);
+            List<string> names = columns.Select(c => actual.FirstOrDefault(n => SameColumn(n, c.name)) ?? c.name).ToList();
             int rows = Math.Min(d.GetInstanceCount(), r.Rows.Count);
             for (int i = 0; i < rows; i++)
             {
                 VariableInstance row = r.Rows[i];
                 for (int j = 0; j < columns.Count; j++)
-                    if (row.Values[j] is double value) d.SetInstanceDimensionValue(i + first, columns[j].name, value);
+                    if (row.Values[j] is double value) d.SetInstanceDimensionValue(i + first, names[j], value);
                 d.SetInstanceSuppressStateByIndex(i + first, row.Suppressed);
             }
             if (d.PropagateVisualProperties != r.PropagateVisualProperties) d.PropagateVisualProperties = r.PropagateVisualProperties;
@@ -218,7 +227,7 @@ namespace Spiegelwerk.Build.Builders
                 try
                 {
                     List<string> present = ColumnNames(d);
-                    foreach (var (_, name) in columns.Where(c => !present.Contains(c.name))) result.Add($"Spalte „{name}“ fehlt");
+                    foreach (var (_, name) in columns.Where(c => !present.Any(p => SameColumn(p, c.name)))) result.Add($"Spalte „{name}“ fehlt");
                     int count = d.GetInstanceCount();
                     if (count != r.Rows.Count) result.Add($"{count} statt {r.Rows.Count} Instanzen");
                     int first = FirstRow(d);
@@ -228,8 +237,9 @@ namespace Spiegelwerk.Build.Builders
                         if (d.GetInstanceSuppressStateByIndex(i + first) != r.Rows[i].Suppressed) result.Add($"Instanz {i + 1}: Unterdrückung");
                         for (int j = 0; j < columns.Count; j++)
                         {
-                            if (!present.Contains(columns[j].name) || !(r.Rows[i].Values[j] is double wanted)) continue;
-                            double? now = doc.Parameter(d.GetInstanceDimensionName(instance, columns[j].name)) is Dimension dim ? dim.SystemValue : (double?)null;
+                            string? column = present.FirstOrDefault(p => SameColumn(p, columns[j].name));
+                            if (column == null || !(r.Rows[i].Values[j] is double wanted)) continue;
+                            double? now = doc.Parameter(d.GetInstanceDimensionName(instance, column)) is Dimension dim ? dim.SystemValue : (double?)null;
                             if (now == null || Math.Abs(now.Value - wanted) > Math.Max(1e-9, Math.Abs(wanted) * 1e-7))
                                 result.Add($"Instanz {i + 1}, {columns[j].name}");
                         }

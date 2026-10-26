@@ -165,16 +165,25 @@ namespace Spiegelwerk.Capture
                 case FillPatternFeatureData fp when fp.AccessSelections(doc, null):
                     try
                     {
-                        seedBodies |= AddSeeds(result, fp.PatternBodyArray is object[] bodies && bodies.Length > 0,
-                            fp.PatternFeatureArray, fp.PatternFaceArray, fp.PatternBodyArray);
+                        seedBodies |= AddSeeds(result, FeatureCapture.IsBodyFillPattern(fp), fp.PatternFeatureArray, fp.PatternFaceArray, fp.PatternBodyArray);
                     }
                     finally
                     {
                         fp.ReleaseSelectionAccess();
                     }
                     break;
-                case DimPatternFeatureData _:
+                case DimPatternFeatureData vp:
+                    // As in capture: the parents that are not sketches, and the owners of feature dimensions.
                     result.AddRange(FeatureCapture.VariablePatternSeeds(f));
+                    if (vp.AccessSelections(doc, null))
+                        try
+                        {
+                            result.AddRange(FeatureCapture.VariablePatternDimensionOwners(doc, vp).ToList());
+                        }
+                        finally
+                        {
+                            vp.ReleaseSelectionAccess();
+                        }
                     break;
                 case SketchPatternFeatureData sp when sp.AccessSelections(doc, null):
                     try

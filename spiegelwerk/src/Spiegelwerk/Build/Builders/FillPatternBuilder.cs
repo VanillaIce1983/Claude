@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
+using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
@@ -55,19 +56,21 @@ namespace Spiegelwerk.Build.Builders
                 if (target == null) return Fail($"Begrenzung des Füllmusters ({g}) im Ziel nicht gefunden.", notes);
                 boundary.Add(target);
             }
+            // The seed position before the direction: a direction may add a helper axis, and a
+            // pattern refused afterwards would leave it behind.
+            if (r.SeedCenterIsOrigin && !ctx.Mirror.Apply(Vec3.Zero).AlmostEquals(Vec3.Zero))
+                return Fail("Die Saat sitzt im Ursprung; die Spiegelebene geht nicht durch ihn, gespiegelt liegt er nicht im Ursprung des Ziels.", notes);
+            if (r.SeedCenter != null && Find(ctx, r.SeedCenter, new List<string>()) == null)
+                return Fail("Lage der Saat des Füllmusters im Ziel nicht gefunden.", notes);
             object? direction = null;
             if (r.Direction != null)
             {
                 direction = Find(ctx, r.Direction, notes);
                 if (direction == null) return Fail("Musterrichtung des Füllmusters im Ziel nicht gefunden.", notes);
             }
-            object? center = null;
-            if (r.SeedCenter != null)
-            {
-                center = Find(ctx, r.SeedCenter, notes);
-                if (center == null) return Fail("Lage der Saat des Füllmusters im Ziel nicht gefunden.", notes);
-            }
-            // A helper axis may have been added: look the seeds up again.
+            // A helper axis may have been added: look the seed position and the seeds up again.
+            object? center = r.SeedCenterIsOrigin ? SwDoc.OriginPoint(ctx.Doc) : r.SeedCenter != null ? Find(ctx, r.SeedCenter, notes) : null;
+            if (r.SeedCenter != null && center == null) return Fail("Lage der Saat des Füllmusters im Ziel nicht gefunden.", notes);
             Seeds? seeds = null;
             if (!r.IsSeedCut)
             {
@@ -75,7 +78,8 @@ namespace Spiegelwerk.Build.Builders
                 if (seeds == null) return Fail(NoSeeds(r), notes);
             }
 
-            double stagger = r.LayoutType == Perforation ? FillPatternRules.MirrorStagger(r.StaggerAngle) : r.StaggerAngle;
+            // A symmetric lattice (60°, 90°, 120°) is its own mirror image: it keeps its angle.
+            double stagger = MirroredStagger(r);
             double rotation = FillPatternRules.MirrorRotation(r.SeedCutRotation);
             var refs = new References(boundary, direction, center, seeds);
 
@@ -107,6 +111,9 @@ namespace Spiegelwerk.Build.Builders
                 differing = Read(ctx.Doc, f, d => Differences(d, r, stagger, rotation)) ?? differing;
             }
             if (differing.Count > 0) notes.Add($"Nicht übernommen: {string.Join(", ", differing)}.");
+            // The numbering follows the in-plane frame, which the mirror turns the other way round.
+            if (r.SkippedItems.Count > 0)
+                notes.Add($"{r.SkippedItems.Count} übersprungene Instanzen nach Nummer übernommen; die Spiegelung kehrt die Reihenfolge in der Ebene um – bitte prüfen, ob die richtigen fehlen.");
 
             ctx.Register(r.Name, f);
             BuildResult result = Ok(f, Describe(r), notes);
@@ -159,11 +166,12 @@ namespace Spiegelwerk.Build.Builders
                 d.PatternFillBoundaryArray = refs.Boundary.ToArray();
                 if (refs.Direction != null) d.PatternDirection = refs.Direction;
                 if (refs.Center != null) d.SeedFeatureCenter = refs.Center;
+                // The element switch first: features/faces or bodies.
+                Try(() => d.PatternElement = (int)(r.BodyPattern ? swPatternElementSelection_e.swBodiesToPattern : swPatternElementSelection_e.swFeatureFaces));
                 if (refs.Seeds != null)
                     SetSeeds(refs.Seeds, r, v => d.PatternFeatureArray = v, v => d.PatternFaceArray = v, v => d.PatternBodyArray = v, _ => { });
                 d.FeaturesToPatternType = r.FeaturesToPattern;
                 Apply(d, r, stagger, rotation);
-                d.PropagateVisualProperty = r.PropagateVisualProperty;
                 if (scope)
                 {
                     // Nothing is rolled back here: the own bodies now are the bodies before the pattern.
@@ -224,6 +232,8 @@ namespace Spiegelwerk.Build.Builders
             Check("Polygonseiten", d.PatternLayoutPolygonSides == r.PolygonSides);
             Check("Saat-Art", d.FeaturesToPatternType == r.FeaturesToPattern);
             Check("Geometriemuster", d.GeometryPattern == r.GeometryPattern);
+            Check("Darstellung übernehmen", d.PropagateVisualProperty == r.PropagateVisualProperty);
+            if (!r.IsSeedCut && r.BodyPattern) Check("Saat-Art (Körper)", d.PatternElement == (int)swPatternElementSelection_e.swBodiesToPattern);
             if (!r.IsSeedCut) return result;
             Check("Saat-Schnitt", d.CreateSeedCutType == r.SeedCutType);
             Check("Durchmesser", Same(d.Diameter, r.SeedCutDiameter));
@@ -249,6 +259,7 @@ namespace Spiegelwerk.Build.Builders
             Try(() => d.NoOfInstances = r.InstanceCount);
             Try(() => d.PatternLayoutPolygonSides = r.PolygonSides);
             Try(() => d.GeometryPattern = r.GeometryPattern);
+            Try(() => d.PropagateVisualProperty = r.PropagateVisualProperty);
             if (!r.IsSeedCut) return;
             Try(() => d.CreateSeedCutType = r.SeedCutType);
             Try(() => d.Diameter = r.SeedCutDiameter);
@@ -261,27 +272,36 @@ namespace Spiegelwerk.Build.Builders
             Try(() => d.SeedCutFlipShapeDirection = r.SeedCutFlip);
         }
 
+        /// <summary>The stagger angle of the copy: the supplement, unless the lattice is symmetric anyway.</summary>
+        private static double MirroredStagger(FillPatternRecord r) =>
+            r.LayoutType == Perforation && !FillPatternRules.StaggerIsSymmetric(r.StaggerAngle) ? FillPatternRules.MirrorStagger(r.StaggerAngle) : r.StaggerAngle;
+
         /// <summary>
-        /// The verifier's choices: the other stagger (only where the lattice is not symmetric
-        /// anyway), the other rotation sign of a seed cut, the other cut direction.
+        /// The verifier's choices, each a self-inverse toggle. First all at once – if SOLIDWORKS
+        /// lays the plane of the copy the other way, stagger, rotation and cut direction are all
+        /// reversed, and while the cut goes the wrong way a single other change measures
+        /// nothing –, then the cut direction, then stagger and rotation on their own.
         /// </summary>
         private static void AddAlternatives(BuildResult result, ModelDoc2 doc, Feature f, FillPatternRecord r, double stagger, double rotation)
         {
-            if (r.LayoutType == Perforation && !FillPatternRules.StaggerIsSymmetric(r.StaggerAngle))
-            {
-                double other = r.StaggerAngle;
-                result.Alternatives.Add(new Alternative("Versatzwinkel nicht gespiegelt",
-                    () => FeatureEdit.FillPattern(doc, f, d => d.StaggerAngle = Same(d.StaggerAngle, stagger) ? other : stagger)));
-            }
-            if (!r.IsSeedCut) return;
-            if (Math.Abs(r.SeedCutRotation) > 1e-9 && r.SeedCutType != (int)swCreateSeedCutType_e.swCreateSeedCutCircle)
-            {
-                double other = r.SeedCutRotation;
-                result.Alternatives.Add(new Alternative("Drehung des Saat-Schnitts nicht gespiegelt",
-                    () => FeatureEdit.FillPattern(doc, f, d => d.Rotation = Same(d.Rotation, rotation) ? other : rotation)));
-            }
-            result.Alternatives.Add(new Alternative("Schnittrichtung umgekehrt",
-                () => FeatureEdit.FillPattern(doc, f, d => d.SeedCutFlipShapeDirection = !d.SeedCutFlipShapeDirection)));
+            bool staggerChoice = r.LayoutType == Perforation && !FillPatternRules.StaggerIsSymmetric(r.StaggerAngle);
+            bool rotationChoice = r.IsSeedCut && Math.Abs(r.SeedCutRotation) > 1e-9 && r.SeedCutType != (int)swCreateSeedCutType_e.swCreateSeedCutCircle;
+            double otherStagger = r.StaggerAngle, otherRotation = r.SeedCutRotation;
+            void ToggleStagger(FillPatternFeatureData d) => d.StaggerAngle = Same(d.StaggerAngle, stagger) ? otherStagger : stagger;
+            void ToggleRotation(FillPatternFeatureData d) => d.Rotation = Same(d.Rotation, rotation) ? otherRotation : rotation;
+            void ToggleFlip(FillPatternFeatureData d) => d.SeedCutFlipShapeDirection = !d.SeedCutFlipShapeDirection;
+
+            int parts = (staggerChoice ? 1 : 0) + (rotationChoice ? 1 : 0) + (r.IsSeedCut ? 1 : 0);
+            if (parts >= 2)
+                result.Alternatives.Add(new Alternative("Ebene der Kopie andersherum (Versatz, Drehung, Schnittrichtung)", () => FeatureEdit.FillPattern(doc, f, d =>
+                {
+                    if (staggerChoice) ToggleStagger(d);
+                    if (rotationChoice) ToggleRotation(d);
+                    if (r.IsSeedCut) ToggleFlip(d);
+                })));
+            if (r.IsSeedCut) result.Alternatives.Add(new Alternative("Schnittrichtung umgekehrt", () => FeatureEdit.FillPattern(doc, f, ToggleFlip)));
+            if (staggerChoice) result.Alternatives.Add(new Alternative("Versatzwinkel nicht gespiegelt", () => FeatureEdit.FillPattern(doc, f, ToggleStagger)));
+            if (rotationChoice) result.Alternatives.Add(new Alternative("Drehung des Saat-Schnitts nicht gespiegelt", () => FeatureEdit.FillPattern(doc, f, ToggleRotation)));
         }
 
         private static string Describe(FillPatternRecord r)
@@ -291,7 +311,8 @@ namespace Spiegelwerk.Build.Builders
                 (int)swPatternLayoutType_e.swPatternLayoutCircular => "kreisförmig",
                 (int)swPatternLayoutType_e.swPatternLayoutSquare => "quadratisch",
                 (int)swPatternLayoutType_e.swPatternLayoutPolygon => "polygonal",
-                Perforation => $"versetzt {r.StaggerAngle * 180 / Math.PI:0.##}° → {FillPatternRules.MirrorStagger(r.StaggerAngle) * 180 / Math.PI:0.##}°",
+                Perforation => $"versetzt {r.StaggerAngle * 180 / Math.PI:0.##}°" +
+                               (Same(MirroredStagger(r), r.StaggerAngle) ? "" : $" → {MirroredStagger(r) * 180 / Math.PI:0.##}°"),
                 _ => $"Layout {r.LayoutType}",
             };
             string seed = r.IsSeedCut ? "Saat-Schnitt" : SeedText(r);

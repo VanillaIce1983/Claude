@@ -229,6 +229,8 @@ namespace Spiegelwerk.Capture
 
                 if (d.PatternDirection is object direction)
                 {
+                    if (direction is SketchSegment ds && ds.GetSketch() is Sketch dsk && dsk.Is3D())
+                        throw new NotSupportedException("Musterrichtung des Füllmusters aus einer 3D-Skizze wird nicht unterstützt.");
                     r.Direction = ToGeometryRef(direction);
                     if (r.Direction == null || r.Direction.Kind == GeometryRefKind.Unknown || r.Direction.Kind == GeometryRefKind.Sketch)
                         throw new NotSupportedException($"Musterrichtung des Füllmusters: {r.Direction?.ToString() ?? "unlesbarer Bezug"} wird nicht unterstützt.");
@@ -255,16 +257,17 @@ namespace Spiegelwerk.Capture
 
                 if (d.SeedFeatureCenter is object center)
                 {
-                    r.SeedCenter = ToGeometryRef(center);
-                    if (r.SeedCenter == null || (r.SeedCenter.Kind != GeometryRefKind.Vertex && r.SeedCenter.Kind != GeometryRefKind.SketchPoint))
-                        throw new NotSupportedException("Lage der Saat im Füllmuster nicht lesbar (erwartet: Eckpunkt oder Skizzenpunkt).");
+                    (GeometryRef? point, bool origin) = ReadReferencePoint(center);
+                    if (!origin && point!.Kind != GeometryRefKind.Vertex && point.Kind != GeometryRefKind.SketchPoint)
+                        throw new NotSupportedException("Lage der Saat im Füllmuster nicht lesbar (erwartet: Eckpunkt, Skizzenpunkt oder Ursprung).");
+                    r.SeedCenter = point;
+                    r.SeedCenterIsOrigin = origin;
                 }
 
                 if (r.IsSeedCut)
                     ReadSkipped(r, d.SkippedItemArray);
                 else
-                    ReadSeeds(r, d.PatternBodyArray is object[] bodies && bodies.Length > 0, d.PatternFeatureArray, d.PatternFaceArray,
-                        d.PatternBodyArray, d.SkippedItemArray);
+                    ReadSeeds(r, IsBodyFillPattern(d), d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, d.SkippedItemArray);
                 r.GeometryPattern = d.GeometryPattern;
                 r.PropagateVisualProperty = d.PropagateVisualProperty;
                 if (d.FeatureScope && !d.AutoSelect) r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
@@ -288,15 +291,16 @@ namespace Spiegelwerk.Capture
                 if (columns.Count == 0) throw new NotSupportedException("Variables Muster ohne steuernde Bemaßungen.");
                 foreach (string column in columns)
                 {
-                    int at = column.IndexOf('@');
-                    if (at <= 0 || at == column.Length - 1) throw new NotSupportedException($"Bemaßung „{column}“: Name nicht lesbar.");
-                    string name = column.Substring(0, at), owner = column.Substring(at + 1);
-                    int docPart = owner.IndexOf('@');
-                    if (docPart >= 0) owner = owner.Substring(0, docPart);
+                    (string name, string owner) = SplitColumn(column) ?? throw new NotSupportedException($"Bemaßung „{column}“: Name nicht lesbar.");
                     Feature ownerFeature = SwDoc.FeatureByName(_doc, owner)
                                            ?? throw new NotSupportedException($"Bemaßung „{column}“: „{owner}“ nicht gefunden.");
                     if (ownerFeature.GetTypeName2() == "3DProfileFeature")
                         throw new NotSupportedException($"Bemaßung „{column}“ gehört zu einer 3D-Skizze.");
+                    // A plane is rebuilt as an offset of a standard plane (or on helper points): its
+                    // dimension measures from another reference in the copy, the values would move
+                    // the instances the wrong way.
+                    if (ownerFeature.GetTypeName2() == "RefPlane")
+                        throw new NotSupportedException($"Bemaßung „{column}“ einer Referenzebene: die gespiegelte Ebene misst von einer anderen Bezugsebene.");
                     double value = DimensionValue(column) ?? throw new NotSupportedException($"Wert der Bemaßung „{column}“ nicht lesbar.");
                     r.Dimensions.Add(new ControllingDimension(name, owner, SwDoc.IsSketch(ownerFeature), value));
                 }
@@ -318,7 +322,7 @@ namespace Spiegelwerk.Capture
             }
 
             // The data object names no seeds: they are the pattern's parents that are not
-            // sketches, and the features whose dimensions it varies.
+            // sketches, and the features whose dimensions it varies (FeatureCollector the same).
             foreach (Feature seed in VariablePatternSeeds(f)) r.SeedFeatures.Add(seed.Name);
             foreach (ControllingDimension c in r.Dimensions.Where(c => !c.OwnerIsSketch && !r.SeedFeatures.Contains(c.Owner)))
                 r.SeedFeatures.Add(c.Owner);
@@ -329,6 +333,35 @@ namespace Spiegelwerk.Capture
         /// <summary>The features a variable pattern repeats: its parents that are not sketches.</summary>
         internal static IEnumerable<Feature> VariablePatternSeeds(Feature pattern) =>
             (pattern.GetParents() as object[])?.OfType<Feature>().Where(p => !SwDoc.IsSketch(p)) ?? Enumerable.Empty<Feature>();
+
+        /// <summary>The features (not sketches) whose dimensions a variable pattern varies – under selection access.</summary>
+        internal static IEnumerable<Feature> VariablePatternDimensionOwners(ModelDoc2 doc, DimPatternFeatureData d)
+        {
+            foreach (string column in Indexed(d.GetControllingDimensionCount(), d.GetControllingDimensionName) ?? new List<string>())
+                if (SplitColumn(column) is (string, string) split && SwDoc.FeatureByName(doc, split.owner) is Feature owner && !SwDoc.IsSketch(owner))
+                    yield return owner;
+        }
+
+        /// <summary>"Name@Owner" (possibly with "@Document" after it) → name and owner; null if not of that form.</summary>
+        internal static (string name, string owner)? SplitColumn(string column)
+        {
+            string[] parts = column.Split('@');
+            return parts.Length >= 2 && parts[0].Length > 0 && parts[1].Length > 0 ? (parts[0], parts[1]) : ((string, string)?)null;
+        }
+
+        /// <summary>Seeds are bodies: the documented element switch, or seed bodies where it does not answer.</summary>
+        internal static bool IsBodyFillPattern(FillPatternFeatureData d)
+        {
+            try
+            {
+                if (d.PatternElement == (int)swPatternElementSelection_e.swBodiesToPattern) return true;
+            }
+            catch (Exception)
+            {
+                // Not readable: the seed bodies decide.
+            }
+            return d.PatternBodyArray is object[] bodies && bodies.Length > 0;
+        }
 
         /// <summary>
         /// Names read by index – whether the API counts from 0 or from 1 is not documented: from

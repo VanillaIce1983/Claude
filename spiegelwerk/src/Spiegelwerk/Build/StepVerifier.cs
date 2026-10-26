@@ -36,7 +36,8 @@ namespace Spiegelwerk.Build
             Outcome best = Measure(ctx, expected, before, feature, samples);
             if (best.Passes) return best.ToString();
 
-            string chosen = "";
+            // Every alternative kept stays applied; the report names them all.
+            var chosen = new List<string>();
             foreach (Alternative alt in result.Alternatives)
             {
                 if (!alt.Toggle()) continue;
@@ -46,7 +47,7 @@ namespace Spiegelwerk.Build
                 if (o.IsBetterThan(best))
                 {
                     best = o;
-                    chosen = alt.Description;
+                    chosen.Add(alt.Description);
                     if (o.Passes) break;
                 }
                 else
@@ -57,7 +58,7 @@ namespace Spiegelwerk.Build
             }
             ctx.Topology.Invalidate();
 
-            if (chosen.Length > 0) result.Notes.Add($"Korrigiert nach Messung: {chosen}.");
+            if (chosen.Count > 0) result.Notes.Add($"Korrigiert nach Messung: {string.Join(", ", chosen)}.");
             if (!best.Passes)
             {
                 result.Status = ReportStatus.Warning;
