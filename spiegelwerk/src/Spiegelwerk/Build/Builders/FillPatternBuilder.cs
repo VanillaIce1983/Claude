@@ -119,7 +119,7 @@ namespace Spiegelwerk.Build.Builders
 
             ctx.Register(r.Name, f);
             BuildResult result = Ok(f, Describe(r), notes);
-            AddAlternatives(result, ctx.Doc, f, r, stagger, rotation);
+            AddAlternatives(result, ctx.Doc, f, r, stagger, rotation, differing);
             return result;
         }
 
@@ -284,10 +284,14 @@ namespace Spiegelwerk.Build.Builders
         /// reversed, and while the cut goes the wrong way a single other change measures
         /// nothing –, then the cut direction, then stagger and rotation on their own.
         /// </summary>
-        private static void AddAlternatives(BuildResult result, ModelDoc2 doc, Feature f, FillPatternRecord r, double stagger, double rotation)
+        private static void AddAlternatives(BuildResult result, ModelDoc2 doc, Feature f, FillPatternRecord r, double stagger, double rotation,
+            List<string> differing)
         {
-            bool staggerChoice = r.LayoutType == Perforation && !FillPatternRules.StaggerIsSymmetric(r.StaggerAngle);
-            bool rotationChoice = r.IsSeedCut && Math.Abs(r.SeedCutRotation) > 1e-9 && r.SeedCutType != (int)swCreateSeedCutType_e.swCreateSeedCutCircle;
+            // A toggle between the two angles undoes itself only if the feature holds one of them:
+            // an angle SOLIDWORKS refused is no starting point.
+            bool staggerChoice = r.LayoutType == Perforation && !FillPatternRules.StaggerIsSymmetric(r.StaggerAngle) && !differing.Contains("Versatzwinkel");
+            bool rotationChoice = r.IsSeedCut && Math.Abs(r.SeedCutRotation) > 1e-9 && r.SeedCutType != (int)swCreateSeedCutType_e.swCreateSeedCutCircle &&
+                                  !differing.Contains("Drehung");
             double otherStagger = r.StaggerAngle, otherRotation = r.SeedCutRotation;
             void ToggleStagger(FillPatternFeatureData d) => d.StaggerAngle = Same(d.StaggerAngle, stagger) ? otherStagger : stagger;
             void ToggleRotation(FillPatternFeatureData d) => d.Rotation = Same(d.Rotation, rotation) ? otherRotation : rotation;
