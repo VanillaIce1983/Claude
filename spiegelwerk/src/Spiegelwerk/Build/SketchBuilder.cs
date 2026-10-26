@@ -597,6 +597,7 @@ namespace Spiegelwerk.Build
                         notes.Add($"{what}: Wert konnte nicht gesetzt werden ({(swSetValueReturnStatus_e)status}).");
                 }
                 TryRename(d, dim.Name);
+                if (dim.Name.Length > 0) map.Dimensions[dim.Name] = dd;
             }
         }
 

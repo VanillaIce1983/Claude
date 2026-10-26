@@ -37,6 +37,9 @@ namespace Spiegelwerk.Build
         /// <summary>Original segment id → segment of the new sketch.</summary>
         public Dictionary<string, SketchSegment> Segments { get; } = new Dictionary<string, SketchSegment>(StringComparer.Ordinal);
 
+        /// <summary>Original dimension name → dimension of the new sketch (for variable patterns, which name them).</summary>
+        public Dictionary<string, DisplayDimension> Dimensions { get; } = new Dictionary<string, DisplayDimension>(StringComparer.Ordinal);
+
         /// <summary>Model coordinates (target) of an original point, after mirroring.</summary>
         public Vec3 TargetModelPoint(string id) => Mirrored.Sketch.ToModel(Mirrored.Sketch.Point(id));
     }

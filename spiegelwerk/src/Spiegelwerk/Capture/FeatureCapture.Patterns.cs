@@ -11,7 +11,7 @@ using Spiegelwerk.Sw;
 
 namespace Spiegelwerk.Capture
 {
-    /// <summary>Linear, circular, curve, sketch and table driven patterns: seeds, directions and the placements of the instances.</summary>
+    /// <summary>Linear, circular, curve, sketch, table driven, fill and variable patterns: seeds, directions and the placements of the instances.</summary>
     internal sealed partial class FeatureCapture
     {
         /// <summary>Beyond this many instances the placements are not read (one call each); the mass check remains.</summary>
@@ -210,6 +210,162 @@ namespace Spiegelwerk.Capture
             }
         }
 
+        private FillPatternRecord CaptureFillPattern(Feature f, string type, FillPatternFeatureData d)
+        {
+            var r = new FillPatternRecord(f.Name, type);
+            if (!d.AccessSelections(_doc, null))
+                throw new NotSupportedException("Feature-Definition konnte nicht gelesen werden (AccessSelections).");
+            try
+            {
+                if (d.PatternFillBoundaryArray is object[] boundary)
+                    foreach (object b in boundary)
+                    {
+                        GeometryRef? g = ToGeometryRef(b);
+                        if (g == null || (g.Kind != GeometryRefKind.Face && g.Kind != GeometryRefKind.Sketch))
+                            throw new NotSupportedException($"Begrenzung des Füllmusters: {g?.ToString() ?? "unlesbarer Bezug"} wird nicht unterstützt (erwartet: Flächen oder 2D-Skizzen).");
+                        r.Boundary.Add(g);
+                    }
+                if (r.Boundary.Count == 0) throw new NotSupportedException("Begrenzung des Füllmusters nicht lesbar.");
+
+                if (d.PatternDirection is object direction)
+                {
+                    r.Direction = ToGeometryRef(direction);
+                    if (r.Direction == null || r.Direction.Kind == GeometryRefKind.Unknown || r.Direction.Kind == GeometryRefKind.Sketch)
+                        throw new NotSupportedException($"Musterrichtung des Füllmusters: {r.Direction?.ToString() ?? "unlesbarer Bezug"} wird nicht unterstützt.");
+                }
+
+                r.LayoutType = d.PatternLayoutType;
+                r.SpacingType = d.LayoutSpacingType;
+                r.InstanceSpacing = d.InstanceSpacing;
+                r.StaggerAngle = d.StaggerAngle;
+                r.Margins = d.Margins;
+                r.LoopSpacing = d.LoopSpacing;
+                r.InstanceCount = d.NoOfInstances;
+                r.PolygonSides = d.PatternLayoutPolygonSides;
+                r.FeaturesToPattern = d.FeaturesToPatternType;
+                r.SeedCutType = d.CreateSeedCutType;
+                r.SeedCutDiameter = d.Diameter;
+                r.SeedCutDimension = d.Dimension;
+                r.SeedCutRotation = d.Rotation;
+                r.SeedCutDiagonal = d.Diagonal;
+                r.SeedCutPolygonSides = d.CreateSeedCutPolygonSides;
+                r.SeedCutOuterRadius = d.OuterRadius;
+                r.SeedCutInnerRadius = d.InnerRadius;
+                r.SeedCutFlip = d.SeedCutFlipShapeDirection;
+
+                if (d.SeedFeatureCenter is object center)
+                {
+                    r.SeedCenter = ToGeometryRef(center);
+                    if (r.SeedCenter == null || (r.SeedCenter.Kind != GeometryRefKind.Vertex && r.SeedCenter.Kind != GeometryRefKind.SketchPoint))
+                        throw new NotSupportedException("Lage der Saat im Füllmuster nicht lesbar (erwartet: Eckpunkt oder Skizzenpunkt).");
+                }
+
+                if (r.IsSeedCut)
+                    ReadSkipped(r, d.SkippedItemArray);
+                else
+                    ReadSeeds(r, d.PatternBodyArray is object[] bodies && bodies.Length > 0, d.PatternFeatureArray, d.PatternFaceArray,
+                        d.PatternBodyArray, d.SkippedItemArray);
+                r.GeometryPattern = d.GeometryPattern;
+                r.PropagateVisualProperty = d.PropagateVisualProperty;
+                if (d.FeatureScope && !d.AutoSelect) r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
+                return r;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+        }
+
+        private VariablePatternRecord CaptureVariablePattern(Feature f, string type, DimPatternFeatureData d)
+        {
+            var r = new VariablePatternRecord(f.Name, type);
+            if (!d.AccessSelections(_doc, null))
+                throw new NotSupportedException("Feature-Definition konnte nicht gelesen werden (AccessSelections).");
+            try
+            {
+                List<string> columns = Indexed(d.GetControllingDimensionCount(), d.GetControllingDimensionName)
+                                       ?? throw new NotSupportedException("Steuernde Bemaßungen des variablen Musters nicht lesbar.");
+                if (columns.Count == 0) throw new NotSupportedException("Variables Muster ohne steuernde Bemaßungen.");
+                foreach (string column in columns)
+                {
+                    int at = column.IndexOf('@');
+                    if (at <= 0 || at == column.Length - 1) throw new NotSupportedException($"Bemaßung „{column}“: Name nicht lesbar.");
+                    string name = column.Substring(0, at), owner = column.Substring(at + 1);
+                    int docPart = owner.IndexOf('@');
+                    if (docPart >= 0) owner = owner.Substring(0, docPart);
+                    Feature ownerFeature = SwDoc.FeatureByName(_doc, owner)
+                                           ?? throw new NotSupportedException($"Bemaßung „{column}“: „{owner}“ nicht gefunden.");
+                    if (ownerFeature.GetTypeName2() == "3DProfileFeature")
+                        throw new NotSupportedException($"Bemaßung „{column}“ gehört zu einer 3D-Skizze.");
+                    double value = DimensionValue(column) ?? throw new NotSupportedException($"Wert der Bemaßung „{column}“ nicht lesbar.");
+                    r.Dimensions.Add(new ControllingDimension(name, owner, SwDoc.IsSketch(ownerFeature), value));
+                }
+
+                List<string> rows = Indexed(d.GetInstanceCount(), d.GetInstanceNameByIndex)
+                                    ?? throw new NotSupportedException("Instanzen des variablen Musters nicht lesbar.");
+                foreach (string row in rows)
+                {
+                    var instance = new VariableInstance(row, d.GetInstanceSuppressStateByName(row));
+                    foreach (string column in columns) instance.Values.Add(DimensionValue(d.GetInstanceDimensionName(row, column)));
+                    if (instance.Values.Any(v => v == null)) throw new NotSupportedException($"Werte der Instanz „{row}“ nicht lesbar.");
+                    r.Rows.Add(instance);
+                }
+                r.PropagateVisualProperties = d.PropagateVisualProperties;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+
+            // The data object names no seeds: they are the pattern's parents that are not
+            // sketches, and the features whose dimensions it varies.
+            foreach (Feature seed in VariablePatternSeeds(f)) r.SeedFeatures.Add(seed.Name);
+            foreach (ControllingDimension c in r.Dimensions.Where(c => !c.OwnerIsSketch && !r.SeedFeatures.Contains(c.Owner)))
+                r.SeedFeatures.Add(c.Owner);
+            if (r.SeedFeatures.Count == 0) throw new NotSupportedException("Saat des variablen Musters nicht lesbar.");
+            return r;
+        }
+
+        /// <summary>The features a variable pattern repeats: its parents that are not sketches.</summary>
+        internal static IEnumerable<Feature> VariablePatternSeeds(Feature pattern) =>
+            (pattern.GetParents() as object[])?.OfType<Feature>().Where(p => !SwDoc.IsSketch(p)) ?? Enumerable.Empty<Feature>();
+
+        /// <summary>
+        /// Names read by index – whether the API counts from 0 or from 1 is not documented: from
+        /// 0 first, from 1 if that gives nothing usable. Null if neither does.
+        /// </summary>
+        private static List<string>? Indexed(int count, Func<int, string> name)
+        {
+            foreach (int first in new[] { 0, 1 })
+            {
+                var result = new List<string>();
+                try
+                {
+                    for (int i = first; i < first + count; i++) result.Add(name(i));
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+                if (result.All(n => !string.IsNullOrEmpty(n))) return result;
+            }
+            return null;
+        }
+
+        /// <summary>Value of a dimension by name (system units), or null.</summary>
+        private double? DimensionValue(string? name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            try
+            {
+                return _doc.Parameter(name) is Dimension dim ? dim.SystemValue : (double?)null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         private static double[] Doubles(object o) => o switch
         {
             double[] ds => ds,
@@ -257,7 +413,11 @@ namespace Spiegelwerk.Capture
                     foreach (Face2 face in fcs.OfType<Face2>()) r.SeedFaces.Add(TopologyCapture.Face(face));
             }
             if (r.SeedCount == 0) throw new NotSupportedException("Muster ohne lesbare Features, Flächen oder Körper.");
+            ReadSkipped(r, skipped);
+        }
 
+        private static void ReadSkipped(PatternRecord r, object? skipped)
+        {
             switch (skipped)
             {
                 case int[] ints:

@@ -157,6 +157,18 @@ namespace Spiegelwerk.Build.Builders
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
+        public static bool FillPattern(ModelDoc2 doc, Feature f, Action<FillPatternFeatureData> change)
+        {
+            var d = (FillPatternFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool VariablePattern(ModelDoc2 doc, Feature f, Action<DimPatternFeatureData> change)
+        {
+            var d = (DimPatternFeatureData)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
         public static bool LinearPattern(ModelDoc2 doc, Feature f, Action<LinearPatternFeatureData> change)
         {
             var d = (LinearPatternFeatureData)f.GetDefinition();

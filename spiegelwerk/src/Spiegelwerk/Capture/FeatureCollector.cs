@@ -113,9 +113,9 @@ namespace Spiegelwerk.Capture
         private static bool IsDatum(Feature f) => f.GetTypeName2() is "RefPlane" or "RefAxis" or "CoordSys";
 
         /// <summary>
-        /// What a pattern (linear, circular, curve, sketch or table driven) repeats: its seed
-        /// features, the features the seed faces belong to, the features that made the seed
-        /// bodies (as when bodies are selected).
+        /// What a pattern (linear, circular, curve, sketch, table driven, fill, variable)
+        /// repeats: its seed features, the features the seed faces belong to, the features
+        /// that made the seed bodies (as when bodies are selected).
         /// </summary>
         private static List<Feature> SeedsOf(ModelDoc2 doc, Feature f, ref bool seedBodies)
         {
@@ -161,6 +161,20 @@ namespace Spiegelwerk.Capture
                     {
                         tp.ReleaseSelectionAccess();
                     }
+                    break;
+                case FillPatternFeatureData fp when fp.AccessSelections(doc, null):
+                    try
+                    {
+                        seedBodies |= AddSeeds(result, fp.PatternBodyArray is object[] bodies && bodies.Length > 0,
+                            fp.PatternFeatureArray, fp.PatternFaceArray, fp.PatternBodyArray);
+                    }
+                    finally
+                    {
+                        fp.ReleaseSelectionAccess();
+                    }
+                    break;
+                case DimPatternFeatureData _:
+                    result.AddRange(FeatureCapture.VariablePatternSeeds(f));
                     break;
                 case SketchPatternFeatureData sp when sp.AccessSelections(doc, null):
                     try

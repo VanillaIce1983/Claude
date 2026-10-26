@@ -73,6 +73,10 @@ namespace Spiegelwerk.Capture
                         return CaptureSketchPattern(f, type, sp);
                     case TablePatternFeatureData tp:
                         return CaptureTablePattern(f, type, tp);
+                    case FillPatternFeatureData fp:
+                        return CaptureFillPattern(f, type, fp);
+                    case DimPatternFeatureData vp:
+                        return CaptureVariablePattern(f, type, vp);
                     case WizardHoleFeatureData2 wh:
                         return CaptureHole(f, type, wh);
                     case AdvancedHoleFeatureData ah:
@@ -409,9 +413,7 @@ namespace Spiegelwerk.Capture
             "MirrorPattern" => "Spiegel-Feature im Original: wird bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. " +
                                "Abhilfe: im Original durch die gespiegelten Einzel-Features ersetzen oder nach dem Lauf von Hand spiegeln.",
             // Reached only if the definition does not answer as the pattern's data interface.
-            "CurvePattern" or "SketchPattern" or "TablePattern" => "Muster: Feature-Daten nicht lesbar.",
-            "FillPattern" or "DimPattern" or "VarPattern" =>
-                "Dieses Muster wird nicht unterstützt (nur lineare, kreisförmige, Kurven-, Skizzen- und Tabellenmuster).",
+            "CurvePattern" or "SketchPattern" or "TablePattern" or "FillPattern" or "DimPattern" or "VarPattern" => "Muster: Feature-Daten nicht lesbar.",
             _ => $"Feature-Typ {type} wird nicht unterstützt.",
         };
     }

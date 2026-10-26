@@ -80,6 +80,8 @@ namespace Spiegelwerk.Build
             new CurvePatternBuilder(),
             new SketchPatternBuilder(),
             new TablePatternBuilder(),
+            new FillPatternBuilder(),
+            new VariablePatternBuilder(),
         };
 
         public MirrorJob(SldWorks sw)

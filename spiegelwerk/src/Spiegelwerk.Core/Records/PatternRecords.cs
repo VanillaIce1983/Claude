@@ -192,4 +192,120 @@ namespace Spiegelwerk.Core.Records
 
         public bool PropagateVisualProperty { get; set; }
     }
+
+    /// <summary>
+    /// Fill pattern: instances laid out inside a boundary (faces or a sketch) – circular,
+    /// square, polygon or staggered (perforation) –, of seed features or of a seed cut the
+    /// pattern makes itself. The API reports no instance placements; the mass check decides.
+    /// A reflection keeps spacings and margins; it turns a staggered lattice into the one with
+    /// the supplementary stagger angle and reverses the rotation of a seed cut
+    /// (<see cref="Planning.FillPatternRules"/>).
+    /// </summary>
+    public sealed class FillPatternRecord : PatternRecord
+    {
+        public FillPatternRecord(string name, string typeName) : base(name, typeName)
+        {
+        }
+
+        /// <summary>Faces or sketches bounding the pattern.</summary>
+        public List<GeometryRef> Boundary { get; } = new List<GeometryRef>();
+
+        /// <summary>Edge, sketch line or axis giving the layout direction; null: SOLIDWORKS chooses.</summary>
+        public GeometryRef? Direction { get; set; }
+
+        /// <summary>swPatternLayoutType_e: circular 0, square 1, polygon 2, perforation 3.</summary>
+        public int LayoutType { get; set; }
+
+        /// <summary>swPatternLayoutSpacingType_e: target spacing 0, instances 1.</summary>
+        public int SpacingType { get; set; }
+
+        public double InstanceSpacing { get; set; }
+        public double StaggerAngle { get; set; }
+        public double Margins { get; set; }
+        public double LoopSpacing { get; set; }
+        public int InstanceCount { get; set; }
+        public int PolygonSides { get; set; }
+
+        /// <summary>swFeaturesToPatternType_e: selected features 0, create seed cut 1.</summary>
+        public int FeaturesToPattern { get; set; }
+
+        /// <summary>swCreateSeedCutType_e: none 0, circle 1, square 2, diamond 3, polygon 4.</summary>
+        public int SeedCutType { get; set; }
+
+        public double SeedCutDiameter { get; set; }
+        public double SeedCutDimension { get; set; }
+        public double SeedCutRotation { get; set; }
+        public double SeedCutDiagonal { get; set; }
+        public int SeedCutPolygonSides { get; set; }
+        public double SeedCutOuterRadius { get; set; }
+        public double SeedCutInnerRadius { get; set; }
+        public bool SeedCutFlip { get; set; }
+
+        /// <summary>Vertex or sketch point where the seed sits; null: the boundary's centre.</summary>
+        public GeometryRef? SeedCenter { get; set; }
+
+        public bool PropagateVisualProperty { get; set; }
+
+        public bool IsSeedCut => FeaturesToPattern == 1;
+    }
+
+    /// <summary>
+    /// Variable pattern: a table of instances, each a copy of the seed with its own values for
+    /// chosen dimensions of the seed (sketch or feature dimensions). The seed is rebuilt with
+    /// the same dimension values, so the table carries over unchanged – only the columns have
+    /// to name the copy's dimensions.
+    /// </summary>
+    public sealed class VariablePatternRecord : PatternRecord
+    {
+        public VariablePatternRecord(string name, string typeName) : base(name, typeName)
+        {
+        }
+
+        /// <summary>Columns of the table, in order.</summary>
+        public List<ControllingDimension> Dimensions { get; } = new List<ControllingDimension>();
+
+        /// <summary>Rows of the table, in order.</summary>
+        public List<VariableInstance> Rows { get; } = new List<VariableInstance>();
+
+        public bool PropagateVisualProperties { get; set; }
+    }
+
+    /// <summary>A dimension of the seed that the variable pattern varies: "Name@Owner".</summary>
+    public sealed class ControllingDimension
+    {
+        public ControllingDimension(string name, string owner, bool ownerIsSketch, double value)
+        {
+            Name = name;
+            Owner = owner;
+            OwnerIsSketch = ownerIsSketch;
+            Value = value;
+        }
+
+        /// <summary>Dimension name within its owner, e.g. "D1".</summary>
+        public string Name { get; }
+
+        /// <summary>Original name of the sketch or feature the dimension belongs to.</summary>
+        public string Owner { get; }
+
+        public bool OwnerIsSketch { get; }
+
+        /// <summary>The seed's value (system units) – identifies the dimension if its name differs in the copy.</summary>
+        public double Value { get; }
+
+        public override string ToString() => $"{Name}@{Owner}";
+    }
+
+    /// <summary>One row of a variable pattern: its values per column (null: not readable) and whether it is suppressed.</summary>
+    public sealed class VariableInstance
+    {
+        public VariableInstance(string name, bool suppressed)
+        {
+            Name = name;
+            Suppressed = suppressed;
+        }
+
+        public string Name { get; }
+        public bool Suppressed { get; }
+        public List<double?> Values { get; } = new List<double?>();
+    }
 }

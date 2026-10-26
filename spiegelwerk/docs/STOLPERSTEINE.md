@@ -178,6 +178,15 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 118. **Auswahl, die nicht übernommen werden kann:** Temporäre Achsen lassen sich als Achse wählen, sind aber kein Feature. Fiele die einzige Auswahl weg, würde das ganze Teil gespiegelt – im selben Teil mit „Original löschen“ fatal. → Im Teil nimmt die Auswahlbox nur Features und Körper an; bleibt trotzdem etwas Gewähltes ungenutzt, bricht der Befehl mit Meldung ab.
 119. **3D-Skizzen unter Ebenen, Achsen und Koordinatensystemen:** Diese Bezüge werden allein aus ihrer Geometrie neu aufgebaut. Eine 3D-Skizze, auf der sie sitzen, ließe sich nicht nachbauen und blockierte als Feature ohne Gegenstück „Original löschen“. → Sie wird nicht mitgezogen; 2D-Skizzen schon, denn eine andere mitgespiegelte Skizze kann sich auf sie beziehen.
 
+## Füll- und variable Muster
+
+120. **Füllmuster melden keine Lage der Instanzen** (kein `GetTransform`). → Massen- und Flächenprüfung mit Varianten statt Lagevergleich.
+121. **Versetzte Gitter haben einen Drehsinn:** Gespiegelt ist das Gitter mit Versatzwinkel θ das mit π − θ (60°, 90°, 120° sind symmetrisch). Die Drehung eines Saat-Schnitts wechselt das Vorzeichen. Beides setzt voraus, dass die Begrenzung der Kopie ihre Außennormale behält. → So angelegt; ungespiegelter Winkel, ungespiegelte Drehung und umgekehrte Schnittrichtung als Varianten für die Prüfung.
+122. **Markierungen des Füllmusters** stehen in der Hilfe zu `IFillPatternFeatureData`: Begrenzung 16384, Richtung 1, Saat-Lage 3, Features 4, Flächen 5; das Beispiel setzt Eigenschaften des Datenobjekts und wählt trotzdem. → Beides: Eigenschaften setzen und mit diesen Markierungen wählen; `FeatureFillPattern` als Ersatz. Körper als Saat (Markierung 256) ist eine Annahme.
+123. **Variables Muster ohne Saat-Getter:** `IDimPatternFeatureData` nennt keine Saat-Features. → Die Eltern des Musters ohne Skizzen, dazu die Features seiner Feature-Bemaßungen.
+124. **Spalten des variablen Musters heißen „Bemaßung@Besitzer“** – in der Kopie heißen Besitzer (Namenszusatz im selben Teil) und Feature-Bemaßungen womöglich anders. → Skizzenbemaßungen bekommen beim Nachbau ihren Originalnamen und werden darüber gefunden; Feature-Bemaßungen über Name und Wert, sonst über einen eindeutigen Wert.
+125. **Zählweise von Zeilen und Spalten** des variablen Musters (ab 0 oder ab 1) ist nicht dokumentiert. → An den lesbaren Namen ablesen; die Tabelle wird nach dem Füllen zurückgelesen und verglichen, Abweichungen stehen im Bericht.
+
 ## Was beim ersten Test in SOLIDWORKS zu prüfen ist
 
 Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in einer laufenden Sitzung erprobt. Diese Stellen beruhen auf der API-Hilfe und offiziellen Beispielen, wo diese uneindeutig sind; Spiegelwerk fängt sie ab, der Bericht zeigt, welcher Weg genommen wurde:
@@ -208,6 +217,8 @@ Das Add-In übersetzt gegen die API 2019 und 2024, wurde aber noch nicht in eine
 | Kurvenmuster | `FeatureCurvePattern` mit Kurve 1, Richtung 2 Markierung 2, Saat 4/128/256; `UseCentroid` = false | `CreateDefinition(swFmCurvePattern)`; Werte danach verglichen, Flags über die Lage der Instanzen |
 | Skizzenmuster | Skizze 64, Referenzpunkt 32, Saat 4/128/256 (Drittquelle) | `CreateDefinition(swFmSketchPattern)`; Lage der Instanzen geprüft |
 | Koordinatensystem | `InsertCoordinateSystem` mit Ursprung 1, X-Achse 2, Y-Achse 4 (Beispiel der Hilfe); Transformation = Koordinatensystem → Modell | `CreateCoordinateSystem` mit den Elementen (schon in der API 2019); Lage zurückgelesen, Achsen umgedreht, sonst samt Hilfsskizze entfernt |
+| Füllmuster | Datenobjekt plus Auswahl (16384/1/3/4/5); Versatzwinkel π − θ, Drehung −α | `FeatureFillPattern`; Varianten für Winkel, Drehung, Schnittrichtung |
+| Variables Muster | Saat mit Markierung 4, `CreateDefinition(swFmDimPattern)`; `AddDimension` mit gewählter Bemaßung; Werte in Systemeinheiten | `FeatureAdvancedTableDrivenPattern`, Markierung 0; Tabelle zurückgelesen |
 | Tabellenmuster | Datenobjekt mit `PointArray` x/y/z je Punkt | `InsertTableDrivenPattern2` mit Auswahl (Koordinatensystem 0, Punkt 32, Saat 4/128/256); Punkte danach verglichen; Lage der Instanzen geprüft |
 | Wandung | offene Flächen mit Markierung 1 (Beispiel eines Drittanbieters), sonst 0; `Direction` 0/1 = innen/außen | Richtung wird nach dem Anlegen verglichen und gesetzt; Alternative für die Prüfung |
 | Flächen-/vollständige Verrundung | Markierungen 2/4 und 512 (API-Hilfe), Optionen für die Normalenrichtung | Flags danach verglichen, Varianten für die Prüfung |
