@@ -250,7 +250,7 @@ namespace Spiegelwerk.Sw
 
         /// <summary>The sketch points of a position sketch – one hole each.</summary>
         public static List<SketchPoint> Points(Feature positionSketch) =>
-            (Get(() => ((Sketch)positionSketch.GetSpecificFeature2()).GetUserPoints2()) as object[])?.OfType<SketchPoint>().ToList()
+            (Get(() => ((Sketch)(object)positionSketch.GetSpecificFeature2()).GetUserPoints2()) as object[])?.OfType<SketchPoint>().ToList()
             ?? new List<SketchPoint>();
 
         private static bool Same(double a, double b) => Math.Abs(a - b) <= Math.Max(1e-12, 1e-9 * Math.Max(Math.Abs(a), Math.Abs(b)));

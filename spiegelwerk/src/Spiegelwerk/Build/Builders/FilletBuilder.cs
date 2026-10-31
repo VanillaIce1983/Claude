@@ -52,7 +52,7 @@ namespace Spiegelwerk.Build.Builders
             if (r.RoundCorners) options |= (int)swFeatureFilletOptions_e.swFeatureFilletCornerType;
             object? radii = r.MultipleRadius ? found.Select(x => x.radius).ToArray() : null;
 
-            var f = (Feature)doc.FeatureManager.FeatureFillet3(options, r.Radius, 0, 0,
+            var f = (Feature)(object)doc.FeatureManager.FeatureFillet3(options, r.Radius, 0, 0,
                 (int)swFeatureFilletType_e.swFeatureFilletType_Simple, r.OverflowType,
                 (int)swFeatureFilletProfileType_e.swFeatureFilletCircular,
                 radii, null, null, null, null, null, null);

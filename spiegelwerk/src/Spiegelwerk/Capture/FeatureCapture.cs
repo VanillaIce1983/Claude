@@ -38,8 +38,8 @@ namespace Spiegelwerk.Capture
                     return part;
                 if (type == "ProfileFeature") return new SketchRecord(f.Name, ReadSketch(f));
                 if (type == "3DProfileFeature") return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);
-                if (type == "RefPlane") return new RefPlaneRecord(f.Name, _math.PlaneOf((RefPlane)f.GetSpecificFeature2()));
-                if (type == "RefAxis") return new RefAxisRecord(f.Name, SwDoc.AxisLine((RefAxis)f.GetSpecificFeature2()));
+                if (type == "RefPlane") return new RefPlaneRecord(f.Name, _math.PlaneOf((RefPlane)(object)f.GetSpecificFeature2()));
+                if (type == "RefAxis") return new RefAxisRecord(f.Name, SwDoc.AxisLine((RefAxis)(object)f.GetSpecificFeature2()));
                 if (type == "CoordSys")
                     return new CoordSysRecord(f.Name, SwDoc.CoordinateSystemFrame(_doc, _math, f.Name)
                                                       ?? throw new NotSupportedException("Lage des Koordinatensystems nicht lesbar."));
@@ -169,7 +169,7 @@ namespace Spiegelwerk.Capture
                 r.DirectionReference2 = ToGeometryRef(dir2);
 
                 if (d.GetContoursCount() > 0)
-                    ReadContours((object[])d.Contours, r.Contours, r.Notes);
+                    ReadContours((object[])(object)d.Contours, r.Contours, r.Notes);
             }
             finally
             {
@@ -184,7 +184,7 @@ namespace Spiegelwerk.Capture
             foreach (object c in contours)
             {
                 if (c is SketchContour sc)
-                    into.Add(((object[])sc.GetSketchSegments()).Cast<SketchSegment>().Select(SwDoc.IdOf).ToList());
+                    into.Add(((object[])(object)sc.GetSketchSegments()).Cast<SketchSegment>().Select(SwDoc.IdOf).ToList());
                 else
                     notes.Add("Ausgewählte Skizzenbereiche (Regionen) werden nicht übernommen; es wird die ganze Skizze verwendet.");
             }
@@ -230,11 +230,11 @@ namespace Spiegelwerk.Capture
                     r.Thickness1 = d.GetWallThickness(true);
                     r.Thickness2 = d.GetWallThickness(false);
                 }
-                r.Axis = ToGeometryRef(d.Axis);
+                r.Axis = ToGeometryRef((object)d.Axis);
                 if (d.FeatureScope && !d.AutoSelect)
                     r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
                 if (d.GetContoursCount() > 0)
-                    ReadContours((object[])d.Contours, r.Contours, r.Notes);
+                    ReadContours((object[])(object)d.Contours, r.Contours, r.Notes);
             }
             finally
             {
@@ -325,14 +325,14 @@ namespace Spiegelwerk.Capture
                 r.KeepFeatures = d.KeepFeatures;
                 if (d.GetEdgeCount() > 0)
                 {
-                    var edges = ((object[])d.Edges).Cast<Edge>().ToList();
+                    var edges = ((object[])(object)d.Edges).Cast<Edge>().ToList();
                     r.Flip = d.GetIsFlipped(edges[0]);
                     if (edges.Any(e => d.GetIsFlipped(e) != r.Flip))
                         r.Notes.Add("Fasenrichtung ist nicht bei allen Kanten gleich; es wird die Richtung der ersten Kante verwendet.");
                     r.Edges.AddRange(edges.Select(TopologyCapture.Edge));
                 }
                 if (d.GetFaceCount() > 0)
-                    r.Faces.AddRange(((object[])d.Faces).Cast<Face2>().Select(TopologyCapture.Face));
+                    r.Faces.AddRange(((object[])(object)d.Faces).Cast<Face2>().Select(TopologyCapture.Face));
             }
             finally
             {

@@ -136,7 +136,7 @@ namespace Spiegelwerk.Build.Builders
 
         private static int Direction(ModelDoc2 doc, Feature f)
         {
-            var d = (ShellFeatureData)f.GetDefinition();
+            var d = (ShellFeatureData)(object)f.GetDefinition();
             if (!d.AccessSelections(doc, null)) return int.MinValue;
             try
             {

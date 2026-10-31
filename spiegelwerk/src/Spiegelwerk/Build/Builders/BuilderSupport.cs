@@ -27,8 +27,8 @@ namespace Spiegelwerk.Build.Builders
         public static List<object>? MapContours(List<List<string>> contours, SketchMap sketch, List<string> notes)
         {
             if (contours.Count == 0) return null;
-            var available = ((object[])sketch.Sketch.GetSketchContours() ?? Array.Empty<object>()).OfType<SketchContour>()
-                .Select(c => (contour: c, ids: new HashSet<string>(((object[])c.GetSketchSegments()).OfType<SketchSegment>().Select(SwDoc.IdOf))))
+            var available = ((object[])(object)sketch.Sketch.GetSketchContours() ?? Array.Empty<object>()).OfType<SketchContour>()
+                .Select(c => (contour: c, ids: new HashSet<string>(((object[])(object)c.GetSketchSegments()).OfType<SketchSegment>().Select(SwDoc.IdOf))))
                 .ToList();
             var result = new List<object>();
             foreach (List<string> wanted in contours)
@@ -107,8 +107,8 @@ namespace Spiegelwerk.Build.Builders
                 {
                     // Start → end in model coordinates; points of a 3D sketch are model coordinates already.
                     Sketch sketch = ((SketchSegment)line).GetSketch();
-                    var a = (SketchPoint)line.GetStartPoint2();
-                    var b = (SketchPoint)line.GetEndPoint2();
+                    var a = (SketchPoint)(object)line.GetStartPoint2();
+                    var b = (SketchPoint)(object)line.GetEndPoint2();
                     if (sketch.Is3D()) return new Vec3(b.X - a.X, b.Y - a.Y, b.Z - a.Z);
                     Frame3 frame = ctx.Math.SketchFrame(sketch);
                     return frame.ToWorld(b.X, b.Y) - frame.ToWorld(a.X, a.Y);
@@ -159,7 +159,7 @@ namespace Spiegelwerk.Build.Builders
             {
                 Vec3 p = at.Value;
                 if (doc.Extension.SelectByID2("", "FACE", p.X, p.Y, p.Z, false, mark, null, 0) &&
-                    ((SelectionMgr)doc.SelectionManager).GetSelectedObject6(1, -1) is Face2 picked && IsSameFace(ctx, picked, target))
+                    ((SelectionMgr)(object)doc.SelectionManager).GetSelectedObject6(1, -1) is Face2 picked && IsSameFace(ctx, picked, target))
                     return true;
                 SwSelect.Clear(doc);
             }

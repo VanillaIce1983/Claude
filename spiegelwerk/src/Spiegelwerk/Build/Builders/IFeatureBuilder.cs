@@ -76,115 +76,115 @@ namespace Spiegelwerk.Build.Builders
     {
         public static bool Extrude(ModelDoc2 doc, Feature f, Action<ExtrudeFeatureData2> change)
         {
-            var d = (ExtrudeFeatureData2)f.GetDefinition();
+            var d = (ExtrudeFeatureData2)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool Revolve(ModelDoc2 doc, Feature f, Action<RevolveFeatureData2> change)
         {
-            var d = (RevolveFeatureData2)f.GetDefinition();
+            var d = (RevolveFeatureData2)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool Chamfer(ModelDoc2 doc, Feature f, Action<ChamferFeatureData2> change)
         {
-            var d = (ChamferFeatureData2)f.GetDefinition();
+            var d = (ChamferFeatureData2)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool Sweep(ModelDoc2 doc, Feature f, Action<SweepFeatureData> change)
         {
-            var d = (SweepFeatureData)f.GetDefinition();
+            var d = (SweepFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool Loft(ModelDoc2 doc, Feature f, Action<LoftFeatureData> change)
         {
-            var d = (LoftFeatureData)f.GetDefinition();
+            var d = (LoftFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool SimpleFillet(ModelDoc2 doc, Feature f, Action<SimpleFilletFeatureData2> change)
         {
-            var d = (SimpleFilletFeatureData2)f.GetDefinition();
+            var d = (SimpleFilletFeatureData2)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool VariableFillet(ModelDoc2 doc, Feature f, Action<VariableFilletFeatureData2> change)
         {
-            var d = (VariableFilletFeatureData2)f.GetDefinition();
+            var d = (VariableFilletFeatureData2)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool Shell(ModelDoc2 doc, Feature f, Action<ShellFeatureData> change)
         {
-            var d = (ShellFeatureData)f.GetDefinition();
+            var d = (ShellFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool Draft(ModelDoc2 doc, Feature f, Action<DraftFeatureData2> change)
         {
-            var d = (DraftFeatureData2)f.GetDefinition();
+            var d = (DraftFeatureData2)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool Hole(ModelDoc2 doc, Feature f, Action<WizardHoleFeatureData2> change)
         {
-            var d = (WizardHoleFeatureData2)f.GetDefinition();
+            var d = (WizardHoleFeatureData2)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool AdvancedHole(ModelDoc2 doc, Feature f, Action<AdvancedHoleFeatureData> change)
         {
-            var d = (AdvancedHoleFeatureData)f.GetDefinition();
+            var d = (AdvancedHoleFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool TablePattern(ModelDoc2 doc, Feature f, Action<TablePatternFeatureData> change)
         {
-            var d = (TablePatternFeatureData)f.GetDefinition();
+            var d = (TablePatternFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool CoordinateSystem(ModelDoc2 doc, Feature f, Action<ICoordinateSystemFeatureData> change)
         {
-            var d = (ICoordinateSystemFeatureData)f.GetDefinition();
+            var d = (ICoordinateSystemFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool CurvePattern(ModelDoc2 doc, Feature f, Action<CurveDrivenPatternFeatureData> change)
         {
-            var d = (CurveDrivenPatternFeatureData)f.GetDefinition();
+            var d = (CurveDrivenPatternFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool SketchPattern(ModelDoc2 doc, Feature f, Action<SketchPatternFeatureData> change)
         {
-            var d = (SketchPatternFeatureData)f.GetDefinition();
+            var d = (SketchPatternFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool FillPattern(ModelDoc2 doc, Feature f, Action<FillPatternFeatureData> change)
         {
-            var d = (FillPatternFeatureData)f.GetDefinition();
+            var d = (FillPatternFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool VariablePattern(ModelDoc2 doc, Feature f, Action<DimPatternFeatureData> change)
         {
-            var d = (DimPatternFeatureData)f.GetDefinition();
+            var d = (DimPatternFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool LinearPattern(ModelDoc2 doc, Feature f, Action<LinearPatternFeatureData> change)
         {
-            var d = (LinearPatternFeatureData)f.GetDefinition();
+            var d = (LinearPatternFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
         public static bool CircularPattern(ModelDoc2 doc, Feature f, Action<CircularPatternFeatureData> change)
         {
-            var d = (CircularPatternFeatureData)f.GetDefinition();
+            var d = (CircularPatternFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 

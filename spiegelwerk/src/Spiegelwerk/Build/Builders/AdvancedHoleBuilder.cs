@@ -216,7 +216,7 @@ namespace Spiegelwerk.Build.Builders
 
         private static bool OnPlane(BuildContext ctx, Feature sketch, Plane3 plane)
         {
-            Plane3 sketchPlane = ctx.Math.SketchFrame((Sketch)sketch.GetSpecificFeature2()).Plane;
+            Plane3 sketchPlane = ctx.Math.SketchFrame((Sketch)(object)sketch.GetSpecificFeature2()).Plane;
             return sketchPlane.IsParallelTo(plane) && plane.Contains(sketchPlane.Origin);
         }
 
@@ -286,7 +286,7 @@ namespace Spiegelwerk.Build.Builders
         private static List<string> Differences(ModelDoc2 doc, Feature f, AdvancedHoleRecord r)
         {
             var result = new List<string>();
-            var d = (AdvancedHoleFeatureData)f.GetDefinition();
+            var d = (AdvancedHoleFeatureData)(object)f.GetDefinition();
             if (!d.AccessSelections(doc, null)) return result;
             try
             {

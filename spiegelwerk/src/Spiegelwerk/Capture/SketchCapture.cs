@@ -25,7 +25,7 @@ namespace Spiegelwerk.Capture
 
         public SketchModel Read(Feature feature)
         {
-            var sketch = (Sketch)feature.GetSpecificFeature2();
+            var sketch = (Sketch)(object)feature.GetSpecificFeature2();
             if (sketch.Is3D())
                 throw new NotSupportedException("3D-Skizzen werden nicht gespiegelt.");
 
@@ -36,14 +36,14 @@ namespace Spiegelwerk.Capture
                 ConstrainedStatus = sketch.GetConstrainedStatus(),
             };
 
-            var userPoints = new HashSet<string>(Objects<SketchPoint>(sketch.GetUserPoints2()).Select(SwDoc.IdOf));
-            foreach (SketchPoint p in Objects<SketchPoint>(sketch.GetSketchPoints2()))
+            var userPoints = new HashSet<string>(Objects<SketchPoint>((object)sketch.GetUserPoints2()).Select(SwDoc.IdOf));
+            foreach (SketchPoint p in Objects<SketchPoint>((object)sketch.GetSketchPoints2()))
             {
                 string id = SwDoc.IdOf(p);
                 model.Points.Add(new SkPoint(id, p.X, p.Y) { Standalone = userPoints.Contains(id) });
             }
 
-            foreach (SketchSegment seg in Objects<SketchSegment>(sketch.GetSketchSegments()))
+            foreach (SketchSegment seg in Objects<SketchSegment>((object)sketch.GetSketchSegments()))
             {
                 SkSegment? s = ReadSegment(seg, model);
                 if (s != null) model.Segments.Add(s);
@@ -65,15 +65,15 @@ namespace Spiegelwerk.Capture
                     var l = (SketchLine)seg;
                     s = new SkSegment(id, SkSegmentKind.Line)
                     {
-                        StartId = SwDoc.IdOf((SketchPoint)l.GetStartPoint2()),
-                        EndId = SwDoc.IdOf((SketchPoint)l.GetEndPoint2()),
+                        StartId = SwDoc.IdOf((SketchPoint)(object)l.GetStartPoint2()),
+                        EndId = SwDoc.IdOf((SketchPoint)(object)l.GetEndPoint2()),
                     };
                     break;
                 }
                 case swSketchSegments_e.swSketchARC:
                 {
                     var a = (SketchArc)seg;
-                    string center = SwDoc.IdOf((SketchPoint)a.GetCenterPoint2());
+                    string center = SwDoc.IdOf((SketchPoint)(object)a.GetCenterPoint2());
                     if (a.IsCircle() == 1)
                     {
                         s = new SkSegment(id, SkSegmentKind.Circle) { CenterId = center, Radius = a.GetRadius() };
@@ -83,8 +83,8 @@ namespace Spiegelwerk.Capture
                         s = new SkSegment(id, SkSegmentKind.Arc)
                         {
                             CenterId = center,
-                            StartId = SwDoc.IdOf((SketchPoint)a.GetStartPoint2()),
-                            EndId = SwDoc.IdOf((SketchPoint)a.GetEndPoint2()),
+                            StartId = SwDoc.IdOf((SketchPoint)(object)a.GetStartPoint2()),
+                            EndId = SwDoc.IdOf((SketchPoint)(object)a.GetEndPoint2()),
                             Direction = a.GetRotationDir() >= 0 ? 1 : -1,
                         };
                     }
@@ -93,14 +93,14 @@ namespace Spiegelwerk.Capture
                 case swSketchSegments_e.swSketchELLIPSE:
                 {
                     var e = (SketchEllipse)seg;
-                    var start = (SketchPoint)e.GetStartPoint2();
-                    var end = (SketchPoint)e.GetEndPoint2();
+                    var start = (SketchPoint)(object)e.GetStartPoint2();
+                    var end = (SketchPoint)(object)e.GetEndPoint2();
                     bool full = start == null || end == null || SwDoc.IdOf(start) == SwDoc.IdOf(end);
                     s = new SkSegment(id, full ? SkSegmentKind.Ellipse : SkSegmentKind.EllipticalArc)
                     {
-                        CenterId = SwDoc.IdOf((SketchPoint)e.GetCenterPoint2()),
-                        MajorId = SwDoc.IdOf((SketchPoint)e.GetMajorPoint2()),
-                        MinorId = SwDoc.IdOf((SketchPoint)e.GetMinorPoint2()),
+                        CenterId = SwDoc.IdOf((SketchPoint)(object)e.GetCenterPoint2()),
+                        MajorId = SwDoc.IdOf((SketchPoint)(object)e.GetMajorPoint2()),
+                        MinorId = SwDoc.IdOf((SketchPoint)(object)e.GetMinorPoint2()),
                         StartId = full ? null : SwDoc.IdOf(start!),
                         EndId = full ? null : SwDoc.IdOf(end!),
                         Direction = e.GetRotationDir() >= 0 ? 1 : -1,
@@ -111,7 +111,7 @@ namespace Spiegelwerk.Capture
                 {
                     var sp = (SketchSpline)seg;
                     s = new SkSegment(id, SkSegmentKind.Spline);
-                    foreach (SketchPoint fp in Objects<SketchPoint>(sp.GetPoints2()))
+                    foreach (SketchPoint fp in Objects<SketchPoint>((object)sp.GetPoints2()))
                         s.FitPointIds.Add(SwDoc.IdOf(fp));
                     if (sp.GetSplineHandleCount() > 0)
                         model.Warnings.Add($"Spline {id}: Tangenten-/Krümmungsgriffe werden nicht übernommen, nur die Stützpunkte.");
@@ -122,10 +122,10 @@ namespace Spiegelwerk.Capture
                     var pa = (SketchParabola)seg;
                     s = new SkSegment(id, SkSegmentKind.Parabola)
                     {
-                        CenterId = SwDoc.IdOf((SketchPoint)pa.GetFocalPoint2()),
-                        MajorId = SwDoc.IdOf((SketchPoint)pa.GetApexPoint2()),
-                        StartId = SwDoc.IdOf((SketchPoint)pa.GetStartPoint2()),
-                        EndId = SwDoc.IdOf((SketchPoint)pa.GetEndPoint2()),
+                        CenterId = SwDoc.IdOf((SketchPoint)(object)pa.GetFocalPoint2()),
+                        MajorId = SwDoc.IdOf((SketchPoint)(object)pa.GetApexPoint2()),
+                        StartId = SwDoc.IdOf((SketchPoint)(object)pa.GetStartPoint2()),
+                        EndId = SwDoc.IdOf((SketchPoint)(object)pa.GetEndPoint2()),
                     };
                     break;
                 }
@@ -144,14 +144,14 @@ namespace Spiegelwerk.Capture
         {
             SketchRelationManager rm = sketch.RelationManager;
             string self = model.Name;
-            foreach (SketchRelation rel in Objects<SketchRelation>(rm.GetRelations((int)swSketchRelationFilterType_e.swAll)))
+            foreach (SketchRelation rel in Objects<SketchRelation>((object)rm.GetRelations((int)swSketchRelationFilterType_e.swAll)))
             {
                 var type = (swConstraintType_e)rel.GetRelationType();
                 if (type == swConstraintType_e.swConstraintType_USEEDGE)
                 {
                     // Converted entities: the segment(s) of this sketch plus the model edge they lie on.
-                    var locals = Objects<object>(rel.GetEntities()).Select(e => ToRef(e, self)).Where(r => r.IsLocal).ToList();
-                    var source = Objects<object>(rel.GetDefinitionEntities2()).Concat(Objects<object>(rel.GetEntities()))
+                    var locals = Objects<object>((object)rel.GetEntities()).Select(e => ToRef(e, self)).Where(r => r.IsLocal).ToList();
+                    var source = Objects<object>((object)rel.GetDefinitionEntities2()).Concat(Objects<object>((object)rel.GetEntities()))
                         .Select(e => ToRef(e, self)).Where(r => !r.IsLocal).Take(1);
                     if (locals.Count > 0) model.Relations.Add(new SkRelation(RelationKind.ExternalLink, locals.Concat(source)));
                     continue;
@@ -160,9 +160,9 @@ namespace Spiegelwerk.Capture
                 {
                     // Offset entities: the offset segment(s) plus their source – a model edge, or a
                     // segment of this same sketch – as the last entity.
-                    var offsets = Objects<object>(rel.GetEntities()).Select(e => ToRef(e, self)).Where(r => r.Kind == SkRefKind.Segment).ToList();
+                    var offsets = Objects<object>((object)rel.GetEntities()).Select(e => ToRef(e, self)).Where(r => r.Kind == SkRefKind.Segment).ToList();
                     var offsetIds = new HashSet<string>(offsets.Select(r => r.Id));
-                    SkRef? source = Objects<object>(rel.GetDefinitionEntities2()).Select(e => ToRef(e, self))
+                    SkRef? source = Objects<object>((object)rel.GetDefinitionEntities2()).Select(e => ToRef(e, self))
                         .FirstOrDefault(r => !(r.Kind == SkRefKind.Segment && offsetIds.Contains(r.Id)) && r.Kind != SkRefKind.Point);
                     if (offsets.Count > 0 && source != null)
                         model.Relations.Add(new SkRelation(RelationKind.OffsetLink, offsets.Concat(new[] { source })));
@@ -177,7 +177,7 @@ namespace Spiegelwerk.Capture
                         model.Warnings.Add($"Beziehung {type} wird nicht übernommen.");
                     continue;
                 }
-                var entities = Objects<object>(rel.GetEntities()).Select(e => ToRef(e, self)).ToList();
+                var entities = Objects<object>((object)rel.GetEntities()).Select(e => ToRef(e, self)).ToList();
                 if (entities.Count == 0) continue;
                 model.Relations.Add(new SkRelation(kind.Value, entities));
             }
@@ -186,11 +186,11 @@ namespace Spiegelwerk.Capture
         private void ReadDimensions(Feature feature, SketchModel model)
         {
             string self = model.Name;
-            var dd = (DisplayDimension)feature.GetFirstDisplayDimension();
+            var dd = (DisplayDimension)(object)feature.GetFirstDisplayDimension();
             while (dd != null)
             {
                 Dimension dim = dd.GetDimension2(0);
-                var ann = (Annotation)dd.GetAnnotation();
+                var ann = (Annotation)(object)dd.GetAnnotation();
                 DimensionKind? kind = MapDimension((swDimensionType_e)dd.Type2);
                 if (kind == null)
                 {
@@ -198,8 +198,8 @@ namespace Spiegelwerk.Capture
                 }
                 else
                 {
-                    var refs = Objects<object>(ann.GetAttachedEntities3()).Select(e => ToRef(e, self)).ToList();
-                    var pos = (double[])ann.GetPosition();
+                    var refs = Objects<object>((object)ann.GetAttachedEntities3()).Select(e => ToRef(e, self)).ToList();
+                    var pos = (double[])(object)ann.GetPosition();
                     model.Dimensions.Add(new SkDimension(kind.Value, refs, dim.SystemValue)
                     {
                         Name = dim.Name,
@@ -207,7 +207,7 @@ namespace Spiegelwerk.Capture
                         TextPosition = pos != null && pos.Length >= 3 ? Vec3.FromArray(pos) : (Vec3?)null,
                     });
                 }
-                dd = (DisplayDimension)feature.GetNextDisplayDimension(dd);
+                dd = (DisplayDimension)(object)feature.GetNextDisplayDimension(dd);
             }
         }
 
@@ -239,7 +239,7 @@ namespace Spiegelwerk.Capture
                     return plane.HasValue ? SkRef.Plane(plane.Value, "Fläche") : SkRef.Unknown("gekrümmte Fläche");
                 }
                 case Feature feat when feat.GetTypeName2() == "RefPlane":
-                    return SkRef.Plane(_math.PlaneOf((RefPlane)feat.GetSpecificFeature2()), feat.Name);
+                    return SkRef.Plane(_math.PlaneOf((RefPlane)(object)feat.GetSpecificFeature2()), feat.Name);
                 case RefPlane rp:
                     return SkRef.Plane(_math.PlaneOf(rp), "Ebene");
                 default:

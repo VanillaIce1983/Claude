@@ -85,14 +85,14 @@ namespace Spiegelwerk.Capture
 
                 if (r.Kind == DraftKind.NeutralPlane)
                 {
-                    r.Direction = ToGeometryRef(d.NeutralPlane);
+                    r.Direction = ToGeometryRef((object)d.NeutralPlane);
                     if (d.GetFacesToDraftCount() > 0 && d.FacesToDraft is object[] faces)
                         r.Faces.AddRange(faces.OfType<Face2>().Select(TopologyCapture.Face));
                     if (r.Faces.Count == 0) throw new NotSupportedException("Formschräge ohne lesbare Flächen.");
                 }
                 else
                 {
-                    r.Direction = ToGeometryRef(d.DirectionPull);
+                    r.Direction = ToGeometryRef((object)d.DirectionPull);
                     if (r.Kind == DraftKind.Step) r.StepType = d.StepType;
                     if (d.GetPartingLinesCount() > 0 && d.PartingLines is object[] edges)
                         for (int i = 0; i < edges.Length; i++)

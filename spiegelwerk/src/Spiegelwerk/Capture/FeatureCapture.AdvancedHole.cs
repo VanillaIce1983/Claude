@@ -23,7 +23,7 @@ namespace Spiegelwerk.Capture
                                ?? throw new NotSupportedException(SwDoc.SubFeatures(f).Any(x => x.GetTypeName2() == "3DProfileFeature")
                                    ? "Erweiterte Bohrungen mit 3D-Positionsskizze werden nicht unterstützt."
                                    : "Positionsskizze der erweiterten Bohrung nicht gefunden.");
-            Frame3 frame = _math.SketchFrame((Sketch)position.GetSpecificFeature2());
+            Frame3 frame = _math.SketchFrame((Sketch)(object)position.GetSpecificFeature2());
             List<Vec3> points = SwAdvancedHole.Points(position).Select(p => frame.ToWorld(p.X, p.Y)).ToList();
             if (points.Count == 0) throw new NotSupportedException("Erweiterte Bohrung ohne Positionspunkte.");
 

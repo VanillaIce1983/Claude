@@ -31,8 +31,8 @@ namespace Spiegelwerk.Capture
 
                 r.CircularProfile = d.CircularProfile;
                 if (r.CircularProfile) r.CircularDiameter = d.CircularProfileDiameter;
-                else r.Profile = RequireCurve(d.Profile, "Profil");
-                r.Path = RequireCurve(d.Path, "Pfad");
+                else r.Profile = RequireCurve((object)d.Profile, "Profil");
+                r.Path = RequireCurve((object)d.Path, "Pfad");
                 r.Direction = d.Direction;
                 if (d.GetGuideCurvesCount() > 0 && d.GuideCurves is object[] guides)
                     foreach (object g in guides) r.Guides.Add(RequireCurve(g, "Führungskurve"));
@@ -45,7 +45,7 @@ namespace Spiegelwerk.Capture
                 r.PathAlignment = (Tangency)d.PathAlignmentType;
                 if (r.PathAlignment == Tangency.DirectionVector)
                 {
-                    r.PathAlignmentDirection = ToGeometryRef(d.GetPathAlignmentDirectionVector(out int _));
+                    r.PathAlignmentDirection = ToGeometryRef((object)d.GetPathAlignmentDirectionVector(out int _));
                 }
 
                 r.MaintainTangency = d.MaintainTangency;
@@ -55,8 +55,8 @@ namespace Spiegelwerk.Capture
                 r.MergeSmoothFaces = d.MergeSmoothFaces;
                 r.StartTangency = (Tangency)d.StartTangencyType;
                 r.EndTangency = (Tangency)d.EndTangencyType;
-                if (r.StartTangency == Tangency.DirectionVector) r.StartDirection = ToGeometryRef(d.StartDirectionVector);
-                if (r.EndTangency == Tangency.DirectionVector) r.EndDirection = ToGeometryRef(d.EndDirectionVector);
+                if (r.StartTangency == Tangency.DirectionVector) r.StartDirection = ToGeometryRef((object)d.StartDirectionVector);
+                if (r.EndTangency == Tangency.DirectionVector) r.EndDirection = ToGeometryRef((object)d.EndDirectionVector);
                 r.Merge = d.Merge;
                 if (d.FeatureScope && !d.AutoSelect)
                     r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
@@ -100,7 +100,7 @@ namespace Spiegelwerk.Capture
                         }
                         r.GuideTangency.Add(tangency);
                     }
-                if (d.Centerline != null) r.Centerline = RequireCurve(d.Centerline, "Mittellinie");
+                if ((object)d.Centerline != null) r.Centerline = RequireCurve((object)d.Centerline, "Mittellinie");
                 ReadPickPoints(d, r);
 
                 r.Closed = d.Close;
@@ -118,13 +118,13 @@ namespace Spiegelwerk.Capture
                 r.EndApplyToAll = d.EndConstraintApplyToAll;
                 if (r.StartTangency == Tangency.DirectionVector)
                 {
-                    r.StartDirection = ToGeometryRef(d.StartDirectionVector);
+                    r.StartDirection = ToGeometryRef((object)d.StartDirectionVector);
                     r.StartDraftAngle = d.StartConstraintDraftAngle;
                     r.ReverseStartDraft = d.StartConstraintDraftAngleDirection;
                 }
                 if (r.EndTangency == Tangency.DirectionVector)
                 {
-                    r.EndDirection = ToGeometryRef(d.EndDirectionVector);
+                    r.EndDirection = ToGeometryRef((object)d.EndDirectionVector);
                     r.EndDraftAngle = d.EndConstraintDraftAngle;
                     r.ReverseEndDraft = d.EndConstraintDraftAngleDirection;
                 }

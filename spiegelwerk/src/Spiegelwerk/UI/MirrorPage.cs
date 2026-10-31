@@ -75,7 +75,7 @@ namespace Spiegelwerk.UI
             int errors = 0;
             int options = (int)(swPropertyManagerPageOptions_e.swPropertyManagerOptions_OkayButton |
                                  swPropertyManagerPageOptions_e.swPropertyManagerOptions_CancelButton);
-            _page = (PropertyManagerPage2)_sw.CreatePropertyManagerPage("Unabhängig spiegeln", options, this, ref errors);
+            _page = (PropertyManagerPage2)(object)_sw.CreatePropertyManagerPage("Unabhängig spiegeln", options, this, ref errors);
             if (_page == null) throw new InvalidOperationException($"PropertyManager-Seite konnte nicht erzeugt werden (Fehler {errors}).");
             Build();
             _page.Show2(0);
@@ -91,8 +91,8 @@ namespace Spiegelwerk.UI
             PageMessage(Intro, "Spiegelwerk");
 
             // ---- mirror plane
-            var g1 = (PropertyManagerPageGroup)_page.AddGroupBox(GrpPlane, "Spiegelebene", groupOpts);
-            _selPlane = (PropertyManagerPageSelectionbox)g1.AddControl2(SelPlane, (short)swPropertyManagerPageControlType_e.swControlType_Selectionbox,
+            var g1 = (PropertyManagerPageGroup)(object)_page.AddGroupBox(GrpPlane, "Spiegelebene", groupOpts);
+            _selPlane = (PropertyManagerPageSelectionbox)(object)g1.AddControl2(SelPlane, (short)swPropertyManagerPageControlType_e.swControlType_Selectionbox,
                 "Ebene oder ebene Fläche", left, vis, "Ebene oder ebene Fläche, an der gespiegelt wird");
             _selPlane.SingleEntityOnly = true;
             _selPlane.Mark = PlaneMark;
@@ -100,18 +100,18 @@ namespace Spiegelwerk.UI
             _selPlane.SetSelectionFilters(new[] { (int)swSelectType_e.swSelFACES, (int)swSelectType_e.swSelDATUMPLANES });
 
             g1.AddControl2(LblHelper, (short)swPropertyManagerPageControlType_e.swControlType_Label, "oder temporäre Ebene:", left, vis, "");
-            _cmbHelper = (PropertyManagerPageCombobox)g1.AddControl2(CmbHelper, (short)swPropertyManagerPageControlType_e.swControlType_Combobox,
+            _cmbHelper = (PropertyManagerPageCombobox)(object)g1.AddControl2(CmbHelper, (short)swPropertyManagerPageControlType_e.swControlType_Combobox,
                 "Hilfsebene", left, vis, "Ebene ohne Feature im Modell: Standardebene mit Abstand");
             _cmbHelper.AddItems(new[] { "– Auswahl verwenden –", "YZ (Rechts) + Abstand in X", "XZ (Oben) + Abstand in Y", "XY (Vorne) + Abstand in Z" });
             _cmbHelper.CurrentSelection = 0;
-            _numOffset = (PropertyManagerPageNumberbox)g1.AddControl2(NumOffset, (short)swPropertyManagerPageControlType_e.swControlType_Numberbox,
+            _numOffset = (PropertyManagerPageNumberbox)(object)g1.AddControl2(NumOffset, (short)swPropertyManagerPageControlType_e.swControlType_Numberbox,
                 "Abstand", left, vis, "Abstand der Hilfsebene vom Ursprung");
             _numOffset.SetRange2((int)swNumberboxUnitType_e.swNumberBox_Length, -100, 100, true, 0.001, 0.01, 0.0001);
             _numOffset.Value = 0;
 
             // ---- items
-            var g2 = (PropertyManagerPageGroup)_page.AddGroupBox(GrpItems, _isAssembly ? "Komponenten" : "Zu spiegelnde Elemente", groupOpts);
-            _selItems = (PropertyManagerPageSelectionbox)g2.AddControl2(SelItems, (short)swPropertyManagerPageControlType_e.swControlType_Selectionbox,
+            var g2 = (PropertyManagerPageGroup)(object)_page.AddGroupBox(GrpItems, _isAssembly ? "Komponenten" : "Zu spiegelnde Elemente", groupOpts);
+            _selItems = (PropertyManagerPageSelectionbox)(object)g2.AddControl2(SelItems, (short)swPropertyManagerPageControlType_e.swControlType_Selectionbox,
                 "Elemente", left, vis, _isAssembly ? "Zu spiegelnde Komponenten" : "Features, Skizzen, Ebenen, Achsen, Koordinatensysteme oder Volumenkörper");
             _selItems.Mark = ItemMark;
             _selItems.Height = 90;
@@ -126,12 +126,12 @@ namespace Spiegelwerk.UI
                 _isAssembly ? "Teile werden als Gegenstück neu aufgebaut, gespeichert und eingefügt." : "Leer lassen für das ganze Teil.", left, vis, "");
 
             // ---- result
-            var g3 = (PropertyManagerPageGroup)_page.AddGroupBox(GrpResult, "Ergebnis", groupOpts);
+            var g3 = (PropertyManagerPageGroup)(object)_page.AddGroupBox(GrpResult, "Ergebnis", groupOpts);
             if (!_isAssembly)
             {
-                _optNew = (PropertyManagerPageOption)g3.AddControl2(OptNewPart, (short)swPropertyManagerPageControlType_e.swControlType_Option,
+                _optNew = (PropertyManagerPageOption)(object)g3.AddControl2(OptNewPart, (short)swPropertyManagerPageControlType_e.swControlType_Option,
                     "Neues Teil (Gegenstück)", left, vis, "Alle Features in einem neuen Teil neu aufbauen");
-                _optSame = (PropertyManagerPageOption)g3.AddControl2(OptSamePart, (short)swPropertyManagerPageControlType_e.swControlType_Option,
+                _optSame = (PropertyManagerPageOption)(object)g3.AddControl2(OptSamePart, (short)swPropertyManagerPageControlType_e.swControlType_Option,
                     "Im selben Teil", left, vis, "Die gespiegelten Features im aktuellen Teil anlegen");
                 _optNew.Checked = true;
                 _chkDelete = Check(g3, ChkDelete, "Original löschen",
@@ -143,13 +143,13 @@ namespace Spiegelwerk.UI
             }
             _chkMaterial = Check(g3, ChkMaterial, "Werkstoff übernehmen", "Werkstoff des Teils in das neue Teil übernehmen", true);
             _chkEquations = Check(g3, ChkEquations, "Gleichungen übernehmen", "Globale Variablen und Gleichungen in das neue Teil kopieren", true);
-            _lblSuffix = (PropertyManagerPageLabel)g3.AddControl2(LblSuffix, (short)swPropertyManagerPageControlType_e.swControlType_Label, "Namenszusatz:", left, vis, "");
-            _txtSuffix = (PropertyManagerPageTextbox)g3.AddControl2(TxtSuffix, (short)swPropertyManagerPageControlType_e.swControlType_Textbox,
+            _lblSuffix = (PropertyManagerPageLabel)(object)g3.AddControl2(LblSuffix, (short)swPropertyManagerPageControlType_e.swControlType_Label, "Namenszusatz:", left, vis, "");
+            _txtSuffix = (PropertyManagerPageTextbox)(object)g3.AddControl2(TxtSuffix, (short)swPropertyManagerPageControlType_e.swControlType_Textbox,
                 "Zusatz", left, vis, "Wird an Feature-Namen (selbes Teil) bzw. Dateinamen (Baugruppe) angehängt");
             _txtSuffix.Text = _options.NameSuffix;
 
             // ---- checks
-            var g4 = (PropertyManagerPageGroup)_page.AddGroupBox(GrpCheck, "Prüfung und Bezüge", groupOpts);
+            var g4 = (PropertyManagerPageGroup)(object)_page.AddGroupBox(GrpCheck, "Prüfung und Bezüge", groupOpts);
             _chkVerify = Check(g4, ChkVerify, "Jeden Schritt prüfen (Volumen, Schwerpunkt)",
                 "Vergleicht jedes neue Feature mit dem gespiegelten Original und korrigiert Richtungen", true);
             _chkFix = Check(g4, ChkFix, "Fehlende Skizzenbezüge ersetzen",
@@ -159,7 +159,7 @@ namespace Spiegelwerk.UI
 
         private static PropertyManagerPageCheckbox Check(PropertyManagerPageGroup g, int id, string caption, string tip, bool value)
         {
-            var c = (PropertyManagerPageCheckbox)g.AddControl2(id, (short)swPropertyManagerPageControlType_e.swControlType_Checkbox, caption,
+            var c = (PropertyManagerPageCheckbox)(object)g.AddControl2(id, (short)swPropertyManagerPageControlType_e.swControlType_Checkbox, caption,
                 (short)swPropertyManagerPageControlLeftAlign_e.swControlAlign_LeftEdge,
                 (int)(swAddControlOptions_e.swControlOptions_Visible | swAddControlOptions_e.swControlOptions_Enabled), tip);
             c.Checked = value;
@@ -280,7 +280,7 @@ namespace Spiegelwerk.UI
 
         private Plane3? ReadPlane()
         {
-            var sm = (SelectionMgr)_doc.SelectionManager;
+            var sm = (SelectionMgr)(object)_doc.SelectionManager;
             if (sm.GetSelectedObjectCount2(PlaneMark) > 0)
             {
                 object o = sm.GetSelectedObject6(1, PlaneMark);
@@ -288,7 +288,7 @@ namespace Spiegelwerk.UI
                 Plane3? p = o switch
                 {
                     Face2 f => TopologyCapture.PlaneOfFace(f),
-                    Feature feat when feat.GetTypeName2() == "RefPlane" => _math.PlaneOf((RefPlane)feat.GetSpecificFeature2()),
+                    Feature feat when feat.GetTypeName2() == "RefPlane" => _math.PlaneOf((RefPlane)(object)feat.GetSpecificFeature2()),
                     RefPlane rp => _math.PlaneOf(rp),
                     _ => null,
                 };
@@ -308,7 +308,7 @@ namespace Spiegelwerk.UI
 
         private void ReadItems()
         {
-            var sm = (SelectionMgr)_doc.SelectionManager;
+            var sm = (SelectionMgr)(object)_doc.SelectionManager;
             int n = sm.GetSelectedObjectCount2(ItemMark);
             _droppedItems = n;
             for (int i = 1; i <= n; i++)
@@ -334,7 +334,7 @@ namespace Spiegelwerk.UI
         /// <summary>Not modal: the model stays usable to look at what the report names. The form disposes itself when closed.</summary>
         private void ShowReport(MirrorReport report)
         {
-            var frame = (SolidWorks.Interop.sldworks.Frame)_sw.Frame();
+            var frame = (SolidWorks.Interop.sldworks.Frame)(object)_sw.Frame();
             var form = new ReportForm(report);
             form.Show(new WindowWrapper(new IntPtr(frame.GetHWndx64())));
         }

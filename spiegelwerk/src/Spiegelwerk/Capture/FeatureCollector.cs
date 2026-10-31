@@ -156,7 +156,7 @@ namespace Spiegelwerk.Capture
                 case LinearPatternFeatureData lp when lp.AccessSelections(doc, null):
                     try
                     {
-                        seedBodies |= AddSeeds(result, seedBodyNames, lp.BodyPattern, lp.PatternFeatureArray, lp.PatternFaceArray, lp.PatternBodyArray);
+                        seedBodies |= AddSeeds(result, seedBodyNames, lp.BodyPattern, (object)lp.PatternFeatureArray, (object)lp.PatternFaceArray, (object)lp.PatternBodyArray);
                     }
                     finally
                     {
@@ -166,7 +166,7 @@ namespace Spiegelwerk.Capture
                 case CircularPatternFeatureData cp when cp.AccessSelections(doc, null):
                     try
                     {
-                        seedBodies |= AddSeeds(result, seedBodyNames, cp.BodyPattern, cp.PatternFeatureArray, cp.PatternFaceArray, cp.PatternBodyArray);
+                        seedBodies |= AddSeeds(result, seedBodyNames, cp.BodyPattern, (object)cp.PatternFeatureArray, (object)cp.PatternFaceArray, (object)cp.PatternBodyArray);
                     }
                     finally
                     {
@@ -176,7 +176,7 @@ namespace Spiegelwerk.Capture
                 case CurveDrivenPatternFeatureData cdp when cdp.AccessSelections(doc, null):
                     try
                     {
-                        seedBodies |= AddSeeds(result, seedBodyNames, cdp.BodyPattern, cdp.PatternFeatureArray, cdp.PatternFaceArray, cdp.PatternBodyArray);
+                        seedBodies |= AddSeeds(result, seedBodyNames, cdp.BodyPattern, (object)cdp.PatternFeatureArray, (object)cdp.PatternFaceArray, (object)cdp.PatternBodyArray);
                     }
                     finally
                     {
@@ -186,7 +186,7 @@ namespace Spiegelwerk.Capture
                 case TablePatternFeatureData tp when tp.AccessSelections(doc, null):
                     try
                     {
-                        seedBodies |= AddSeeds(result, seedBodyNames, tp.GetPatternBodyCount() > 0, tp.PatternFeatureArray, tp.PatternFaceArray, tp.PatternBodyArray);
+                        seedBodies |= AddSeeds(result, seedBodyNames, tp.GetPatternBodyCount() > 0, (object)tp.PatternFeatureArray, (object)tp.PatternFaceArray, (object)tp.PatternBodyArray);
                     }
                     finally
                     {
@@ -196,7 +196,7 @@ namespace Spiegelwerk.Capture
                 case FillPatternFeatureData fp when fp.AccessSelections(doc, null):
                     try
                     {
-                        seedBodies |= AddSeeds(result, seedBodyNames, FeatureCapture.IsBodyFillPattern(fp), fp.PatternFeatureArray, fp.PatternFaceArray, fp.PatternBodyArray);
+                        seedBodies |= AddSeeds(result, seedBodyNames, FeatureCapture.IsBodyFillPattern(fp), (object)fp.PatternFeatureArray, (object)fp.PatternFaceArray, (object)fp.PatternBodyArray);
                     }
                     finally
                     {
@@ -219,7 +219,7 @@ namespace Spiegelwerk.Capture
                 case SketchPatternFeatureData sp when sp.AccessSelections(doc, null):
                     try
                     {
-                        seedBodies |= AddSeeds(result, seedBodyNames, sp.BodyPattern, sp.PatternFeatureArray, sp.PatternFaceArray, sp.PatternBodyArray);
+                        seedBodies |= AddSeeds(result, seedBodyNames, sp.BodyPattern, (object)sp.PatternFeatureArray, (object)sp.PatternFaceArray, (object)sp.PatternBodyArray);
                     }
                     finally
                     {

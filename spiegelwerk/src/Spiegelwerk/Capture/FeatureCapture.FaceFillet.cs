@@ -48,7 +48,7 @@ namespace Spiegelwerk.Capture
                         if (r.HoldLines.Count < holds.Length)
                             r.Notes.Add("Haltelinien, die keine Kanten sind (z. B. Trennlinien-Kurven), werden nicht übernommen.");
                     }
-                    if (d.HelpPoint != null)
+                    if ((object)d.HelpPoint != null)
                         r.Notes.Add("Der Hilfspunkt der Flächenverrundung wird nicht übernommen.");
                 }
                 else

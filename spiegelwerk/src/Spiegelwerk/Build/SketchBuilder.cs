@@ -255,29 +255,29 @@ namespace Spiegelwerk.Build
             switch (seg)
             {
                 case SketchLine l:
-                    result.Add(l.GetStartPoint2());
-                    result.Add(l.GetEndPoint2());
+                    result.Add((object)l.GetStartPoint2());
+                    result.Add((object)l.GetEndPoint2());
                     break;
                 case SketchArc a:
-                    result.Add(a.GetStartPoint2());
-                    result.Add(a.GetEndPoint2());
-                    result.Add(a.GetCenterPoint2());
+                    result.Add((object)a.GetStartPoint2());
+                    result.Add((object)a.GetEndPoint2());
+                    result.Add((object)a.GetCenterPoint2());
                     break;
                 case SketchEllipse e:
-                    result.Add(e.GetStartPoint2());
-                    result.Add(e.GetEndPoint2());
-                    result.Add(e.GetCenterPoint2());
-                    result.Add(e.GetMajorPoint2());
-                    result.Add(e.GetMinorPoint2());
+                    result.Add((object)e.GetStartPoint2());
+                    result.Add((object)e.GetEndPoint2());
+                    result.Add((object)e.GetCenterPoint2());
+                    result.Add((object)e.GetMajorPoint2());
+                    result.Add((object)e.GetMinorPoint2());
                     break;
                 case SketchSpline sp:
                     if (sp.GetPoints2() is object[] fit) result.AddRange(fit);
                     break;
                 case SketchParabola p:
-                    result.Add(p.GetStartPoint2());
-                    result.Add(p.GetEndPoint2());
-                    result.Add(p.GetFocalPoint2());
-                    result.Add(p.GetApexPoint2());
+                    result.Add((object)p.GetStartPoint2());
+                    result.Add((object)p.GetEndPoint2());
+                    result.Add((object)p.GetFocalPoint2());
+                    result.Add((object)p.GetApexPoint2());
                     break;
             }
             return result.OfType<SketchPoint>().ToList();
@@ -662,7 +662,7 @@ namespace Spiegelwerk.Build
         private void DeleteDimension(DisplayDimension dd)
         {
             SwSelect.Clear(_doc);
-            ((Annotation)dd.GetAnnotation()).Select3(false, null);
+            ((Annotation)(object)dd.GetAnnotation()).Select3(false, null);
             _doc.EditDelete();
             SwSelect.Clear(_doc);
         }

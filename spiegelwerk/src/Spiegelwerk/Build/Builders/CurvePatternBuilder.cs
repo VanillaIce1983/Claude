@@ -231,7 +231,7 @@ namespace Spiegelwerk.Build.Builders
         {
             try
             {
-                var d = (CurveDrivenPatternFeatureData)f.GetDefinition();
+                var d = (CurveDrivenPatternFeatureData)(object)f.GetDefinition();
                 if (!d.AccessSelections(doc, null)) return null;
                 try
                 {

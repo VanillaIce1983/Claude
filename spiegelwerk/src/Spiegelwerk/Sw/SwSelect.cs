@@ -12,7 +12,7 @@ namespace Spiegelwerk.Sw
     {
         public static bool Select(ModelDoc2 doc, object item, int mark, bool append)
         {
-            var sm = (SelectionMgr)doc.SelectionManager;
+            var sm = (SelectionMgr)(object)doc.SelectionManager;
             SelectData data = sm.CreateSelectData();
             data.Mark = mark;
             switch (item)

@@ -96,7 +96,7 @@ namespace Spiegelwerk.Addin
         public void OnMirror()
         {
             if (_sw == null) return;
-            var doc = (ModelDoc2)_sw.ActiveDoc;
+            var doc = (ModelDoc2)(object)_sw.ActiveDoc;
             if (doc == null) return;
             try
             {

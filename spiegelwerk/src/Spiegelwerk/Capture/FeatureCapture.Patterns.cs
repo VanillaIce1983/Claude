@@ -24,14 +24,14 @@ namespace Spiegelwerk.Capture
                 throw new NotSupportedException("Feature-Definition konnte nicht gelesen werden (AccessSelections).");
             try
             {
-                r.Direction1 = RequireDirection(d.D1Axis, "Richtung 1");
+                r.Direction1 = RequireDirection((object)d.D1Axis, "Richtung 1");
                 r.Reverse1 = d.D1ReverseDirection;
                 r.Spacing1 = d.D1Spacing;
                 r.Count1 = d.D1TotalInstances;
                 r.HasDirection2 = d.IsDirection2Specified();
                 if (r.HasDirection2)
                 {
-                    r.Direction2 = RequireDirection(d.D2Axis, "Richtung 2");
+                    r.Direction2 = RequireDirection((object)d.D2Axis, "Richtung 2");
                     r.Reverse2 = d.D2ReverseDirection;
                     r.Spacing2 = d.D2Spacing;
                     r.Count2 = d.D2TotalInstances;
@@ -41,7 +41,7 @@ namespace Spiegelwerk.Capture
                     (r.HasDirection2 && d.D2EndCondition != (int)swPatternEndCondition_e.swPatternEndCondition_SpacingAndInstances))
                     r.Notes.Add("„Bis Referenz“ wird als feste Anzahl und fester Abstand übernommen (Werte des Originals).");
 
-                ReadSeeds(r, d.BodyPattern, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, d.SkippedItemArray);
+                ReadSeeds(r, d.BodyPattern, (object)d.PatternFeatureArray, (object)d.PatternFaceArray, (object)d.PatternBodyArray, (object)d.SkippedItemArray);
                 NoteScope(d, r);
                 r.GeometryPattern = d.GeometryPattern;
                 r.VarySketch = d.VarySketch;
@@ -62,7 +62,7 @@ namespace Spiegelwerk.Capture
                 throw new NotSupportedException("Feature-Definition konnte nicht gelesen werden (AccessSelections).");
             try
             {
-                r.Axis = RequireDirection(d.Axis, "Achse");
+                r.Axis = RequireDirection((object)d.Axis, "Achse");
                 r.Reverse = d.ReverseDirection;
                 r.Spacing = d.Spacing;
                 r.Count = d.TotalInstances;
@@ -76,7 +76,7 @@ namespace Spiegelwerk.Capture
                     r.EqualSpacing2 = d.EqualSpacing2;
                 }
 
-                ReadSeeds(r, d.BodyPattern, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, d.SkippedItemArray);
+                ReadSeeds(r, d.BodyPattern, (object)d.PatternFeatureArray, (object)d.PatternFaceArray, (object)d.PatternBodyArray, (object)d.SkippedItemArray);
                 NoteScope(d, r);
                 r.GeometryPattern = d.GeometryPattern;
                 r.VarySketch = d.VarySketch;
@@ -96,7 +96,7 @@ namespace Spiegelwerk.Capture
                 throw new NotSupportedException("Feature-Definition konnte nicht gelesen werden (AccessSelections).");
             try
             {
-                r.Curve1 = RequirePatternCurve(d.D1Direction, "Kurve");
+                r.Curve1 = RequirePatternCurve((object)d.D1Direction, "Kurve");
                 r.Reverse1 = d.D1ReverseDirection;
                 r.Count1 = d.D1InstanceCount;
                 r.EqualSpacing1 = d.D1IsEqualSpaced;
@@ -116,7 +116,7 @@ namespace Spiegelwerk.Capture
                 r.HasDirection2 = d.Dir2Specified;
                 if (r.HasDirection2)
                 {
-                    r.Curve2 = RequirePatternCurve(d.D2Direction, "Richtung 2");
+                    r.Curve2 = RequirePatternCurve((object)d.D2Direction, "Richtung 2");
                     r.Reverse2 = d.D2ReverseDirection;
                     r.Count2 = d.D2InstanceCount;
                     r.EqualSpacing2 = d.D2IsEqualSpaced;
@@ -124,7 +124,7 @@ namespace Spiegelwerk.Capture
                     r.SeedOnly2 = d.D2PatternSeedOnly;
                 }
 
-                ReadSeeds(r, d.BodyPattern, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, d.SkippedItemArray);
+                ReadSeeds(r, d.BodyPattern, (object)d.PatternFeatureArray, (object)d.PatternFaceArray, (object)d.PatternBodyArray, (object)d.SkippedItemArray);
                 NoteScope(d, r);
                 r.GeometryPattern = d.GeometryPattern;
                 r.VarySketch = d.VarySketch;
@@ -154,12 +154,12 @@ namespace Spiegelwerk.Capture
                 };
                 if (!r.UseCentroid)
                 {
-                    (GeometryRef? point, bool origin) = ReadReferencePoint(d.ReferencePoint);
+                    (GeometryRef? point, bool origin) = ReadReferencePoint((object)d.ReferencePoint);
                     r.ReferencePoint = point;
                     r.ReferenceIsOrigin = origin;
                 }
 
-                ReadSeeds(r, d.BodyPattern, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, null);
+                ReadSeeds(r, d.BodyPattern, (object)d.PatternFeatureArray, (object)d.PatternFaceArray, (object)d.PatternBodyArray, null);
                 NoteScope(d, r);
                 r.GeometryPattern = d.GeometryPattern;
                 // Seed plus one instance per sketch point at most; indices without an instance give nothing.
@@ -187,17 +187,17 @@ namespace Spiegelwerk.Capture
                     UseCentroid = d.UseCentroid,
                     PropagateVisualProperty = d.PropagateVisualProperty,
                 };
-                r.Points.AddRange(TablePoints.FromArray(Doubles(d.PointArray)));
+                r.Points.AddRange(TablePoints.FromArray(Doubles((object)d.PointArray)));
                 if (r.Points.Count == 0) throw new NotSupportedException("Punkte des Tabellenmusters nicht lesbar.");
                 if (!r.UseCentroid)
                 {
-                    (GeometryRef? point, bool origin) = ReadReferencePoint(d.ReferencePoint);
+                    (GeometryRef? point, bool origin) = ReadReferencePoint((object)d.ReferencePoint);
                     r.ReferencePoint = point;
                     r.ReferenceIsOrigin = origin;
                 }
 
                 // No BodyPattern flag on this data object: a body pattern is one with seed bodies.
-                ReadSeeds(r, d.GetPatternBodyCount() > 0, d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, d.SkippedItemArray);
+                ReadSeeds(r, d.GetPatternBodyCount() > 0, (object)d.PatternFeatureArray, (object)d.PatternFaceArray, (object)d.PatternBodyArray, (object)d.SkippedItemArray);
                 NoteScope(d, r);
                 r.GeometryPattern = d.GeometryPattern;
                 // Seed plus one instance per table point at most; indices without an instance give nothing.
@@ -265,9 +265,9 @@ namespace Spiegelwerk.Capture
                 }
 
                 if (r.IsSeedCut)
-                    ReadSkipped(r, d.SkippedItemArray);
+                    ReadSkipped(r, (object)d.SkippedItemArray);
                 else
-                    ReadSeeds(r, IsBodyFillPattern(d), d.PatternFeatureArray, d.PatternFaceArray, d.PatternBodyArray, d.SkippedItemArray);
+                    ReadSeeds(r, IsBodyFillPattern(d), (object)d.PatternFeatureArray, (object)d.PatternFaceArray, (object)d.PatternBodyArray, (object)d.SkippedItemArray);
                 r.GeometryPattern = d.GeometryPattern;
                 r.PropagateVisualProperty = d.PropagateVisualProperty;
                 if (d.FeatureScope && !d.AutoSelect) r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
@@ -360,7 +360,7 @@ namespace Spiegelwerk.Capture
             {
                 // Not readable: the seed bodies decide.
             }
-            return d.PatternBodyArray is object[] bodies && bodies.Length > 0;
+            return (object)d.PatternBodyArray is object[] bodies && bodies.Length > 0;
         }
 
         /// <summary>
@@ -434,7 +434,7 @@ namespace Spiegelwerk.Capture
                     foreach (Body2 b in bs.OfType<Body2>())
                     {
                         // CenterOfMassX, Y, Z, Volume, ...
-                        var mp = (double[])b.GetMassProperties(1.0);
+                        var mp = (double[])(object)b.GetMassProperties(1.0);
                         if (mp != null && mp.Length >= 4) r.SeedBodies.Add(MassState.FromBodies(new[] { (mp[3], new Vec3(mp[0], mp[1], mp[2])) }));
                     }
             }

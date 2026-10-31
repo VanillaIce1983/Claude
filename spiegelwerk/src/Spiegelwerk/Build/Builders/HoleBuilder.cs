@@ -211,7 +211,7 @@ namespace Spiegelwerk.Build.Builders
 
         private static int HoleType(ModelDoc2 doc, Feature f)
         {
-            var d = (WizardHoleFeatureData2)f.GetDefinition();
+            var d = (WizardHoleFeatureData2)(object)f.GetDefinition();
             if (!d.AccessSelections(doc, null)) return -1;
             try
             {
@@ -225,7 +225,7 @@ namespace Spiegelwerk.Build.Builders
 
         private static List<string> Differences(ModelDoc2 doc, Feature f, IReadOnlyDictionary<string, double> wanted)
         {
-            var d = (WizardHoleFeatureData2)f.GetDefinition();
+            var d = (WizardHoleFeatureData2)(object)f.GetDefinition();
             if (!d.AccessSelections(doc, null)) return new List<string>();
             try
             {

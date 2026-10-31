@@ -27,21 +27,21 @@ namespace Spiegelwerk.Sw
 
         public static IEnumerable<Feature> TopLevelFeatures(ModelDoc2 doc)
         {
-            var f = (Feature)doc.FirstFeature();
+            var f = (Feature)(object)doc.FirstFeature();
             while (f != null)
             {
                 yield return f;
-                f = (Feature)f.GetNextFeature();
+                f = (Feature)(object)f.GetNextFeature();
             }
         }
 
         public static IEnumerable<Feature> SubFeatures(Feature parent)
         {
-            var f = (Feature)parent.GetFirstSubFeature();
+            var f = (Feature)(object)parent.GetFirstSubFeature();
             while (f != null)
             {
                 yield return f;
-                f = (Feature)f.GetNextSubFeature();
+                f = (Feature)(object)f.GetNextSubFeature();
             }
         }
 
@@ -70,8 +70,8 @@ namespace Spiegelwerk.Sw
         /// <summary>The single point of the origin "sketch"; used for relations and dimensions to the origin.</summary>
         public static SketchPoint OriginPoint(ModelDoc2 doc)
         {
-            var sketch = (Sketch)FindOrigin(doc).GetSpecificFeature2();
-            var points = (object[])sketch.GetSketchPoints2();
+            var sketch = (Sketch)(object)FindOrigin(doc).GetSpecificFeature2();
+            var points = (object[])(object)sketch.GetSketchPoints2();
             return (SketchPoint)points[0];
         }
 
@@ -80,7 +80,7 @@ namespace Spiegelwerk.Sw
             foreach (Feature f in TopLevelFeatures(doc))
             {
                 if (f.GetTypeName2() != "RefPlane") continue;
-                var rp = (RefPlane)f.GetSpecificFeature2();
+                var rp = (RefPlane)(object)f.GetSpecificFeature2();
                 yield return (f, math.PlaneOf(rp));
             }
         }
@@ -105,7 +105,7 @@ namespace Spiegelwerk.Sw
         public static List<Body2> SolidBodies(ModelDoc2 doc)
         {
             if (!(doc is PartDoc part)) return new List<Body2>();
-            var bodies = (object[])part.GetBodies2((int)swBodyType_e.swSolidBody, false);
+            var bodies = (object[])(object)part.GetBodies2((int)swBodyType_e.swSolidBody, false);
             return bodies?.Cast<Body2>().ToList() ?? new List<Body2>();
         }
 
@@ -118,7 +118,7 @@ namespace Spiegelwerk.Sw
             foreach (Body2 b in bodies)
             {
                 // CenterOfMassX, Y, Z, Volume, Area, Mass, moments ...
-                var mp = (double[])b.GetMassProperties(1.0);
+                var mp = (double[])(object)b.GetMassProperties(1.0);
                 if (mp == null || mp.Length < 4) continue;
                 items.Add((mp[3], new Vec3(mp[0], mp[1], mp[2])));
             }
@@ -129,7 +129,7 @@ namespace Spiegelwerk.Sw
         public static Line3 AxisLine(RefAxis ax)
         {
             // start point x,y,z, end point x,y,z
-            var p = (double[])ax.GetRefAxisParams();
+            var p = (double[])(object)ax.GetRefAxisParams();
             Vec3 a = Vec3.FromArray(p, 0), b = Vec3.FromArray(p, 3);
             return new Line3(a, b - a);
         }
@@ -156,7 +156,7 @@ namespace Spiegelwerk.Sw
         }
 
         public static Feature? FeatureByName(ModelDoc2 doc, string name) =>
-            doc is PartDoc p ? (Feature)p.FeatureByName(name) : null;
+            doc is PartDoc p ? (Feature)(object)p.FeatureByName(name) : null;
 
         public static bool HasFeatureNamed(ModelDoc2 doc, string name) => FeatureByName(doc, name) != null;
 
@@ -200,9 +200,9 @@ namespace Spiegelwerk.Sw
             return new NamedDimension(d.Name, d.SystemValue, dd.Type2);
         }
 
-        public static string IdOf(SketchPoint p) => "P" + string.Join("-", (int[])p.GetID());
+        public static string IdOf(SketchPoint p) => "P" + string.Join("-", (int[])(object)p.GetID());
 
-        public static string IdOf(SketchSegment s) => "S" + string.Join("-", (int[])s.GetID());
+        public static string IdOf(SketchSegment s) => "S" + string.Join("-", (int[])(object)s.GetID());
 
         public static string SketchNameOf(Sketch s) => ((Feature)s).Name;
     }

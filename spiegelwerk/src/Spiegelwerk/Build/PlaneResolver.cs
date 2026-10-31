@@ -463,7 +463,7 @@ namespace Spiegelwerk.Build
             return plane == null ? null : doc.Extension.GetLastFeatureAdded();
         }
 
-        private Plane3 PlaneOf(Feature f) => _ctx.Math.PlaneOf((RefPlane)f.GetSpecificFeature2());
+        private Plane3 PlaneOf(Feature f) => _ctx.Math.PlaneOf((RefPlane)(object)f.GetSpecificFeature2());
 
         private void Delete(Feature f)
         {

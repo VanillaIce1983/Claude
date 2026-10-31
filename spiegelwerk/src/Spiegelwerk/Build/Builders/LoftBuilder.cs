@@ -226,7 +226,7 @@ namespace Spiegelwerk.Build.Builders
             }
             bool ok = FeatureEdit.Loft(ctx.Doc, f, d =>
             {
-                var chains = (object[])d.PickPoints;
+                var chains = (object[])(object)d.PickPoints;
                 for (int i = 0; i < chains.Length; i++)
                 {
                     var points = (object[])chains[i];
@@ -241,13 +241,13 @@ namespace Spiegelwerk.Build.Builders
 
         private static List<List<Vec3>>? ReadPickPoints(ModelDoc2 doc, Feature f)
         {
-            var d = (LoftFeatureData)f.GetDefinition();
+            var d = (LoftFeatureData)(object)f.GetDefinition();
             if (!d.AccessSelections(doc, null)) return null;
             try
             {
                 if (!(d.PickPoints is object[] chains)) return null;
                 return chains.Select(c => (c as object[] ?? Array.Empty<object>()).OfType<MathPoint>()
-                    .Select(p => Vec3.FromArray((double[])p.ArrayData)).ToList()).ToList();
+                    .Select(p => Vec3.FromArray((double[])(object)p.ArrayData)).ToList()).ToList();
             }
             catch (Exception)
             {

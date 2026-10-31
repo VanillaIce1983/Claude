@@ -166,7 +166,7 @@ namespace Spiegelwerk.Build.Builders
         /// </summary>
         public static void LimitToOwnBodies(BuildContext ctx, Feature f, Func<Action<object>, bool> edit, List<string> notes)
         {
-            if (!(SwLate.Get(f.GetDefinition(), "FeatureScope") is bool)) return;
+            if (!(SwLate.Get((object)f.GetDefinition(), "FeatureScope") is bool)) return;
             bool set = false;
             bool ok = edit(d => set = SwLate.Call(d, "SetFeatureScope", true, false, OwnBodiesBeforeFeature(ctx)));
             if (!ok || !set) notes.Add("Der Feature-Bereich des Musters ließ sich nicht auf den gespiegelten Körper beschränken.");

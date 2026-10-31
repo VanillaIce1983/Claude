@@ -471,7 +471,7 @@ namespace Spiegelwerk.Build
             string template = _sw.GetUserPreferenceStringValue((int)swUserPreferenceStringValue_e.swDefaultTemplatePart);
             if (string.IsNullOrEmpty(template))
                 throw new InvalidOperationException("Keine Standardvorlage für Teile eingestellt (Optionen › Standardvorlagen).");
-            var target = (ModelDoc2)_sw.NewDocument(template, 0, 0, 0)
+            var target = (ModelDoc2)(object)_sw.NewDocument(template, 0, 0, 0)
                 ?? throw new InvalidOperationException($"Neues Teil aus Vorlage \"{template}\" konnte nicht angelegt werden.");
 
             // Same units as the original, so the copied dimensions read the same and copied

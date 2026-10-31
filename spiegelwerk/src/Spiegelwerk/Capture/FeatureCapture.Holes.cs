@@ -136,12 +136,12 @@ namespace Spiegelwerk.Capture
                 end = d.EndCondition;
                 reverse = d.ReverseDirection;
                 threadClass = d.ThreadClass ?? "";
-                face = ToGeometryRef(d.Face);
+                face = ToGeometryRef((object)d.Face);
                 if (face == null || (face.Kind != GeometryRefKind.Face && face.Kind != GeometryRefKind.Plane))
                     throw new NotSupportedException("Platzierungsfläche der Bohrung nicht lesbar.");
                 if (ExtrudeSide.NeedsReference((EndCondition)end))
                 {
-                    endReference = ToGeometryRef(d.GetEndConditionReference(out int _));
+                    endReference = ToGeometryRef((object)d.GetEndConditionReference(out int _));
                     if (endReference == null || endReference.Kind == GeometryRefKind.Unknown)
                         throw new NotSupportedException($"Bezug der Endbedingung {(EndCondition)end} ist im Original nicht lesbar.");
                 }

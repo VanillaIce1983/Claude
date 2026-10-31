@@ -122,7 +122,7 @@ namespace Spiegelwerk.Build.Builders
             {
                 bool ok = FeatureEdit.TablePattern(ctx.Doc, f, d =>
                 {
-                    if (!TablePoints.Same(TablePoints.FromArray(Doubles(d.PointArray)), points)) d.PointArray = TablePoints.ToArray(points);
+                    if (!TablePoints.Same(TablePoints.FromArray(Doubles((object)d.PointArray)), points)) d.PointArray = TablePoints.ToArray(points);
                     if (r.SkippedItems.Count > 0) d.SkippedItemArray = r.SkippedItems.ToArray();
                     if (d.UseCentroid != r.UseCentroid)
                     {
@@ -212,11 +212,11 @@ namespace Spiegelwerk.Build.Builders
         {
             try
             {
-                var d = (TablePatternFeatureData)f.GetDefinition();
+                var d = (TablePatternFeatureData)(object)f.GetDefinition();
                 if (!d.AccessSelections(doc, null)) return skippedToo && r.SkippedItems.Count > 0;
                 try
                 {
-                    return !TablePoints.Same(TablePoints.FromArray(Doubles(d.PointArray)), points) ||
+                    return !TablePoints.Same(TablePoints.FromArray(Doubles((object)d.PointArray)), points) ||
                            d.UseCentroid != r.UseCentroid || d.GeometryPattern != r.GeometryPattern ||
                            d.PropagateVisualProperty != r.PropagateVisualProperty ||
                            (skippedToo && r.SkippedItems.Count > 0);
@@ -244,7 +244,7 @@ namespace Spiegelwerk.Build.Builders
         {
             try
             {
-                var d = (TablePatternFeatureData)f.GetDefinition();
+                var d = (TablePatternFeatureData)(object)f.GetDefinition();
                 if (!d.AccessSelections(ctx.Doc, null)) return null;
                 try
                 {

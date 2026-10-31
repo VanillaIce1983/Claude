@@ -348,7 +348,7 @@ namespace Spiegelwerk.Build.Builders
         {
             try
             {
-                var d = (FillPatternFeatureData)f.GetDefinition();
+                var d = (FillPatternFeatureData)(object)f.GetDefinition();
                 if (!d.AccessSelections(doc, null)) return null;
                 try
                 {

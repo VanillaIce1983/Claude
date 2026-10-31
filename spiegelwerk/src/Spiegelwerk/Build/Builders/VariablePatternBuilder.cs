@@ -152,7 +152,7 @@ namespace Spiegelwerk.Build.Builders
             {
                 if (present.Any(p => SameColumn(p, name))) continue;
                 SwSelect.Clear(doc);
-                bool added = ((Annotation)dimension.GetAnnotation()).Select3(false, null) && d.AddDimension();
+                bool added = ((Annotation)(object)dimension.GetAnnotation()).Select3(false, null) && d.AddDimension();
                 SwSelect.Clear(doc);
                 if (!added) notes.Add($"Spalte „{name}“ ließ sich nicht anlegen.");
             }
@@ -222,7 +222,7 @@ namespace Spiegelwerk.Build.Builders
             var result = new List<string>();
             try
             {
-                var d = (DimPatternFeatureData)f.GetDefinition();
+                var d = (DimPatternFeatureData)(object)f.GetDefinition();
                 if (!d.AccessSelections(doc, null)) return result;
                 try
                 {

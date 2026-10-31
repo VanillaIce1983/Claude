@@ -132,7 +132,7 @@ namespace Spiegelwerk.Sw
         /// <summary>The position sketch of a hole: the sketch its hole points belong to.</summary>
         public static Feature? PositionSketch(ModelDoc2 doc, Feature hole)
         {
-            var d = (WizardHoleFeatureData2)hole.GetDefinition();
+            var d = (WizardHoleFeatureData2)(object)hole.GetDefinition();
             if (!d.AccessSelections(doc, null)) return null;
             try
             {
@@ -147,7 +147,7 @@ namespace Spiegelwerk.Sw
         /// <summary>Number of holes (points of the position sketch).</summary>
         public static int PointCount(ModelDoc2 doc, Feature hole)
         {
-            var d = (WizardHoleFeatureData2)hole.GetDefinition();
+            var d = (WizardHoleFeatureData2)(object)hole.GetDefinition();
             if (!d.AccessSelections(doc, null)) return -1;
             try
             {

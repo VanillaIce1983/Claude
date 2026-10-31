@@ -14,21 +14,21 @@ namespace Spiegelwerk.Sw
 
         public SwMath(SldWorks sw)
         {
-            _mu = (MathUtility)sw.GetMathUtility();
+            _mu = (MathUtility)(object)sw.GetMathUtility();
         }
 
         public Vec3 TransformPoint(Vec3 p, MathTransform t)
         {
-            var mp = (MathPoint)_mu.CreatePoint(p.ToArray());
-            mp = (MathPoint)mp.MultiplyTransform(t);
-            return Vec3.FromArray((double[])mp.ArrayData);
+            var mp = (MathPoint)(object)_mu.CreatePoint(p.ToArray());
+            mp = (MathPoint)(object)mp.MultiplyTransform(t);
+            return Vec3.FromArray((double[])(object)mp.ArrayData);
         }
 
         public Vec3 TransformVector(Vec3 v, MathTransform t)
         {
-            var mv = (MathVector)_mu.CreateVector(v.ToArray());
-            mv = (MathVector)mv.MultiplyTransform(t);
-            return Vec3.FromArray((double[])mv.ArrayData);
+            var mv = (MathVector)(object)_mu.CreateVector(v.ToArray());
+            mv = (MathVector)(object)mv.MultiplyTransform(t);
+            return Vec3.FromArray((double[])(object)mv.ArrayData);
         }
 
         /// <summary>Frame whose local coordinates the transform maps to world coordinates.</summary>
@@ -45,7 +45,7 @@ namespace Spiegelwerk.Sw
         public Frame3 SketchFrame(Sketch sketch)
         {
             MathTransform modelToSketch = sketch.ModelToSketchTransform;
-            return FrameOf((MathTransform)modelToSketch.Inverse());
+            return FrameOf((MathTransform)(object)modelToSketch.Inverse());
         }
 
         /// <summary>Plane of a reference plane; its transform's Z axis is the plane normal.</summary>
@@ -63,10 +63,10 @@ namespace Spiegelwerk.Sw
 
         public MathTransform ToMathTransform(Affine a)
         {
-            var x = (MathVector)_mu.CreateVector(a.Col0.ToArray());
-            var y = (MathVector)_mu.CreateVector(a.Col1.ToArray());
-            var z = (MathVector)_mu.CreateVector(a.Col2.ToArray());
-            var t = (MathVector)_mu.CreateVector(a.Translation.ToArray());
+            var x = (MathVector)(object)_mu.CreateVector(a.Col0.ToArray());
+            var y = (MathVector)(object)_mu.CreateVector(a.Col1.ToArray());
+            var z = (MathVector)(object)_mu.CreateVector(a.Col2.ToArray());
+            var t = (MathVector)(object)_mu.CreateVector(a.Translation.ToArray());
             return _mu.ComposeTransform(x, y, z, t, 1.0);
         }
     }

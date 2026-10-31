@@ -123,7 +123,7 @@ namespace Spiegelwerk.Build.Builders
         {
             try
             {
-                var d = (SketchPatternFeatureData)f.GetDefinition();
+                var d = (SketchPatternFeatureData)(object)f.GetDefinition();
                 if (!d.AccessSelections(doc, null)) return false;
                 try
                 {
@@ -145,7 +145,7 @@ namespace Spiegelwerk.Build.Builders
         {
             try
             {
-                var d = (SketchPatternFeatureData)f.GetDefinition();
+                var d = (SketchPatternFeatureData)(object)f.GetDefinition();
                 if (!d.AccessSelections(ctx.Doc, null)) return null;
                 try
                 {
