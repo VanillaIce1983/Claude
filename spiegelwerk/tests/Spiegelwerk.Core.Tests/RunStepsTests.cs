@@ -64,6 +64,11 @@ namespace Spiegelwerk.Core.Tests
             Assert.False(asm.Cancelled);
             asm.Append(new MirrorReport { Aborted = true, Cancelled = true }, "Lasche-1");
             Assert.True(asm.Cancelled);
+            // A later component that runs through clears neither flag.
+            asm.Append(new MirrorReport(), "Halter-2");
+            Assert.True(asm.Aborted);
+            Assert.True(asm.Cancelled);
+            Assert.EndsWith("– abgebrochen", asm.Summary);
         }
     }
 }

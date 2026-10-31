@@ -104,6 +104,8 @@ namespace Spiegelwerk.Build
             var report = new MirrorReport();
             ModelDoc2 source = req.Source;
             MirrorOptions opt = req.Options;
+            // Body pointers do not survive the rollbacks of capture and measurement; names do.
+            var selectedBodyNames = new HashSet<string>(req.Bodies.Select(b => b.Name), StringComparer.Ordinal);
 
             // ---- 1. capture
             // In an open sketch the rollback for the measurement fails, and the first new sketch would close it instead of opening one.
@@ -129,6 +131,8 @@ namespace Spiegelwerk.Build
                     report.Aborted = true;
                     return new MirrorJobResult(report, null);
                 }
+                if (features.FirstOrDefault(f => UnsupportedFeatures.RefusesRun(f.GetTypeName2())) is Feature carrier)
+                    throw new InvalidOperationException(UnsupportedFeatures.RunRefusal(carrier.Name, carrier.GetTypeName2()));
                 progress.Start(features.Count, opt.VerifySteps);
                 var capture = new FeatureCapture(source, _math);
                 records = new List<FeatureRecord>();
@@ -160,7 +164,7 @@ namespace Spiegelwerk.Build
             foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) ctx.PointSketches.Add(pattern.SketchName);
             report.General.Add($"Spiegelebene: {ReportText.Plane(req.MirrorPlane)}");
             // New part: only the part's material is copied. Same part: a body of its own gets the part's material.
-            if (opt.Target == MirrorTarget.NewPart ? opt.CopyMaterial : separateBody) NoteBodyMaterials(source, req.Bodies, report);
+            if (opt.Target == MirrorTarget.NewPart ? opt.CopyMaterial : separateBody) NoteBodyMaterials(source, selectedBodyNames, req.Features.Count > 0 ? features : null, report);
 
             try
             {
@@ -499,9 +503,11 @@ namespace Spiegelwerk.Build
 
         /// <summary>
         /// Materials of single bodies (multi-body parts) are not carried over; the report says
-        /// which. Selected bodies, else all. Only a note: never stops the run.
+        /// which. The bodies that are mirrored: the selected ones (by name, read fresh), with
+        /// selected features those the collected features change, else all. Only a note: never
+        /// stops the run.
         /// </summary>
-        private static void NoteBodyMaterials(ModelDoc2 source, List<Body2> selected, MirrorReport report)
+        private static void NoteBodyMaterials(ModelDoc2 source, HashSet<string> selectedBodies, List<Feature>? collected, MirrorReport report)
         {
             try
             {
@@ -509,7 +515,13 @@ namespace Spiegelwerk.Build
                 string config = source.GetActiveConfiguration() is Configuration active ? active.Name : "";
                 string db = "";
                 string partMaterial = part.GetMaterialPropertyName2(config, out db);
-                List<Body2> bodies = selected.Count > 0 ? selected : SwDoc.SolidBodies(source);
+                List<Body2> bodies = SwDoc.SolidBodies(source);
+                if (selectedBodies.Count > 0) bodies = bodies.Where(b => selectedBodies.Contains(b.Name)).ToList();
+                else if (collected != null)
+                {
+                    var rebuilt = new HashSet<string>(collected.Where(f => !SwDoc.IsSketch(f)).Select(f => f.Name), StringComparer.Ordinal);
+                    bodies = bodies.Where(b => b.GetFeatures() is object[] fs && fs.OfType<Feature>().Any(f => rebuilt.Contains(f.Name))).ToList();
+                }
                 var materials = new List<(string, string)>();
                 foreach (Body2 b in bodies) materials.Add((b.Name, b.GetMaterialPropertyName(config, out db)));
                 if (BodyMaterials.Note(partMaterial, materials) is string note) report.General.Add(note);

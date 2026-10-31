@@ -70,6 +70,25 @@ namespace Spiegelwerk.UI
             buttons.Controls.Add(close);
             buttons.Controls.Add(copy);
             AcceptButton = close;
+            // Shown modeless, the form runs in the SOLIDWORKS message loop, which never calls the
+            // WinForms dialog-key processing: AcceptButton, Enter on a button and Tab would do
+            // nothing. KeyPreview still reaches the form from the focused control's window procedure.
+            KeyPreview = true;
+            KeyDown += (s, a) =>
+            {
+                if (a.Control || a.Alt) return;
+                if (a.KeyCode == Keys.Tab)
+                {
+                    a.SuppressKeyPress = true;
+                    SelectNextControl(ActiveControl, !a.Shift, true, true, true);
+                }
+                else if (a.KeyCode == Keys.Enter)
+                {
+                    a.SuppressKeyPress = true;
+                    if (ActiveControl is Button b) b.PerformClick();
+                    else close.PerformClick();
+                }
+            };
 
             Controls.Add(list);
             Controls.Add(buttons);
