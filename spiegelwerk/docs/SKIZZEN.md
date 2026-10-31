@@ -117,11 +117,11 @@ Die Textposition ist kein Schmuck: Bei Winkelbemaßungen entscheidet sie, ob 60�
 // SketchBuilder.PlaceDimension (vereinfacht)
 object created = _doc.AddDimension2(pos.X, pos.Y, pos.Z);   // bzw. Horizontal-/Vertikal-/Radius-/Durchmesser-Variante
 double measured = dd.GetDimension2(0).SystemValue;
-if (Matches(dim, measured)) return dd;                      // misst dasselbe wie im Original
+if (dim.Matches(measured)) return dd;                       // misst dasselbe wie im Original
 DeleteDimension(dd);                                        // sonst: weg, nächster Versuch
 ```
 
-Die API-Hilfe sagt nicht eindeutig, ob die Position in Modell- oder Skizzenkoordinaten gelesen wird; Spiegelwerk versucht beides und behält die Bemaßung, die stimmt. Erst dann wird der exakte Wert gesetzt (`SetSystemValue3`, alle Konfigurationen; ein Fehlercode wird gemeldet), getriebene Bemaßungen werden wieder getrieben, und der Name (`D1`) wird übernommen, damit Gleichungen wie `"D1@Skizze1" = …` weiter passen. Hat SOLIDWORKS eine im Original treibende Bemaßung als getrieben angelegt, weil sie die Kopie überbestimmen würde, steht das im Bericht – Gleichungen darauf wirken dann nicht.
+Als dasselbe gilt bei Winkeln eine Abweichung bis 1e-6 rad, bei Längen bis relativ 1e-6, mindestens aber bis 0,1 µm (`SkDimension.Matches`, Tests in `RecordRulesTests`). Die API-Hilfe sagt nicht eindeutig, ob die Position in Modell- oder Skizzenkoordinaten gelesen wird; Spiegelwerk versucht beides und behält die Bemaßung, die stimmt. Erst dann wird der exakte Wert gesetzt (`SetSystemValue3`, alle Konfigurationen; ein Fehlercode wird gemeldet), getriebene Bemaßungen werden wieder getrieben, und der Name (`D1`) wird übernommen, damit Gleichungen wie `"D1@Skizze1" = …` weiter passen. Lässt sich der Name nicht wiederherstellen, steht im Bericht, wie die Bemaßung in der Kopie heißt. Hat SOLIDWORKS eine im Original treibende Bemaßung als getrieben angelegt, weil sie die Kopie überbestimmen würde, steht auch das im Bericht. Gleichungen auf eine Bemaßung, die in der Kopie anders heißt, einen anderen Wert hat oder getrieben statt treibend ist, übernimmt Spiegelwerk nicht.
 
 Damit `AddDimension2` nicht blockiert und nichts überbestimmt wird, schaltet `SwPreferences` für die Dauer des Laufs ab: *Bemaßungswert eingeben*, automatische Beziehungen, Skizzenfang, Rückfrage bei überbestimmenden Bemaßungen.
 

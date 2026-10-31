@@ -8,11 +8,13 @@ Spiegelwerk ist eine eigenständige Entwicklung und steht in keiner Verbindung z
 
 | Kontext | Ergebnis |
 | --- | --- |
-| **Teil → neues Teil** | Gegenstück in einem neuen Dokument. Feature-Namen und Bemaßungsnamen bleiben erhalten, Gleichungen, Werkstoff und Einheitensystem werden übernommen. |
-| **Teil → selbes Teil** | Die gespiegelten Features werden im selben Teil angelegt. Ganzes Teil oder gewählte Körper: eigener Körper, Schnitte wirken nur auf ihn. Nur gewählte Features (z. B. eine Tasche): sie wirken auf die vorhandenen Körper. Optional wird das Original danach gelöscht. |
-| **Baugruppe** | Gewählte Komponenten werden als Gegenstück neu aufgebaut, neben dem Original gespeichert (`Name_gespiegelt.SLDPRT`) und an der gespiegelten Lage eingefügt. |
+| **Teil → neues Teil** | Gegenstück in einem neuen Dokument. Feature-Namen und Bemaßungsnamen werden übernommen, ebenso Werkstoff und Einheitensystem. Bemaßungen, die sich nicht eindeutig zuordnen oder umbenennen lassen, und die von Referenzebenen, -achsen und Koordinatensystemen behalten den Namen, den SOLIDWORKS vergibt. Werkstoffe einzelner Körper (Mehrkörperteile) kommen nicht mit; der Bericht nennt sie. Gleichungen kommen nur mit, wenn jede Bemaßung, die sie nennen, in der Kopie sicher dieselbe ist (Name zurückgegeben, gleicher Wert); die übrigen nennt der Bericht. Winkeleinheit und automatische Lösungsreihenfolge werden übernommen, ebenso ob eine Gleichung deaktiviert oder unterdrückt ist; die Verknüpfung mit einer externen Gleichungsdatei nicht. |
+| **Teil → selbes Teil** | Die gespiegelten Features werden im selben Teil angelegt. Ganzes Teil oder gewählte Körper: eigener Körper, Schnitte wirken nur auf ihn. Er bekommt den Werkstoff des Teils; Werkstoffe einzelner Körper nennt der Bericht. Nur gewählte Features (z. B. eine Tasche): sie wirken auf die vorhandenen Körper. Gleichungen werden nicht übertragen: Maße, die im Original von Gleichungen getrieben werden, sind in der Kopie feste Werte; der Bericht nennt sie. Optional wird das Original danach gelöscht. |
+| **Baugruppe** | Gewählte Komponenten werden als Gegenstück neu aufgebaut, neben dem Original gespeichert (`Name_gespiegelt.SLDPRT`) und an der gespiegelten Lage eingefügt. Nur Teile der obersten Ebene; Teile in einer Unterbaugruppe werden mit Begründung abgelehnt. Wird dieselbe Komponente noch einmal gespiegelt, entsteht `Name_gespiegelt_2.SLDPRT` und wird ebenfalls eingefügt; das alte Gegenstück bleibt in der Baugruppe und wird weder ersetzt noch aktualisiert (bei Bedarf von Hand löschen). |
 
 Nach jedem Lauf zeigt ein Bericht pro Feature, ob es neu aufgebaut wurde, was angepasst werden musste, ob **Volumen und Schwerpunkt** der Änderung mit dem gespiegelten Original übereinstimmen und ob die gespiegelten **Flächenproben** des Originals auf der Kopie liegen. Unterdrückte und im Original fehlerhafte Features werden übersprungen und genannt.
+
+Das Berichtsfenster ist nicht modal: Das Modell bleibt bedienbar, das Fenster bleibt offen bis „Schließen“. In eine Datei wird der Bericht nicht geschrieben; „Als Text kopieren“ legt ihn in die Zwischenablage. Längen stehen im Bericht immer in mm, auch in Zoll-Dokumenten, mit dem Dezimaltrennzeichen von Windows. Die Spiegelebene wird über ihren Punkt angegeben, der dem Ursprung am nächsten liegt, z. B. „Ebene durch (52,5|0|0) mm, Normale (1|0|0)“. In einer Baugruppe nennt die Kopfzeile die Baugruppe, und jede Komponente bekommt eine Zeile wie „— Halter-1 → Halter_gespiegelt.SLDPRT: …“ mit ihrer Zusammenfassung.
 
 ## Unterstützte Features
 
@@ -37,18 +39,22 @@ Nach jedem Lauf zeigt ein Bericht pro Feature, ob es neu aufgebaut wurde, was an
 | Füllmuster | Begrenzung (Flächen oder Skizze), Richtung, Layout (kreisförmig, quadratisch, polygonal, versetzt), Abstand oder Anzahl, Rand, Ringabstand, Saat-Features oder Saat-Schnitt (Kreis, Quadrat, Raute, Polygon), Lage der Saat (auch der Ursprung, wenn die Spiegelebene durch ihn geht), übersprungene Instanzen (nach Nummer, mit Hinweis – die Spiegelung dreht die Reihenfolge in der Ebene um). Im selben Teil auf die gespiegelten Körper beschränkt; ein Feature-Bereich des Originals wird nicht übernommen. Ein versetztes Gitter bekommt den Ergänzungswinkel (π − θ, symmetrische Gitter bleiben), ein gedrehter Saat-Schnitt die Gegendrehung; die Prüfung kann beides zurücknehmen. |
 | Variables Muster | Tabelle mit Instanzen, ihren Werten für die steuernden Bemaßungen der Saat (Skizzen- und Feature-Bemaßungen) und ihrer Unterdrückung. Die Werte bleiben gleich, die Spalten zeigen auf die Bemaßungen der gespiegelten Saat. Nicht: Bemaßungen von Referenzebenen. Einen Feature-Bereich gibt es in der API nicht; im selben Teil schützt die Prüfung der Originalkörper. |
 | Referenzebene, Referenzachse, Koordinatensystem | Neu an gespiegelter Lage, nur von den Standardebenen bzw. fixierter Hilfsgeometrie abhängig. Ein gespiegeltes Koordinatensystem wäre linkshändig; die Kopie behält X und Y gespiegelt und bekommt Z = X × Y. |
-| Noch nicht | 3D-Skizzen, Skizzentext. Spiegel-Features im Original werden bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. Sie erscheinen im Bericht; Features, die darauf aufbauen, können dann ebenfalls scheitern. Wie ein weiterer Typ dazukommt, steht in der [Architektur](docs/ARCHITEKTUR.md#einen-feature-typ-ergänzen). |
+| Noch nicht | 3D-Skizzen, Skizzentext, Blech. Blech-Features (Basislasche, Kantenlasche, Abwicklung, Biegungen, Ecken …) erscheinen im Bericht als Fehler mit „Blech wird nicht unterstützt“. Spiegel-Features im Original werden bewusst nicht nachgebaut, weil Spiegelwerk die Spiegel-API nicht verwendet. Der Bericht nennt jedes mit eigener Abhilfe: ein Spiegel-Feature im Original durch die gespiegelten Einzel-Features ersetzen oder nach dem Lauf von Hand spiegeln; „Körper spiegeln“ nach dem Lauf im Ziel von Hand nachholen; bei „Teil spiegeln“ ist das Ausgangsteil bis auf die Lage selbst das Gegenstück. Features, die auf einem nicht nachgebauten Feature aufbauen, können ebenfalls scheitern. Wie ein weiterer Typ dazukommt, steht in der [Architektur](docs/ARCHITEKTUR.md#einen-feature-typ-ergänzen). |
 
 ## Bedienung
 
 Befehl **Unabhängig spiegeln** (Registerkarte *Spiegelwerk*, Menü und Symbolleiste) in Teilen und Baugruppen:
 
-1. **Spiegelebene:** Referenzebene oder ebene Fläche wählen – oder ohne Auswahl eine temporäre Ebene (YZ, XZ, XY mit Abstand), die nicht im Modell angelegt wird.
-2. **Zu spiegelnde Elemente:** Features, Skizzen, Ebenen, Achsen, Koordinatensysteme oder Körper; leer lassen für das ganze Teil. In Baugruppen: Komponenten.
-3. **Ergebnis:** neues Teil oder selbes Teil, Original löschen, Werkstoff und Gleichungen übernehmen, Namenszusatz.
+1. **Spiegelebene:** Referenzebene oder ebene Fläche wählen – oder ohne Auswahl eine temporäre Ebene (YZ, XZ, XY mit Abstand), die nicht im Modell angelegt wird. Solange eine Ebene gewählt ist, ist die temporäre Ebene gesperrt.
+2. **Zu spiegelnde Elemente:** Features, Skizzen, Ebenen, Achsen, Koordinatensysteme oder Körper; leer lassen für das ganze Teil. In Baugruppen: Komponenten (Teile der obersten Ebene).
+3. **Ergebnis:** neues Teil oder selbes Teil, Original löschen, Werkstoff und Gleichungen übernehmen, Namenszusatz. Optionen, die dabei nichts bewirken, sind gesperrt: Werkstoff und Gleichungen gibt es nur für ein neues Teil und in Baugruppen, den Namenszusatz nur im selben Teil und in Baugruppen, „Original löschen“ nur im selben Teil. Das Original wird nur gelöscht, wenn alles fehlerfrei gespiegelt wurde, nichts anderes vom Original abhängt und das Teil nur eine Konfiguration hat. Entstehen aus den Original-Features auch nicht gewählte Körper, bleibt es ebenfalls stehen. Den Grund nennt der Bericht.
 4. **Prüfung und Bezüge:** jeden Schritt prüfen, fehlende Skizzenbezüge durch fixierte Hilfsgeometrie ersetzen oder weglassen, beim ersten Fehler abbrechen.
 
-Die Rückrollleiste muss am Ende des Feature-Baums stehen.
+Eine Auswahl, die sich nicht spiegeln lässt (eine nicht ebene Fläche als Spiegelebene, eine temporäre Achse, eine unterdrückte oder virtuelle Komponente, eine Unterbaugruppe oder ein Teil darin), nimmt die Seite nicht an; der Grund steht in der Meldung oben auf der PropertyManager-Seite.
+
+Die Rückrollleiste muss am Ende des Feature-Baums stehen, und es darf keine Skizze zur Bearbeitung geöffnet sein.
+
+Während des Laufs zeigt die Statusleiste von SOLIDWORKS einen Fortschrittsbalken mit Phase und Feature („Spiegelwerk – Aufbauen: Austragung1“; Phasen Erfassen, Vermessen nur mit „Jeden Schritt prüfen“, Aufbauen, zum Schluss Abschließen). Mit Esc lässt sich der Lauf zwischen zwei Features abbrechen. Nach der Rückfrage „Spiegeln hier abbrechen?“ hält er an wie bei „Beim ersten Fehler abbrechen“: Was aufgebaut ist, bleibt, und der Bericht nennt das letzte Feature und wie viele nicht mehr aufgebaut wurden. Wird beim Erfassen oder Vermessen abgebrochen, wird nichts aufgebaut und kein neues Teil angelegt. Nach einem Abbruch wird das Original nicht gelöscht; in einer Baugruppe werden keine weiteren Komponenten gespiegelt, und ein angefangenes Gegenstück bleibt ungespeichert offen.
 
 ## Bauen und installieren
 
@@ -82,7 +88,7 @@ spiegelwerk/
     Capture/                   Original lesen: Feature-Auswahl, Skizzen, Feature-Daten, Mengenmessung
     Build/                     Ziel aufbauen: Ebenen, Kanten/Flächen wiederfinden, Skizzen, Builder je Feature-Typ, Prüfung
     AssemblyContext/           Komponenten spiegeln, speichern, einfügen
-  tests/Spiegelwerk.Core.Tests xUnit
+  tests/Spiegelwerk.Core.Tests xUnit, prüft auch die aus swconst kopierten Zahlen
   docs/                        Architektur, Skizzen spiegeln, Stolpersteine
 ```
 
