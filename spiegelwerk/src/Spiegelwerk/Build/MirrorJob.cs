@@ -154,6 +154,15 @@ namespace Spiegelwerk.Build
                 if (opt.VerifySteps && !MassCapture.Measure(source, records, progress, rebuilt)) return CancelledBeforeBuild(report, RunSteps.Measure);
             }
 
+            // Capture and measurement end with the bar at the end; an interrupted regeneration may have stopped it mid-tree.
+            if (!SwDoc.RollToEnd(source))
+            {
+                report.Aborted = true;
+                report.General.Add("Die Rückrollleiste des Originals ließ sich nach dem Erfassen nicht wieder ans Ende setzen (Neuaufbau unterbrochen?). " +
+                                   "Es wurde nichts aufgebaut; bitte die Leiste ans Ende setzen und erneut spiegeln.");
+                return new MirrorJobResult(report, null);
+            }
+
             // ---- 2. target
             ModelDoc2 target = opt.Target == MirrorTarget.SamePart ? source : CreatePart(source, opt, report);
             report.TargetName = target.GetTitle();
@@ -185,12 +194,18 @@ namespace Spiegelwerk.Build
                         {
                             report.Aborted = report.Cancelled = true;
                             report.General.Add(RunSteps.CancelledInBuild(records[i].Name, records.Count - i - 1));
+                            // Sketches already reported as built with a hole that now is not built.
+                            foreach (PositionedHoleRecord hole in records.Skip(i + 1).OfType<PositionedHoleRecord>()) WithdrawParts(ctx, hole.Name);
                             break;
                         }
                     }
                 }
                 progress.Show(RunSteps.Finish);
                 target.EditRebuild3();
+                bool atEnd = SwDoc.RollToEnd(target);
+                if (!atEnd)
+                    report.General.Add("Achtung: Die Rückrollleiste steht nach dem Aufbau nicht am Ende des Feature-Baums (Neuaufbau unterbrochen?). " +
+                                       "Bitte ans Ende setzen und das Ergebnis prüfen.");
 
                 // ---- 3. finish
                 if (opt.Target == MirrorTarget.NewPart)
@@ -202,7 +217,8 @@ namespace Spiegelwerk.Build
                 else
                 {
                     NoteEquationDrivenDimensions(source, ctx, report);
-                    if (opt.DeleteOriginal) DeleteOriginals(source, features, bodyScope, report);
+                    if (opt.DeleteOriginal && !atEnd) report.General.Add("Original nicht gelöscht: Die Rückrollleiste steht nicht am Ende.");
+                    else if (opt.DeleteOriginal) DeleteOriginals(source, features, bodyScope, report);
                 }
             }
             catch (Exception ex)
@@ -550,7 +566,8 @@ namespace Spiegelwerk.Build
 
         /// <summary>
         /// Global variables and equations, copied verbatim, with angle unit, solve order and
-        /// disabled or suppressed state. They name dimensions ("D1@Skizze1"): an equation is
+        /// disabled state; an equation suppressed in an older original (before SOLIDWORKS 2014)
+        /// becomes disabled – the new part ignores Suppression. They name dimensions ("D1@Skizze1"): an equation is
         /// only copied if each dimension it names is known to be the same one in the copy, else
         /// it would silently drive another. In the original they give the values the copy
         /// already has, so the part must stay as it is – checked by volume and centroid.
@@ -578,8 +595,8 @@ namespace Spiegelwerk.Build
                 if (index >= 0)
                 {
                     ok++;
-                    if (disabled) dst.set_Disabled(index, true);
-                    if (suppressed) dst.set_Suppression(index, true);
+                    // IEquationMgr.Suppression is ignored in documents created as of SOLIDWORKS 2014, the new part is one; Disabled is its equivalent there.
+                    if (disabled || suppressed) dst.set_Disabled(index, true);
                     continue;
                 }
                 if (EquationText.Driven(eq) is string driven && EquationText.Dimension(driven) == null) dropped.Add(driven);
