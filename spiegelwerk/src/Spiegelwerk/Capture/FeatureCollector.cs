@@ -95,11 +95,24 @@ namespace Spiegelwerk.Capture
                     foreach (Feature f in bodyFeatures.OfType<Feature>()) wanted.Add(f.Name);
             }
 
-            // Seeds of wanted patterns (also of patterns of patterns).
-            var queue = new Queue<Feature>(all.Where(x => wanted.Contains(x.Name)));
+            // Seeds of wanted patterns (also of patterns of patterns). Only the seed bodies of a
+            // pattern the user chose (or of a seed of one) count as selected; a pattern that comes
+            // along only because it built a selected body leaves its seed body outside the
+            // selection – deleting the original would take that body away.
+            var chosen = new HashSet<string>(features.Select(f => f.Name), StringComparer.Ordinal);
+            var queue = new Queue<(Feature Feature, bool Chosen)>(all.Where(x => wanted.Contains(x.Name)).Select(x => (x, chosen.Contains(x.Name))));
             while (queue.Count > 0)
-                foreach (Feature seed in SeedsOf(doc, queue.Dequeue(), selectedBodies, ref seedBodies))
-                    if (wanted.Add(seed.Name)) queue.Enqueue(seed);
+            {
+                (Feature pattern, bool isChosen) = queue.Dequeue();
+                HashSet<string> seedNames = isChosen ? selectedBodies : new HashSet<string>(StringComparer.Ordinal);
+                foreach (Feature seed in SeedsOf(doc, pattern, seedNames, ref seedBodies))
+                {
+                    bool added = wanted.Add(seed.Name);
+                    // Reached again from a chosen pattern: its own seed bodies now count as selected too.
+                    bool promoted = isChosen && chosen.Add(seed.Name);
+                    if (added || promoted) queue.Enqueue((seed, isChosen));
+                }
+            }
 
             // Sketches the wanted features are built from (absorbed or shared). Planes, axes and
             // coordinate systems are rebuilt from their geometry alone; the 2D sketches they sit
@@ -118,7 +131,7 @@ namespace Spiegelwerk.Capture
             return all.Where(f => wanted.Contains(f.Name) && !SwDoc.IsSystemFeature(f) && !standard.Contains(f.Name)).ToList();
         }
 
-        private static bool IsDatum(Feature f) => f.GetTypeName2() is "RefPlane" or "RefAxis" or "CoordSys";
+        internal static bool IsDatum(Feature f) => f.GetTypeName2() is "RefPlane" or "RefAxis" or "CoordSys";
 
         /// <summary>
         /// Every solid body of the part with the features that made it, judged against what was

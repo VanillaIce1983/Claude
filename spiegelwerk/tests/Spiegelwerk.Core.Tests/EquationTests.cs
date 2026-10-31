@@ -70,6 +70,15 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void One_of_two_equal_values_left_in_the_copy_belongs_to_neither()
+        {
+            // Both directions 10 mm in the original, the copy has only one of them: which one is unknown.
+            DimensionMatch m = DimensionMatcher.Match(new[] { Dim("D1", 0.01), Dim("D2", 0.01) }, new[] { Dim("D3", 0.01) });
+            Assert.Equal(new[] { -1, -1 }, m.Counterparts);
+            Assert.Empty(m.Renames);
+        }
+
+        [Fact]
         public void Equal_values_of_another_kind_are_other_dimensions()
         {
             // 0.1 m and 0.1 rad: only the linear one is the depth.

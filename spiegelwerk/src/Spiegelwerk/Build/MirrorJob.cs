@@ -145,7 +145,9 @@ namespace Spiegelwerk.Build
                         records[i] = capture.CaptureOnItsOwn(features[i], part);
                 MarkOtherBodies(records, bodyScope);
                 for (int i = 0; i < records.Count; i++) CaptureDimensions(features[i], records[i]);
-                if (opt.VerifySteps && !MassCapture.Measure(source, records, progress)) return CancelledBeforeBuild(report, RunSteps.Measure);
+                // With selected bodies, a feature may also change a body that is gone at the end; only the rolled-back state shows it.
+                ISet<string>? rebuilt = req.Bodies.Count > 0 || seedBodies ? new HashSet<string>(features.Select(f => f.Name), StringComparer.Ordinal) : null;
+                if (opt.VerifySteps && !MassCapture.Measure(source, records, progress, rebuilt)) return CancelledBeforeBuild(report, RunSteps.Measure);
             }
 
             // ---- 2. target
@@ -295,12 +297,7 @@ namespace Spiegelwerk.Build
         private static void MarkOtherBodies(List<FeatureRecord> records, BodyScope scope)
         {
             foreach (FeatureRecord r in records)
-                if (scope.OtherBodiesChanged.TryGetValue(r.Name, out List<string> bodies))
-                {
-                    r.OtherBodies.AddRange(bodies);
-                    r.Notes.Add($"Das Original verändert auch Körper, die nicht mitgespiegelt werden ({Quoted(bodies)}). " +
-                                "Die Kopie wirkt nur auf die gespiegelten Körper und wurde deshalb nicht mit dem Original verglichen.");
-                }
+                if (scope.OtherBodiesChanged.TryGetValue(r.Name, out List<string> bodies)) MassCapture.NoteOtherBodies(r, bodies);
         }
 
         private static string Quoted(IEnumerable<string> names) => string.Join(", ", names.Select(n => $"\"{n}\""));
@@ -395,13 +392,18 @@ namespace Spiegelwerk.Build
         /// such a feature would count neither as mirrored nor as the job's own body, and a cut or
         /// pattern without feature scope may already have changed the original: what the step
         /// added is deleted again. Deleting keeps absorbed sketches – those of earlier steps were
-        /// at the top level before and stay, one made in this step comes up in the second round.
+        /// at the top level before or sit under an earlier feature too (a shared sketch) and stay,
+        /// one made in this step comes up in the second round.
         /// </summary>
         private static void RemoveLeftovers(BuildContext ctx, HashSet<string> before, BuildResult result)
         {
             var removed = new List<string>();
             try
             {
+                // A shared sketch of an earlier step is also a sub-feature of the new feature; it
+                // stays in the model under the earlier one and must stay registered.
+                var shared = new HashSet<string>(SwDoc.TopLevelFeatures(ctx.Doc).Where(t => before.Contains(t.Name))
+                    .SelectMany(SwDoc.SubFeatures).Select(s => s.Name), StringComparer.Ordinal);
                 for (int round = 0; round < 2; round++)
                 {
                     List<Feature> made = NewFeatures(ctx.Doc, before);
@@ -411,7 +413,7 @@ namespace Spiegelwerk.Build
                     {
                         names.Add(f.Name);
                         if (!removed.Contains(f.Name)) removed.Add(f.Name);
-                        foreach (Feature sub in SwDoc.SubFeatures(f).Where(s => !before.Contains(s.Name))) names.Add(sub.Name);
+                        foreach (Feature sub in SwDoc.SubFeatures(f).Where(s => !before.Contains(s.Name) && !shared.Contains(s.Name))) names.Add(sub.Name);
                     }
                     ctx.Forget(names);
                     SwSelect.Clear(ctx.Doc);
@@ -577,7 +579,11 @@ namespace Spiegelwerk.Build
             {
                 ctx.Doc.EditRebuild3();
                 MassState after = SwDoc.MassOf(ctx.Doc);
-                if (MassComparison.Compare(MassState.Empty, after - before, before).Passes)
+                if (before.Volume <= 0 && after.Volume <= 0)
+                {
+                    check = ", Volumen und Schwerpunkt nicht geprüft (die Kopie hat keinen Volumenkörper)";
+                }
+                else if (MassComparison.Compare(MassState.Empty, after - before, before).Passes)
                 {
                     check = ", Volumen und Schwerpunkt bleiben damit unverändert";
                 }
@@ -591,7 +597,8 @@ namespace Spiegelwerk.Build
             }
             report.General.Add($"Gleichungen: {ok} von {n} übernommen{check}.");
             foreach (string eq in failed) report.General.Add($"  nicht übernommen: {eq}");
-            if (deviation != null) report.General.Add(deviation);
+            // As an entry with a notice, so the summary and the assembly report count it.
+            if (deviation != null) report.Entries.Add(new ReportEntry("Gleichungen", "Gleichungen", ReportStatus.Warning, deviation));
         }
 
         /// <summary>Why an equation must not be copied, or null.</summary>
