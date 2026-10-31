@@ -52,8 +52,14 @@ namespace Spiegelwerk.Sw
         }
 
         /// <summary>
+        /// Esc came with the last step: nothing of this run is left to stop, but an assembly run
+        /// asks before its next component.
+        /// </summary>
+        public bool EscAtEnd { get; private set; }
+
+        /// <summary>
         /// One feature done. True if the user pressed Esc meanwhile and confirms stopping the run
-        /// here – never after the last step.
+        /// here – never after the last step (<see cref="EscAtEnd"/>).
         /// </summary>
         public bool CancelAfterStep()
         {
@@ -69,7 +75,12 @@ namespace Spiegelwerk.Sw
                 _bar = null;
                 return false;
             }
-            if (!more || status != (int)swUpdateProgressError_e.swUpdateProgressError_UserCancel) return false;
+            if (status != (int)swUpdateProgressError_e.swUpdateProgressError_UserCancel) return false;
+            if (!more)
+            {
+                EscAtEnd = true;
+                return false;
+            }
             return _sw.SendMsgToUser2("Spiegeln hier abbrechen? Was bis jetzt aufgebaut wurde, bleibt erhalten.",
                 (int)swMessageBoxIcon_e.swMbQuestion, (int)swMessageBoxBtn_e.swMbYesNo) == (int)swMessageBoxResult_e.swMbHitYes;
         }

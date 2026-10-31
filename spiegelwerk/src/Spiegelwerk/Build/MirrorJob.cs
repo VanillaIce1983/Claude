@@ -96,7 +96,11 @@ namespace Spiegelwerk.Build
         {
             // The progress bar goes again however the run ends.
             using (var progress = new RunProgress(_sw))
-                return Run(req, progress);
+            {
+                MirrorJobResult result = Run(req, progress);
+                result.Report.StopRequested = progress.EscAtEnd;
+                return result;
+            }
         }
 
         private MirrorJobResult Run(MirrorRequest req, RunProgress progress)
