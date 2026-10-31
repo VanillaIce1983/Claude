@@ -25,6 +25,18 @@ namespace Spiegelwerk.Sw
 
         public static bool IsSystemFeature(Feature f) => SystemTypes.Contains(f.GetTypeName2());
 
+        /// <summary>
+        /// Puts the rollback bar at the end of the tree and checks it got there. Esc also
+        /// interrupts SOLIDWORKS' own regeneration, a rollback included, and leaves the bar after
+        /// the feature it was on.
+        /// </summary>
+        public static bool RollToEnd(ModelDoc2 doc)
+        {
+            if (!TopLevelFeatures(doc).Any(f => f.IsRolledBack())) return true;
+            doc.FeatureManager.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToEnd, "");
+            return !TopLevelFeatures(doc).Any(f => f.IsRolledBack());
+        }
+
         public static IEnumerable<Feature> TopLevelFeatures(ModelDoc2 doc)
         {
             var f = (Feature)(object)doc.FirstFeature();

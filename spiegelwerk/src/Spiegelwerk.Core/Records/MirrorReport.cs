@@ -55,6 +55,12 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Stopped by the user (Esc), not by an error: an assembly run mirrors no further component.</summary>
         public bool Cancelled { get; set; }
 
+        /// <summary>
+        /// Complete, but the user pressed Esc during its last step: an assembly run asks before
+        /// its next component. Not carried into an assembly report.
+        /// </summary>
+        public bool StopRequested { get; set; }
+
         public ReportEntry Add(FeatureRecord r, ReportStatus status, string message)
         {
             var e = new ReportEntry(r.Name, r.TypeName, status, message);

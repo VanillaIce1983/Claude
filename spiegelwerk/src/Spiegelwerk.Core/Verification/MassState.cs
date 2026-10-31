@@ -87,7 +87,10 @@ namespace Spiegelwerk.Core.Verification
         /// <summary>Relative volume difference of the change, for the report.</summary>
         public double VolumeError { get; }
 
-        /// <summary>Moment difference expressed as a centroid distance in metres, for the report.</summary>
+        /// <summary>
+        /// For the report, metres: the distance between the centroids of the expected and the
+        /// actual change when both have volume, otherwise the moment difference as a distance.
+        /// </summary>
         public double CentroidError { get; }
 
         /// <summary>For ranking alternatives: smaller is better.</summary>
@@ -105,7 +108,11 @@ namespace Spiegelwerk.Core.Verification
             double dv = Math.Abs(expected.Volume - actual.Volume);
             double dm = (expected.Moment - actual.Moment).Length;
             double scale = Math.Max(v, volTol);
-            return new MassComparison(dv / volTol, dm / momTol, dv / scale, dm / scale, v <= volTol);
+            // Twice the volume at the same place is no centroid shift; only compare centroids that exist.
+            double centroid = v > volTol && Math.Abs(actual.Volume) > volTol
+                ? (actual.Moment * (1 / actual.Volume) - expected.Moment * (1 / expected.Volume)).Length
+                : dm / scale;
+            return new MassComparison(dv / volTol, dm / momTol, dv / scale, centroid, v <= volTol);
         }
 
         public override string ToString()

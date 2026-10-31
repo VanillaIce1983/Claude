@@ -241,8 +241,9 @@ namespace Spiegelwerk.UI
                     // Each component's saved part goes into its heading line.
                     report = new MirrorReport { TargetName = _doc.GetTitle() };
                     var asm = new AssemblyMirror(_sw);
-                    foreach (Component2 c in _components)
+                    for (int k = 0; k < _components.Count; k++)
                     {
+                        Component2 c = _components[k];
                         // One component failing must not cost the report of the ones already saved and inserted.
                         string name = c.Name2;
                         try
@@ -251,6 +252,15 @@ namespace Spiegelwerk.UI
                             report.Append(part, name);
                             // Esc stops the whole run, not only this component.
                             if (part.Aborted && (_options.StopOnError || part.Cancelled)) break;
+                            // Esc with the last step of this component: its run is complete, the next one is asked for.
+                            if (part.StopRequested && k < _components.Count - 1 &&
+                                _sw.SendMsgToUser2("Spiegeln hier abbrechen? Die übrigen Komponenten werden nicht mehr gespiegelt.",
+                                    (int)swMessageBoxIcon_e.swMbQuestion, (int)swMessageBoxBtn_e.swMbYesNo) == (int)swMessageBoxResult_e.swMbHitYes)
+                            {
+                                report.Aborted = report.Cancelled = true;
+                                report.General.Add($"Mit Esc abgebrochen nach Komponente „{name}“; {_components.Count - k - 1} weitere wurden nicht mehr gespiegelt.");
+                                break;
+                            }
                         }
                         catch (Exception ex)
                         {

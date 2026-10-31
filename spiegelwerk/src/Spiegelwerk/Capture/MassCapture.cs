@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
+using Spiegelwerk.Core.Verification;
 using Spiegelwerk.Sw;
 
 namespace Spiegelwerk.Capture
@@ -17,8 +19,14 @@ namespace Spiegelwerk.Capture
     /// </summary>
     internal static class MassCapture
     {
+        /// <param name="rebuilt">
+        /// With selected bodies (or seed bodies pulled in): the collected features. A body with a
+        /// solid feature outside them has no counterpart in the copy; if a feature changes such a
+        /// body in its own rolled-back state – also one that is gone in the final state, which
+        /// <see cref="Spiegelwerk.Core.Planning.BodyScope"/> cannot see –, it gets no reference.
+        /// </param>
         /// <returns>False if the user stopped the run with Esc.</returns>
-        public static bool Measure(ModelDoc2 doc, IEnumerable<FeatureRecord> records, RunProgress progress)
+        public static bool Measure(ModelDoc2 doc, IEnumerable<FeatureRecord> records, RunProgress progress, ISet<string>? rebuilt = null)
         {
             FeatureManager fm = doc.FeatureManager;
             try
@@ -26,7 +34,7 @@ namespace Spiegelwerk.Capture
                 foreach (FeatureRecord r in records)
                 {
                     progress.Show(RunSteps.Measure, r.Name);
-                    MeasureOne(doc, fm, r);
+                    MeasureOne(doc, fm, r, rebuilt);
                     if (progress.CancelAfterStep()) return false;
                 }
                 return true;
@@ -37,15 +45,50 @@ namespace Spiegelwerk.Capture
             }
         }
 
-        private static void MeasureOne(ModelDoc2 doc, FeatureManager fm, FeatureRecord r)
+        private static void MeasureOne(ModelDoc2 doc, FeatureManager fm, FeatureRecord r, ISet<string>? rebuilt)
         {
             // A feature that also changed bodies the copy does not get has no usable reference.
             if (!r.ChangesSolid || r is UnsupportedRecord || r.OtherBodies.Count > 0) return;
             if (!fm.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToBeforeFeature, r.Name)) return;
             var before = SwDoc.MassOf(doc);
+            List<string> foreignNames = new List<string>();
+            MassState foreignBefore = rebuilt == null ? MassState.Empty : SwDoc.MassOf(ForeignBodies(doc, rebuilt, foreignNames));
             if (!fm.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, r.Name)) return;
-            r.ExpectedChange = SwDoc.MassOf(doc) - before;
+            MassState after = SwDoc.MassOf(doc);
+            if (rebuilt != null)
+            {
+                MassState foreignChange = SwDoc.MassOf(ForeignBodies(doc, rebuilt, foreignNames)) - foreignBefore;
+                if (!MassComparison.Compare(MassState.Empty, foreignChange, after).Passes)
+                {
+                    NoteOtherBodies(r, foreignNames);
+                    return;
+                }
+            }
+            r.ExpectedChange = after - before;
             if (SwDoc.FeatureByName(doc, r.Name) is Feature f) SampleFaces(f, r);
+        }
+
+        /// <summary>Solid bodies of the current (rolled-back) state that a feature outside <paramref name="rebuilt"/> made or changed.</summary>
+        private static List<Body2> ForeignBodies(ModelDoc2 doc, ISet<string> rebuilt, List<string> names)
+        {
+            var result = new List<Body2>();
+            foreach (Body2 b in SwDoc.SolidBodies(doc))
+            {
+                IEnumerable<Feature> made = b.GetFeatures() is object[] fs ? fs.OfType<Feature>() : Enumerable.Empty<Feature>();
+                if (!made.Any(f => !rebuilt.Contains(f.Name) && !SwDoc.IsSketch(f) && !FeatureCollector.IsDatum(f) && !SwDoc.IsSystemFeature(f))) continue;
+                result.Add(b);
+                if (!names.Contains(b.Name)) names.Add(b.Name);
+            }
+            return result;
+        }
+
+        /// <summary>The copy acts on the mirrored bodies only: what the original did to other bodies is no reference for it.</summary>
+        internal static void NoteOtherBodies(FeatureRecord r, IEnumerable<string> bodies)
+        {
+            foreach (string b in bodies)
+                if (!r.OtherBodies.Contains(b)) r.OtherBodies.Add(b);
+            r.Notes.Add($"Das Original verändert auch Körper, die nicht mitgespiegelt werden ({string.Join(", ", r.OtherBodies.Select(n => $"\"{n}\""))}). " +
+                        "Die Kopie wirkt nur auf die gespiegelten Körper und wurde deshalb nicht mit dem Original verglichen.");
         }
 
         /// <summary>Points on the feature's faces for the shape check, spread over at most <see cref="MaxSamples"/> faces.</summary>

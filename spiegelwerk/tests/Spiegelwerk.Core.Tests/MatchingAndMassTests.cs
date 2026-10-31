@@ -139,18 +139,22 @@ namespace Spiegelwerk.Core.Tests
         [Fact]
         public void Report_text_names_the_volume_and_centroid_deviation()
         {
-            // 10 % too much volume, centroid 10 mm off.
+            // 10 % too much volume, centroid from z = 5 mm to 0.015/1.1 = 13.636 mm.
             var expected = new MassState(1e-6, new Vec3(0, 0, 0.005) * 1e-6);
             var actual = new MassState(1.1e-6, new Vec3(0, 0, 0.015) * 1e-6);
             MassComparison cmp = MassComparison.Compare(expected, actual);
             Assert.False(cmp.Passes);
             Assert.False(cmp.NoNetVolume);
+            // Twice the volume at the same place: the centroid did not move.
+            MassComparison twice = MassComparison.Compare(expected, new MassState(2e-6, new Vec3(0, 0, 0.005) * 2e-6));
+            Assert.False(twice.Passes);
+            Near(0, twice.CentroidError, 1e-12);
 
             CultureInfo saved = CultureInfo.CurrentCulture;
             try
             {
                 CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
-                Assert.Equal("Abweichung: Volumen 10.000 %, Schwerpunkt 10 mm", cmp.ToString());
+                Assert.Equal("Abweichung: Volumen 10.000 %, Schwerpunkt 8.636 mm", cmp.ToString());
             }
             finally
             {

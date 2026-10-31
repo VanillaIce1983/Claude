@@ -76,6 +76,22 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Sheet_metal_and_derived_mirror_parts_refuse_the_whole_run()
+        {
+            // The first of them carries the body: nothing after it could be built.
+            Assert.True(UnsupportedFeatures.RefusesRun("SheetMetal"));
+            Assert.True(UnsupportedFeatures.RefusesRun("SMBaseFlange"));
+            Assert.True(UnsupportedFeatures.RefusesRun("MirrorStock"));
+            Assert.Equal("Blechteile werden nicht unterstützt (\"Blech1\"). Es wurde nichts gespiegelt.", UnsupportedFeatures.RunRefusal("Blech1", "SheetMetal"));
+            Assert.StartsWith("\"Teil spiegeln1\": Teil spiegeln im Original", UnsupportedFeatures.RunRefusal("Teil spiegeln1", "MirrorStock"));
+            Assert.EndsWith("Es wurde nichts gespiegelt.", UnsupportedFeatures.RunRefusal("Teil spiegeln1", "MirrorStock"));
+            // Other unsupported features fail on their own; the rest of the part is still rebuilt.
+            Assert.False(UnsupportedFeatures.RefusesRun("MirrorPattern"));
+            Assert.False(UnsupportedFeatures.RefusesRun("MirrorSolid"));
+            Assert.False(UnsupportedFeatures.RefusesRun("Bending"));
+        }
+
+        [Fact]
         public void Other_types_keep_the_general_message()
         {
             Assert.False(UnsupportedFeatures.IsSheetMetal("Bending"));

@@ -140,9 +140,13 @@ namespace Spiegelwerk.Core.Tests
             Assert.True(SketchMirror.MaxDistortion(src, res.Sketch) < 1e-12);
         }
 
-        [Fact]
-        public void External_references_are_mirrored_and_local_ids_kept()
+        /// <param name="x">Mirror plane x = const: through the origin, and 40 mm off it (positions must take the translation part).</param>
+        [Theory]
+        [InlineData(0.0)]
+        [InlineData(0.04)]
+        public void External_references_are_mirrored_and_local_ids_kept(double x)
         {
+            double x2 = 2 * x;   // R(p).X = 2x − p.X
             SketchModel src = Tombstone(Front);
             var edge = new EdgeSignature(CurveKind.Line, new Vec3(0.01, 0, 0), new Vec3(0.05, 0, 0), new Vec3(0.03, 0, 0), 0.04) { Axis = Vec3.UnitX };
             src.Relations.Add(new SkRelation(RelationKind.Collinear, new[] { SkRef.LocalSegment("L1"), SkRef.ModelEdge(edge) }));
@@ -152,9 +156,12 @@ namespace Spiegelwerk.Core.Tests
             src.Relations.Add(new SkRelation(RelationKind.Tangent, new[] { SkRef.LocalSegment("L4"), SkRef.Unknown("Silhouettenkante") }));
             src.Dimensions.Add(new SkDimension(DimensionKind.Aligned, new[] { SkRef.LocalPoint("p3"), SkRef.ModelVertex(new Vec3(0.07, 0.02, 0)) }, 0.02) { Name = "D4" });
 
-            SketchMirrorResult res = SketchMirror.Mirror(src, new Reflection(Plane3.RightYZ), Front);
+            SketchMirrorResult res = SketchMirror.Mirror(src, new Reflection(new Plane3(new Vec3(x, 0, 0), Vec3.UnitX)), Front);
             SketchModel m = res.Sketch;
             Assert.Empty(res.Warnings);
+            // The sketch origin is a model point like any other: R(0) is not 0 for a plane off the origin.
+            Assert.Equal(SkRefKind.Origin, m.Relations[4].Entities[0].Kind);
+            Near(new Vec3(x2, 0, 0), m.Relations[4].Entities[0].Position);
             SkRelation[] rels = m.Relations.Skip(5).ToArray();
             Assert.All(rels, rel => Assert.True(rel.HasExternal));
 
@@ -164,9 +171,9 @@ namespace Spiegelwerk.Core.Tests
 
             // Model edge: the fingerprint is mirrored and still lies on the mirrored line L1.
             EdgeSignature me = rels[0].Entities[1].Edge!;
-            Near(new Vec3(-0.01, 0, 0), me.Start);
-            Near(new Vec3(-0.05, 0, 0), me.End);
-            Near(new Vec3(-0.03, 0, 0), me.Mid);
+            Near(new Vec3(x2 - 0.01, 0, 0), me.Start);
+            Near(new Vec3(x2 - 0.05, 0, 0), me.End);
+            Near(new Vec3(x2 - 0.03, 0, 0), me.Mid);
             Near(-Vec3.UnitX, me.Axis);
             Assert.Equal(0.04, me.Length);
             Near(m.ToModel(m.Point("p1")), me.Start);
@@ -177,12 +184,13 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal(SkRefKind.Plane, plane.Kind);
             Assert.Equal("Ebene1", plane.Description);
             Near(-Vec3.UnitX, plane.PlaneGeometry.Normal);
+            Near(new Vec3(x2 - 0.01, 0, 0), plane.PlaneGeometry.Origin);
             Assert.True(plane.PlaneGeometry.Contains(m.ToModel(m.Point("p1")), 1e-12));
 
             // Point of another sketch: position mirrored, sketch and id kept; it still meets the mirrored c.
             SkRef other = rels[2].Entities[1];
             Assert.Equal(("Skizze2", "p4"), (other.SketchName, other.Id));
-            Near(new Vec3(-0.03, 0.02, 0), other.Position);
+            Near(new Vec3(x2 - 0.03, 0.02, 0), other.Position);
             Near(m.ToModel(m.Point("c")), other.Position);
 
             // Segment of another sketch and unknown references carry no geometry: unchanged.
@@ -191,7 +199,7 @@ namespace Spiegelwerk.Core.Tests
 
             // Model vertex of a dimension: mirrored, the dimension still measures the same.
             SkDimension d4 = m.Dimensions.Single(d => d.Name == "D4");
-            Near(new Vec3(-0.07, 0.02, 0), d4.Refs[1].Position);
+            Near(new Vec3(x2 - 0.07, 0.02, 0), d4.Refs[1].Position);
             Near(0.02, m.ToModel(m.Point("p3")).DistanceTo(d4.Refs[1].Position));
         }
 

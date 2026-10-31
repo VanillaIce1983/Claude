@@ -234,7 +234,19 @@ namespace Spiegelwerk.Build.Builders
                 return null;
             }
 
-            object? target = Safe(ctx.Topology.Resolve(side.Reference.Mirror(ctx.Mirror), notes));
+            object? target;
+            try
+            {
+                target = Safe(ctx.Topology.Resolve(side.Reference.Mirror(ctx.Mirror), notes));
+            }
+            catch (InvalidOperationException ex)
+            {
+                // A face or plane that was not found and whose helper plane could not be made:
+                // parallel to the sketch, a blind depth still does it.
+                notes.Add(ex.Message);
+                ctx.Topology.Invalidate();
+                target = null;
+            }
             if (target != null) return target;
 
             double? blind = side.BlindEquivalent(sketch.Source.Frame.Plane);

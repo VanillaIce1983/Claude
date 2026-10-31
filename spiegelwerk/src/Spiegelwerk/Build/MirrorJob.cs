@@ -96,7 +96,11 @@ namespace Spiegelwerk.Build
         {
             // The progress bar goes again however the run ends.
             using (var progress = new RunProgress(_sw))
-                return Run(req, progress);
+            {
+                MirrorJobResult result = Run(req, progress);
+                result.Report.StopRequested = progress.EscAtEnd;
+                return result;
+            }
         }
 
         private MirrorJobResult Run(MirrorRequest req, RunProgress progress)
@@ -104,6 +108,8 @@ namespace Spiegelwerk.Build
             var report = new MirrorReport();
             ModelDoc2 source = req.Source;
             MirrorOptions opt = req.Options;
+            // Body pointers do not survive the rollbacks of capture and measurement; names do.
+            var selectedBodyNames = new HashSet<string>(req.Bodies.Select(b => b.Name), StringComparer.Ordinal);
 
             // ---- 1. capture
             // In an open sketch the rollback for the measurement fails, and the first new sketch would close it instead of opening one.
@@ -129,6 +135,8 @@ namespace Spiegelwerk.Build
                     report.Aborted = true;
                     return new MirrorJobResult(report, null);
                 }
+                if (features.FirstOrDefault(f => UnsupportedFeatures.RefusesRun(f.GetTypeName2())) is Feature carrier)
+                    throw new InvalidOperationException(UnsupportedFeatures.RunRefusal(carrier.Name, carrier.GetTypeName2()));
                 progress.Start(features.Count, opt.VerifySteps);
                 var capture = new FeatureCapture(source, _math);
                 records = new List<FeatureRecord>();
@@ -145,7 +153,18 @@ namespace Spiegelwerk.Build
                         records[i] = capture.CaptureOnItsOwn(features[i], part);
                 MarkOtherBodies(records, bodyScope);
                 for (int i = 0; i < records.Count; i++) CaptureDimensions(features[i], records[i]);
-                if (opt.VerifySteps && !MassCapture.Measure(source, records, progress)) return CancelledBeforeBuild(report, RunSteps.Measure);
+                // With selected bodies, a feature may also change a body that is gone at the end; only the rolled-back state shows it.
+                ISet<string>? rebuilt = req.Bodies.Count > 0 || seedBodies ? new HashSet<string>(features.Select(f => f.Name), StringComparer.Ordinal) : null;
+                if (opt.VerifySteps && !MassCapture.Measure(source, records, progress, rebuilt)) return CancelledBeforeBuild(report, RunSteps.Measure);
+            }
+
+            // Capture and measurement end with the bar at the end; an interrupted regeneration may have stopped it mid-tree.
+            if (!SwDoc.RollToEnd(source))
+            {
+                report.Aborted = true;
+                report.General.Add("Die Rückrollleiste des Originals ließ sich nach dem Erfassen nicht wieder ans Ende setzen (Neuaufbau unterbrochen?). " +
+                                   "Es wurde nichts aufgebaut; bitte die Leiste ans Ende setzen und erneut spiegeln.");
+                return new MirrorJobResult(report, null);
             }
 
             // ---- 2. target
@@ -158,7 +177,7 @@ namespace Spiegelwerk.Build
             foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) ctx.PointSketches.Add(pattern.SketchName);
             report.General.Add($"Spiegelebene: {ReportText.Plane(req.MirrorPlane)}");
             // New part: only the part's material is copied. Same part: a body of its own gets the part's material.
-            if (opt.Target == MirrorTarget.NewPart ? opt.CopyMaterial : separateBody) NoteBodyMaterials(source, req.Bodies, report);
+            if (opt.Target == MirrorTarget.NewPart ? opt.CopyMaterial : separateBody) NoteBodyMaterials(source, selectedBodyNames, req.Features.Count > 0 ? features : null, report);
 
             try
             {
@@ -179,12 +198,18 @@ namespace Spiegelwerk.Build
                         {
                             report.Aborted = report.Cancelled = true;
                             report.General.Add(RunSteps.CancelledInBuild(records[i].Name, records.Count - i - 1));
+                            // Sketches already reported as built with a hole that now is not built.
+                            foreach (PositionedHoleRecord hole in records.Skip(i + 1).OfType<PositionedHoleRecord>()) WithdrawParts(ctx, hole.Name);
                             break;
                         }
                     }
                 }
                 progress.Show(RunSteps.Finish);
                 target.EditRebuild3();
+                bool atEnd = SwDoc.RollToEnd(target);
+                if (!atEnd)
+                    report.General.Add("Achtung: Die Rückrollleiste steht nach dem Aufbau nicht am Ende des Feature-Baums (Neuaufbau unterbrochen?). " +
+                                       "Bitte ans Ende setzen und das Ergebnis prüfen.");
 
                 // ---- 3. finish
                 if (opt.Target == MirrorTarget.NewPart)
@@ -196,7 +221,8 @@ namespace Spiegelwerk.Build
                 else
                 {
                     NoteEquationDrivenDimensions(source, ctx, report);
-                    if (opt.DeleteOriginal) DeleteOriginals(source, features, bodyScope, report);
+                    if (opt.DeleteOriginal && !atEnd) report.General.Add("Original nicht gelöscht: Die Rückrollleiste steht nicht am Ende.");
+                    else if (opt.DeleteOriginal) DeleteOriginals(source, features, bodyScope, report);
                 }
             }
             catch (Exception ex)
@@ -295,12 +321,7 @@ namespace Spiegelwerk.Build
         private static void MarkOtherBodies(List<FeatureRecord> records, BodyScope scope)
         {
             foreach (FeatureRecord r in records)
-                if (scope.OtherBodiesChanged.TryGetValue(r.Name, out List<string> bodies))
-                {
-                    r.OtherBodies.AddRange(bodies);
-                    r.Notes.Add($"Das Original verändert auch Körper, die nicht mitgespiegelt werden ({Quoted(bodies)}). " +
-                                "Die Kopie wirkt nur auf die gespiegelten Körper und wurde deshalb nicht mit dem Original verglichen.");
-                }
+                if (scope.OtherBodiesChanged.TryGetValue(r.Name, out List<string> bodies)) MassCapture.NoteOtherBodies(r, bodies);
         }
 
         private static string Quoted(IEnumerable<string> names) => string.Join(", ", names.Select(n => $"\"{n}\""));
@@ -395,13 +416,18 @@ namespace Spiegelwerk.Build
         /// such a feature would count neither as mirrored nor as the job's own body, and a cut or
         /// pattern without feature scope may already have changed the original: what the step
         /// added is deleted again. Deleting keeps absorbed sketches – those of earlier steps were
-        /// at the top level before and stay, one made in this step comes up in the second round.
+        /// at the top level before or sit under an earlier feature too (a shared sketch) and stay,
+        /// one made in this step comes up in the second round.
         /// </summary>
         private static void RemoveLeftovers(BuildContext ctx, HashSet<string> before, BuildResult result)
         {
             var removed = new List<string>();
             try
             {
+                // A shared sketch of an earlier step is also a sub-feature of the new feature; it
+                // stays in the model under the earlier one and must stay registered.
+                var shared = new HashSet<string>(SwDoc.TopLevelFeatures(ctx.Doc).Where(t => before.Contains(t.Name))
+                    .SelectMany(SwDoc.SubFeatures).Select(s => s.Name), StringComparer.Ordinal);
                 for (int round = 0; round < 2; round++)
                 {
                     List<Feature> made = NewFeatures(ctx.Doc, before);
@@ -411,7 +437,7 @@ namespace Spiegelwerk.Build
                     {
                         names.Add(f.Name);
                         if (!removed.Contains(f.Name)) removed.Add(f.Name);
-                        foreach (Feature sub in SwDoc.SubFeatures(f).Where(s => !before.Contains(s.Name))) names.Add(sub.Name);
+                        foreach (Feature sub in SwDoc.SubFeatures(f).Where(s => !before.Contains(s.Name) && !shared.Contains(s.Name))) names.Add(sub.Name);
                     }
                     ctx.Forget(names);
                     SwSelect.Clear(ctx.Doc);
@@ -497,9 +523,11 @@ namespace Spiegelwerk.Build
 
         /// <summary>
         /// Materials of single bodies (multi-body parts) are not carried over; the report says
-        /// which. Selected bodies, else all. Only a note: never stops the run.
+        /// which. The bodies that are mirrored: the selected ones (by name, read fresh), with
+        /// selected features those the collected features change, else all. Only a note: never
+        /// stops the run.
         /// </summary>
-        private static void NoteBodyMaterials(ModelDoc2 source, List<Body2> selected, MirrorReport report)
+        private static void NoteBodyMaterials(ModelDoc2 source, HashSet<string> selectedBodies, List<Feature>? collected, MirrorReport report)
         {
             try
             {
@@ -507,7 +535,13 @@ namespace Spiegelwerk.Build
                 string config = source.GetActiveConfiguration() is Configuration active ? active.Name : "";
                 string db = "";
                 string partMaterial = part.GetMaterialPropertyName2(config, out db);
-                List<Body2> bodies = selected.Count > 0 ? selected : SwDoc.SolidBodies(source);
+                List<Body2> bodies = SwDoc.SolidBodies(source);
+                if (selectedBodies.Count > 0) bodies = bodies.Where(b => selectedBodies.Contains(b.Name)).ToList();
+                else if (collected != null)
+                {
+                    var rebuilt = new HashSet<string>(collected.Where(f => !SwDoc.IsSketch(f)).Select(f => f.Name), StringComparer.Ordinal);
+                    bodies = bodies.Where(b => b.GetFeatures() is object[] fs && fs.OfType<Feature>().Any(f => rebuilt.Contains(f.Name))).ToList();
+                }
                 var materials = new List<(string, string)>();
                 foreach (Body2 b in bodies) materials.Add((b.Name, b.GetMaterialPropertyName(config, out db)));
                 if (BodyMaterials.Note(partMaterial, materials) is string note) report.General.Add(note);
@@ -536,7 +570,8 @@ namespace Spiegelwerk.Build
 
         /// <summary>
         /// Global variables and equations, copied verbatim, with angle unit, solve order and
-        /// disabled or suppressed state. They name dimensions ("D1@Skizze1"): an equation is
+        /// disabled state; an equation suppressed in an older original (before SOLIDWORKS 2014)
+        /// becomes disabled – the new part ignores Suppression. They name dimensions ("D1@Skizze1"): an equation is
         /// only copied if each dimension it names is known to be the same one in the copy, else
         /// it would silently drive another. In the original they give the values the copy
         /// already has, so the part must stay as it is – checked by volume and centroid.
@@ -564,8 +599,8 @@ namespace Spiegelwerk.Build
                 if (index >= 0)
                 {
                     ok++;
-                    if (disabled) dst.set_Disabled(index, true);
-                    if (suppressed) dst.set_Suppression(index, true);
+                    // IEquationMgr.Suppression is ignored in documents created as of SOLIDWORKS 2014, the new part is one; Disabled is its equivalent there.
+                    if (disabled || suppressed) dst.set_Disabled(index, true);
                     continue;
                 }
                 if (EquationText.Driven(eq) is string driven && EquationText.Dimension(driven) == null) dropped.Add(driven);
@@ -577,7 +612,11 @@ namespace Spiegelwerk.Build
             {
                 ctx.Doc.EditRebuild3();
                 MassState after = SwDoc.MassOf(ctx.Doc);
-                if (MassComparison.Compare(MassState.Empty, after - before, before).Passes)
+                if (before.Volume <= 0 && after.Volume <= 0)
+                {
+                    check = ", Volumen und Schwerpunkt nicht geprüft (die Kopie hat keinen Volumenkörper)";
+                }
+                else if (MassComparison.Compare(MassState.Empty, after - before, before).Passes)
                 {
                     check = ", Volumen und Schwerpunkt bleiben damit unverändert";
                 }
@@ -591,7 +630,8 @@ namespace Spiegelwerk.Build
             }
             report.General.Add($"Gleichungen: {ok} von {n} übernommen{check}.");
             foreach (string eq in failed) report.General.Add($"  nicht übernommen: {eq}");
-            if (deviation != null) report.General.Add(deviation);
+            // As an entry with a notice, so the summary and the assembly report count it.
+            if (deviation != null) report.Entries.Add(new ReportEntry("Gleichungen", "Gleichungen", ReportStatus.Warning, deviation));
         }
 
         /// <summary>Why an equation must not be copied, or null.</summary>
