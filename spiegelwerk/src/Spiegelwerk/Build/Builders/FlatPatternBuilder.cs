@@ -39,22 +39,26 @@ namespace Spiegelwerk.Build.Builders
             if (r.FixedFace?.Kind == GeometryRefKind.Face) fixedEntity = Safe(ctx.Topology.FindFace(r.FixedFace.Face!.Mirror(ctx.Mirror), notes));
             else if (r.FixedFace?.Kind == GeometryRefKind.Edge) fixedEntity = Safe(ctx.Topology.FindEdge(r.FixedFace.Edge!.Mirror(ctx.Mirror), notes));
             // Same part: the finder falls back on the original where the copy has nothing – a flat pattern of the copy never takes its faces.
-            if (fixedEntity != null && !OnOwnBody(ctx, fixedEntity))
+            bool fixedOnOriginal = fixedEntity != null && !OnOwnBody(ctx, fixedEntity);
+            if (fixedOnOriginal)
             {
                 fixedEntity = null;
-                notes.Add("Feste Fläche der Abwicklung nur am Original gefunden; sie wird nicht verwendet.");
+                notes.Add("Feste Fläche der Abwicklung nur am Original gefunden; sie wird nicht verwendet, die Vorgabe von SOLIDWORKS bleibt.");
             }
 
             Feature? fp = ctx.SheetMetalBodies.TryGetValue(r.Owner, out SheetMetalBody body) ? body.FlatPattern : null;
             fp ??= FlatPatternOfBody(fixedEntity);
             if (fp == null) return Fail($"Im Ziel gibt es keine Abwicklung zu „{r.Owner}“.", notes);
-            if (r.FixedFace != null && fixedEntity == null) notes.Add("Feste Fläche der Abwicklung im Ziel nicht gefunden; die Vorgabe von SOLIDWORKS bleibt.");
+            if (r.FixedFace != null && fixedEntity == null && !fixedOnOriginal) notes.Add("Feste Fläche der Abwicklung im Ziel nicht gefunden; die Vorgabe von SOLIDWORKS bleibt.");
 
             var excluded = new List<object>();
             foreach (FaceSignature excludedFace in r.ExcludedFaces)
             {
-                if (Safe(ctx.Topology.FindFace(excludedFace.Mirror(ctx.Mirror), notes)) is object found && OnOwnBody(ctx, found)) excluded.Add(found);
-                else notes.Add("Eine ausgeschlossene Fläche der Abwicklung wurde im Ziel nicht gefunden.");
+                object? found = Safe(ctx.Topology.FindFace(excludedFace.Mirror(ctx.Mirror), notes));
+                if (found != null && OnOwnBody(ctx, found)) excluded.Add(found);
+                else notes.Add(found == null
+                    ? "Eine ausgeschlossene Fläche der Abwicklung wurde im Ziel nicht gefunden."
+                    : "Eine ausgeschlossene Fläche der Abwicklung wurde nur am Original gefunden; sie wird nicht verwendet.");
             }
 
             if (!Edit(ctx, fp, d => Apply(d, r, fixedEntity, excluded)))

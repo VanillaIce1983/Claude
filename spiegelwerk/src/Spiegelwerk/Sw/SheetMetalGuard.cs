@@ -13,9 +13,10 @@ namespace Spiegelwerk.Sw
     /// allowance belong to the part's defaults; a later base flange, created or toggled the wrong
     /// way, can rewrite them – and with them every body that uses the defaults, also one whose
     /// step was already reported OK. Before such a step the guard takes the defaults and every
-    /// SheetMetal of the target, afterwards it compares; a difference is written back, and if
-    /// that does not restore them, the run stops. The body the step's own feature belongs to (the
-    /// one a tab joins) changes by design and is left out of the body comparison.
+    /// SheetMetal of the target, afterwards it compares; what differs is written back – with the
+    /// material flag as it was, never as fixed values –, and if that does not restore them, the
+    /// run stops. The body the step's own feature belongs to (the one a tab joins) changes by
+    /// design and is left out of the body comparison.
     ///
     /// In the same part (S1b) the defaults and SheetMetals are the original's: the snapshot is
     /// taken from the first copied flange on, a step without one is not built
@@ -86,11 +87,13 @@ namespace Spiegelwerk.Sw
             List<string> still = new List<string>();
             if (changed.Count > 0)
             {
-                if (before.Template != null && SwSheetMetal.Template(_doc) is Feature t)
-                    SwSheetMetal.Apply(_doc, t, before.Template, false, Array.Empty<int>());
+                // Only what differs is written back, the material flag as it was (in the same part
+                // the defaults and SheetMetals are the original's; SheetMetalRules.MaterialOnWrite).
+                if (before.Template != null && SwSheetMetal.Template(_doc) is Feature t && SwSheetMetal.Compare(_doc, t, before.Template, false).Count > 0)
+                    SwSheetMetal.Apply(_doc, t, before.Template, false, Array.Empty<int>(), restore: true);
                 foreach (var kv in before.SheetMetals)
-                    if (SwDoc.FeatureByName(_doc, kv.Key) is Feature sm)
-                        SwSheetMetal.Apply(_doc, sm, kv.Value, true, SheetMetalRules.RestoreGroups(kv.Value, TryRead(sm)));
+                    if (SwDoc.FeatureByName(_doc, kv.Key) is Feature sm && SwSheetMetal.Compare(_doc, sm, kv.Value, true).Count > 0)
+                        SwSheetMetal.Apply(_doc, sm, kv.Value, true, SheetMetalRules.RestoreGroups(kv.Value, TryRead(sm)), restore: true);
                 _doc.EditRebuild3();
                 still = Differences(before);
             }

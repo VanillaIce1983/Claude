@@ -87,6 +87,19 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Guard_gives_the_material_flag_back_and_writes_no_value_the_material_drives()
+        {
+            // Building a copy: material-driven values become fixed ones.
+            Assert.Equal(((bool?)false, true), SheetMetalRules.MaterialOnWrite(false, true));
+            Assert.Equal(((bool?)false, true), SheetMetalRules.MaterialOnWrite(false, null));
+            // Restoring the original's values: the flag as it was; on, the values are the material's.
+            Assert.Equal(((bool?)true, false), SheetMetalRules.MaterialOnWrite(true, true));
+            Assert.Equal(((bool?)false, true), SheetMetalRules.MaterialOnWrite(true, false));
+            // Not available (before 2023): left as it is, the values written.
+            Assert.Equal(((bool?)null, true), SheetMetalRules.MaterialOnWrite(true, null));
+        }
+
+        [Fact]
         public void Same_part_copy_overrides_what_the_part_defaults_do_not_give_it()
         {
             SheetMetalParameters defaults = Params(0.002, 0.001, 0.44);

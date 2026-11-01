@@ -330,6 +330,19 @@ namespace Spiegelwerk.Core.Planning
         }
 
         /// <summary>
+        /// What a write does with „Blechparameter aus dem Werkstoff“ (late-bound, 2023 and later).
+        /// Building a copy turns material-driven values into fixed ones: the flag off, the values
+        /// written. The guard writing a snapshot back gives the flag its old state – in the same
+        /// part it is the original's; on, the material drives the values and none is written as a
+        /// fixed one.
+        /// </summary>
+        /// <param name="restore">The guard writes a snapshot back.</param>
+        /// <param name="wanted">The flag in the values to write; null if it was not available.</param>
+        /// <returns>The flag to set (null: left as it is) and whether the values are written.</returns>
+        public static (bool? flag, bool writeValues) MaterialOnWrite(bool restore, bool? wanted) =>
+            restore ? (wanted, wanted != true) : (false, true);
+
+        /// <summary>
         /// What the original body has: with readable override flags its overridden groups and the
         /// defaults for the rest (<see cref="OwnValues"/>); without them (a single-body or pre-2013
         /// part) its SheetMetal's values – there they are the body's own.

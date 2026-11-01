@@ -415,25 +415,35 @@ namespace Spiegelwerk.Sw
         /// override flags in <paramref name="overrides"/> first, then only the overridden groups)
         /// or into the part's defaults, reads them back and returns what does not match.
         /// ModifyDefinition can report success and change nothing; only the read-back counts.
-        /// Material-driven values become fixed ones.
+        /// Building a copy, material-driven values become fixed ones; with <paramref name="restore"/>
+        /// (the guard writes a snapshot back) the material flag gets its state from
+        /// <paramref name="want"/>, and with it on no value is written
+        /// (<see cref="SheetMetalRules.MaterialOnWrite"/>).
         /// </summary>
-        public static List<string> Apply(ModelDoc2 doc, Feature f, SheetMetalParameters want, bool bodyLevel, IReadOnlyList<int> overrides)
+        public static List<string> Apply(ModelDoc2 doc, Feature f, SheetMetalParameters want, bool bodyLevel, IReadOnlyList<int> overrides, bool restore = false)
         {
             var notes = new List<string>();
             string label = bodyLevel ? $"Blechparameter „{f.Name}“" : "Blech-Standardwerte";
             var groups = new HashSet<int>(bodyLevel ? overrides : new[] { 0, 1, 2 });
-            if (bodyLevel && groups.Count == 0) return notes;
+            (bool? material, bool writeValues) = SheetMetalRules.MaterialOnWrite(restore, want.UseMaterialParameters);
+            // Restoring, the material flag may be all a body has to get back.
+            if (bodyLevel && groups.Count == 0 && !(restore && material.HasValue)) return notes;
             var d = (SheetMetalFeatureData)(object)f.GetDefinition();
             if (d == null || !d.AccessSelections(doc, null))
             {
                 notes.Add($"{label}: nicht änderbar (Feature-Daten nicht zugänglich).");
                 return notes;
             }
+            bool flagMoves = material.HasValue && SwLate.Get(d, "UseMaterialSheetMetalParameters") is bool now && now != material.Value;
+            if (bodyLevel && groups.Count == 0 && !flagMoves)
+            {
+                d.ReleaseSelectionAccess();
+                return notes;
+            }
             bool ok = false;
             try
             {
-                if (SwLate.Get(d, "UseMaterialSheetMetalParameters") is bool material && material)
-                    SwLate.Set(d, "UseMaterialSheetMetalParameters", false);
+                if (flagMoves) SwLate.Set(d, "UseMaterialSheetMetalParameters", material!.Value);
                 if (bodyLevel)
                     foreach (int i in overrides)
                     {
@@ -444,6 +454,8 @@ namespace Spiegelwerk.Sw
                             notes.Add($"{label}: Überschreiben der Standardwerte ({OverrideName(i)}) nicht anwendbar (Code {code}).");
                         }
                     }
+                // The material drives the values: none of them is written as a fixed one.
+                if (!writeValues) groups.Clear();
                 if (groups.Contains(0))
                 {
                     d.Thickness = want.Thickness;
