@@ -5,13 +5,13 @@ using Spiegelwerk.Core.Sketch;
 namespace Spiegelwerk.Core.Records
 {
     /// <summary>
-    /// A hole that brings its own position sketch – Hole Wizard and Advanced Hole. The holes
-    /// sit at the points of that sketch, which is captured with the hole and rebuilt into the
-    /// position sketch of the new hole; it is not rebuilt as a sketch of its own.
+    /// A feature placed at the points of a position sketch it brings along – holes (Hole Wizard,
+    /// Advanced Hole) and later form tools. The position sketch is captured with the feature and
+    /// rebuilt into the position sketch of the new one; it is not rebuilt as a sketch of its own.
     /// </summary>
-    public abstract class PositionedHoleRecord : FeatureRecord
+    public abstract class PositionedFeatureRecord : FeatureRecord
     {
-        protected PositionedHoleRecord(string name, string typeName, string positionSketchName, SketchModel position) : base(name, typeName)
+        protected PositionedFeatureRecord(string name, string typeName, string positionSketchName, SketchModel position) : base(name, typeName)
         {
             PositionSketchName = positionSketchName;
             Position = position;
@@ -19,14 +19,28 @@ namespace Spiegelwerk.Core.Records
 
         public string PositionSketchName { get; }
 
-        /// <summary>The position sketch: one hole at each of its points.</summary>
+        /// <summary>The position sketch: one instance at each of its points.</summary>
         public SketchModel Position { get; }
 
-        /// <summary>Hole centres in model coordinates (unmirrored), as the hole reports them.</summary>
+        /// <summary>Instance centres in model coordinates (unmirrored), as the feature reports them.</summary>
         public List<Vec3> Points { get; } = new List<Vec3>();
 
         /// <summary>Placement face (or plane).</summary>
         public GeometryRef? Face { get; set; }
+
+        public override IReadOnlyList<string> OwnedSketches => new[] { PositionSketchName };
+    }
+
+    /// <summary>
+    /// A hole that brings its own position sketch – Hole Wizard and Advanced Hole. The holes
+    /// sit at the points of that sketch.
+    /// </summary>
+    public abstract class PositionedHoleRecord : PositionedFeatureRecord
+    {
+        protected PositionedHoleRecord(string name, string typeName, string positionSketchName, SketchModel position)
+            : base(name, typeName, positionSketchName, position)
+        {
+        }
     }
 
     /// <summary>
@@ -69,20 +83,59 @@ namespace Spiegelwerk.Core.Records
         public Dictionary<string, double> Values { get; } = new Dictionary<string, double>();
     }
 
+    /// <summary>What kind of feature owns a part (<see cref="PartOfFeatureRecord"/>): decides what becomes of the part when its owner is not rebuilt.</summary>
+    public enum PartOwnerKind
+    {
+        /// <summary>Hole Wizard hole or Advanced Hole: the position sketch becomes an ordinary sketch again, the profile sketch is left out.</summary>
+        Hole,
+
+        /// <summary>Form tool: the position sketch becomes an ordinary sketch again, its other sketch is left out.</summary>
+        FormTool,
+
+        /// <summary>Profile sketch of an edge flange: left out with it.</summary>
+        EdgeFlange,
+
+        /// <summary>Width sketch of a hem: left out with it.</summary>
+        Hem,
+
+        /// <summary>The SheetMetal feature a base flange brings along.</summary>
+        SheetMetal,
+
+        /// <summary>A sketch under a flat pattern.</summary>
+        FlatPattern,
+    }
+
     /// <summary>
-    /// A sub-feature that is not rebuilt on its own but together with its owner – the sketches
-    /// of a Hole Wizard hole or an Advanced Hole. Only valid while the owner is rebuilt too;
-    /// otherwise the job captures the sketch on its own again.
+    /// A sub-feature that is not rebuilt on its own but together with its owner (a record with
+    /// <see cref="FeatureRecord.BringsParts"/>) – the sketches of a Hole Wizard hole or an
+    /// Advanced Hole. Only valid while the owner is rebuilt too; otherwise the job captures the
+    /// part on its own again, as <see cref="OwnerKind"/> says.
     /// </summary>
     public sealed class PartOfFeatureRecord : FeatureRecord
     {
-        public PartOfFeatureRecord(string name, string typeName, string owner) : base(name, typeName)
+        public PartOfFeatureRecord(string name, string typeName, string owner, PartOwnerKind ownerKind) : base(name, typeName)
         {
             Owner = owner;
+            OwnerKind = ownerKind;
         }
 
         public string Owner { get; }
+        public PartOwnerKind OwnerKind { get; }
         public override bool ChangesSolid => false;
+
+        /// <summary>Its owner keeps its position sketch as an ordinary sketch when it is not rebuilt itself.</summary>
+        public bool OwnerHasPositionSketch => OwnerKind == PartOwnerKind.Hole || OwnerKind == PartOwnerKind.FormTool;
+
+        /// <summary>Why the part is left out when its owner is not rebuilt (for a position sketch: not left out, an ordinary sketch).</summary>
+        public string LeftOut => OwnerKind switch
+        {
+            PartOwnerKind.Hole => $"Profilskizze der Bohrung „{Owner}“, die nicht gespiegelt wird – entfällt mit ihr.",
+            PartOwnerKind.FormTool => $"Skizze des Umformwerkzeugs „{Owner}“, das nicht gespiegelt wird – entfällt mit ihm.",
+            PartOwnerKind.EdgeFlange => $"Profilskizze der Kantenlasche „{Owner}“, die nicht gespiegelt wird – entfällt mit ihr.",
+            PartOwnerKind.Hem => $"Skizze des Saums „{Owner}“, der nicht gespiegelt wird – entfällt mit ihm.",
+            PartOwnerKind.SheetMetal => $"Entsteht nur mit der Basislasche „{Owner}“.",
+            _ => $"Gehört zur Abwicklung „{Owner}“.",
+        };
     }
 
     /// <summary>Hole Wizard type numbers.</summary>

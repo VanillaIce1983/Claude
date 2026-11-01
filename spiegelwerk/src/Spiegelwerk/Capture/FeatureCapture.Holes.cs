@@ -8,31 +8,33 @@ using Spiegelwerk.Sw;
 
 namespace Spiegelwerk.Capture
 {
-    /// <summary>Hole Wizard holes: hole data, hole centres and the position sketch; sketches of both kinds of hole.</summary>
+    /// <summary>Hole Wizard holes: hole data, hole centres and the position sketch; the parts of features (sketches of both kinds of hole).</summary>
     internal sealed partial class FeatureCapture
     {
-        /// <summary>Sketch name → the hole it belongs to.</summary>
-        private Dictionary<string, string>? _holeParts;
+        /// <summary>Name of a part → its owner and the owner's kind; built on the first sketch.</summary>
+        private Dictionary<string, (string owner, PartOwnerKind kind)>? _ownedParts;
 
         /// <summary>Hole name → name of its position sketch, read only when needed.</summary>
         private readonly Dictionary<string, string?> _positionSketches = new Dictionary<string, string?>(StringComparer.Ordinal);
 
         /// <summary>
-        /// The hole a sketch belongs to, if it is one of the sketches of a Hole Wizard hole
-        /// (position and profile) or an Advanced Hole. Those are not rebuilt on their own: the
-        /// new hole brings its own, and the position sketch is written into that.
+        /// The owner a feature is part of, if it does not come into being on its own: the
+        /// sketches of a Hole Wizard hole (position and profile) or an Advanced Hole. Those are
+        /// not rebuilt on their own: the new hole brings its own, and the position sketch is
+        /// written into that. Only sketches are parts so far.
         /// </summary>
-        private PartOfFeatureRecord? HolePart(Feature sketch, string type)
+        private PartOfFeatureRecord? OwnedPart(Feature f, string type)
         {
+            if (type != "ProfileFeature" && type != "3DProfileFeature") return null;
             // Tree walk only – no selection access, so runs without holes cost nothing extra.
-            if (_holeParts == null)
+            if (_ownedParts == null)
             {
-                _holeParts = new Dictionary<string, string>(StringComparer.Ordinal);
+                _ownedParts = new Dictionary<string, (string, PartOwnerKind)>(StringComparer.Ordinal);
                 foreach (Feature hole in SwDoc.TopLevelFeatures(_doc).Where(IsPositionedHole))
                     foreach (Feature sub in SwDoc.SubFeatures(hole).Where(SwDoc.IsSketch))
-                        _holeParts[sub.Name] = hole.Name;
+                        _ownedParts[sub.Name] = (hole.Name, PartOwnerKind.Hole);
             }
-            return _holeParts.TryGetValue(sketch.Name, out string owner) ? new PartOfFeatureRecord(sketch.Name, type, owner) : null;
+            return _ownedParts.TryGetValue(f.Name, out var owner) ? new PartOfFeatureRecord(f.Name, type, owner.owner, owner.kind) : null;
         }
 
         /// <summary>
@@ -77,18 +79,20 @@ namespace Spiegelwerk.Capture
         }
 
         /// <summary>
-        /// A sketch of a hole that is not rebuilt (not in the job, unsupported, skipped): the
-        /// position sketch becomes an ordinary sketch again, so its points stay available; the
-        /// profile sketch means nothing without the hole and is left out. A 3D sub-sketch can
-        /// only be a position sketch (on several or curved faces) – profiles are always 2D.
+        /// A part whose owner is not rebuilt (not in the job, unsupported, skipped). The position
+        /// sketch of a hole becomes an ordinary sketch again, so its points stay available; every
+        /// other part means nothing without its owner and is left out (<see cref="PartOfFeatureRecord.LeftOut"/>).
+        /// A 3D sub-sketch of a hole can only be a position sketch (on several or curved faces) –
+        /// profiles are always 2D.
         /// </summary>
         public FeatureRecord CaptureOnItsOwn(Feature f, PartOfFeatureRecord part)
         {
             string type = f.GetTypeName2();
+            if (!part.OwnerHasPositionSketch) return new UnsupportedRecord(f.Name, type, part.LeftOut, false);
             if (type != "ProfileFeature")
                 return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);
             if (!IsPositionSketch(part.Owner, f.Name))
-                return new UnsupportedRecord(f.Name, type, $"Profilskizze der Bohrung „{part.Owner}“, die nicht gespiegelt wird – entfällt mit ihr.", false);
+                return new UnsupportedRecord(f.Name, type, part.LeftOut, false);
             try
             {
                 return new SketchRecord(f.Name, ReadSketch(f));

@@ -112,7 +112,9 @@ namespace Spiegelwerk.Build
                     report.Aborted = true;
                     return new MirrorJobResult(report, null);
                 }
-                if (features.FirstOrDefault(f => UnsupportedFeatures.RefusesRun(f.GetTypeName2())) is Feature carrier)
+                // Refusal step 1 (blech-plan §1.5). Accepted owners come with the sheet-metal tree,
+                // the fallback switch with the fallback; until then neither exempts anything.
+                if (features.FirstOrDefault(f => UnsupportedFeatures.RefusesBeforeCapture(f.GetTypeName2(), partOfAcceptedOwner: false, fallbackOn: false)) is Feature carrier)
                     throw new InvalidOperationException(UnsupportedFeatures.RunRefusal(carrier.Name, carrier.GetTypeName2()));
                 progress.Start(features.Count, opt.VerifySteps);
                 var capture = new FeatureCapture(source, _math, regionSpaces);
@@ -179,8 +181,8 @@ namespace Spiegelwerk.Build
                         {
                             report.Aborted = report.Cancelled = true;
                             report.General.Add(RunSteps.CancelledInBuild(records[i].Name, records.Count - i - 1));
-                            // Sketches already reported as built with a hole that now is not built.
-                            foreach (PositionedHoleRecord hole in records.Skip(i + 1).OfType<PositionedHoleRecord>()) StepRunner.WithdrawParts(ctx, hole.Name);
+                            // Parts already reported as built with an owner that now is not built.
+                            foreach (FeatureRecord owner in records.Skip(i + 1).Where(r => r.BringsParts)) StepRunner.WithdrawParts(ctx, owner.Name);
                             break;
                         }
                     }

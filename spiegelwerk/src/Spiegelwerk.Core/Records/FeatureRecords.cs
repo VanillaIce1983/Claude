@@ -51,6 +51,37 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Does this feature add or remove material? Sketches and planes do not.</summary>
         public virtual bool ChangesSolid => true;
 
+        // ---- ownership (one model for holes, sheet metal and form tools, blech-plan §1.3)
+
+        /// <summary>
+        /// Sketches absorbed by this feature that belong to it alone and are rebuilt into it (the
+        /// position sketch of a hole; later edge-flange profiles, hem width sketches, cross-break
+        /// lines, form-tool sketches). They are registered like sketches and forgotten with it.
+        /// </summary>
+        public virtual IReadOnlyList<string> OwnedSketches => System.Array.Empty<string>();
+
+        /// <summary>
+        /// Sub-features or companions come into being with this feature: records that are part of
+        /// it (<see cref="PartOfFeatureRecord"/>) point to it, and they are withdrawn when it is not built.
+        /// </summary>
+        public virtual bool BringsParts => OwnedSketches.Count > 0;
+
+        /// <summary>
+        /// Removing the copy again takes its absorbed features with it – only when it owns sketches.
+        /// A feature that merely uses a sketch (a base flange, an extrude) keeps it: that sketch is an
+        /// ordinary record of its own and may be shared.
+        /// </summary>
+        public bool DeleteWithAbsorbed => OwnedSketches.Count > 0;
+
+        /// <summary>The feature whose state "after this record" is measured (legacy bends: their ProcessBends).</summary>
+        public virtual string MeasureUntil => Name;
+
+        /// <summary>May write the part's shared sheet-metal defaults: built under the guard that restores them.</summary>
+        public virtual bool TouchesSheetMetalDefaults => false;
+
+        /// <summary>Its faces live on bend sub-features: face samples are also taken on non-sketch sub-features.</summary>
+        public virtual bool SampleSubFeatures => false;
+
         /// <summary>Things worth telling the user that do not stop the rebuild.</summary>
         public List<string> Notes { get; } = new List<string>();
 
@@ -382,5 +413,11 @@ namespace Spiegelwerk.Core.Records
 
         public string Reason { get; }
         public override bool ChangesSolid => _changesSolid;
+
+        /// <summary>
+        /// On a sheet-metal body that qualifies, hands the body to the fallback (from blech-plan
+        /// S7a; only records that change the solid). False where a substitute would not help.
+        /// </summary>
+        public bool TriggersFallback { get; set; } = true;
     }
 }

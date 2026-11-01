@@ -21,16 +21,24 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   (Zweig `feat-skizzenbereiche`, geprüft, Befunde behoben, eingefügt).
 - Gegenprüfung der vier Blech-Entwürfe (`blech-*-gegenpruefung.md`) und Integrationsplan `blech-plan.md`
   (gemeinsame Grundlagen, 28 aufgelöste Widersprüche, Schritte S0–S10, Ersatzweg als S7, Live-Test-Annahmen).
+- Blech S0 (Zweig `feat-blech`): Grundlage ohne Verhaltensänderung – gemeinsame Blech-Werte und -Regeln in Core
+  (`SheetMetalRecords`, `SheetMetalCompare`, `AllowanceRules`, `BendOverrides`), Typtabelle mit Rolle und Zustand
+  (`SheetMetalTypes`, alle „noch nicht“) und `RefusesBeforeCapture`, ein Besitzmodell für Bohrungen und Blech
+  (`OwnedSketches`, `BringsParts`, `PartOwnerKind`, `PositionedFeatureRecord`), ausnahmesicherer Blech-Verteiler beim
+  Erfassen (noch ohne Leser), Spiegel-Features über Blech als nicht unterstützt, `SwLate.Invoke`/`InvokeOut`.
+  Abweichend vom Plan: STOLPERSTEINE 139 aus dem Plan ist nach dem Einfügen der beiden Zweige 151; die neuen Zeilen
+  stehen als 164–171 in einem eigenen Abschnitt. Die geschlossene Ecke (`CornerFeat`) steht schon in der Tabelle, die
+  Eckentlastung nicht (Name unbestätigt, §1.5).
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusesRun` den Lauf ab |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 steht (Zweig `feat-blech`), als Nächstes S1a; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusesBeforeCapture` den Lauf ab (`SheetMetalTypes`) |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S0 (Grundlagen, ohne Verhaltensänderung), dann S1a (Basislasche, Abwicklung, neues Teil) usw. nach `blech-plan.md`;
+1. Blech S0 prüfen und gegenprüfen, dann S1a (Basislasche, Abwicklung, neues Teil) usw. nach `blech-plan.md`;
    jeder Schritt mit Core-Tests, Prüfung und Gegenprüfung.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.

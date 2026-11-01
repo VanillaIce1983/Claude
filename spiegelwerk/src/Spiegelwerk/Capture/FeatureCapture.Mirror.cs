@@ -38,8 +38,11 @@ namespace Spiegelwerk.Capture
                     PropagateVisualProperty = d.PropagateVisualProperty,
                 };
                 if ((object)d.PatternFeatureArray is object[] seeds)
+                {
+                    RefuseSheetMetalSeeds(seeds.OfType<Feature>());
                     foreach (Feature seed in seeds.OfType<Feature>())
                         if (IsSeed(seed) && !r.SeedFeatures.Contains(seed.Name)) r.SeedFeatures.Add(seed.Name);
+                }
 
                 if ((object)d.MirrorFaceArray is object[] faces && faces.Length > 0)
                 {
@@ -48,6 +51,7 @@ namespace Spiegelwerk.Capture
                         throw new NotSupportedException("Spiegeln einzelner Flächen wird nicht nachgebaut (nur ganze Features): Von " +
                                                         string.Join(", ", owners.Incomplete.Select(n => $"„{n}“")) +
                                                         " sind nicht alle Flächen gewählt. Abhilfe: im Original die Features statt der Flächen spiegeln.");
+                    RefuseSheetMetalSeeds(owners.Complete);
                     r.SeedFaces.AddRange(owners.Signatures);
                     foreach (Feature owner in owners.Complete)
                         if (IsSeed(owner) && !r.SeedFeatures.Contains(owner.Name)) r.SeedFeatures.Add(owner.Name);
@@ -95,9 +99,9 @@ namespace Spiegelwerk.Capture
                         var mp = (double[])(object)b.GetMassProperties(1.0);
                         if (mp == null || mp.Length < 4)
                             throw new NotSupportedException($"Volumen und Schwerpunkt des Körpers „{b.Name}“ nicht lesbar.");
-                        IEnumerable<string> made = (object)b.GetFeatures() is object[] fs
-                            ? fs.OfType<Feature>().Where(IsSeed).Select(x => x.Name).Distinct()
-                            : Enumerable.Empty<string>();
+                        List<Feature> features = (object)b.GetFeatures() is object[] fs ? fs.OfType<Feature>().ToList() : new List<Feature>();
+                        RefuseSheetMetalSeeds(features);
+                        IEnumerable<string> made = features.Where(IsSeed).Select(x => x.Name).Distinct();
                         r.SeedBodies.Add(new MirrorSeedBody(b.Name, MassState.FromBodies(new[] { (mp[3], new Vec3(mp[0], mp[1], mp[2])) }), made));
                     }
                 if (r.SeedBodies.Count == 0) throw new NotSupportedException("„Körper spiegeln“ ohne lesbare Körper.");
@@ -109,6 +113,17 @@ namespace Spiegelwerk.Capture
             {
                 d.ReleaseSelectionAccess();
             }
+        }
+
+        /// <summary>
+        /// A mirror feature over sheet metal is not rebuilt yet: its second half would be read
+        /// back from the copies under the sheet-metal session and guard, which only the dedicated
+        /// slice brings. Unsupported, it changes the solid (and may hand its body to the fallback).
+        /// </summary>
+        private static void RefuseSheetMetalSeeds(IEnumerable<Feature> seeds)
+        {
+            if (seeds.Any(s => UnsupportedFeatures.IsSheetMetal(s.GetTypeName2())))
+                throw new NotSupportedException(UnsupportedFeatures.MirrorOverSheetMetal);
         }
 
         /// <summary>

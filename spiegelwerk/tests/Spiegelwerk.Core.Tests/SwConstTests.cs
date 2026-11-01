@@ -50,6 +50,18 @@ namespace Spiegelwerk.Core.Tests
             SameNumbers<DraftKind, swDraftType_e>(n => "sw" + n + "Draft");
             SameNumbers<FaceFilletKind, swSimpleFilletType_e>(n => "sw" + n + "Fillet", complete: false);
             SameNumbers<FaceFilletKind, swFeatureFilletType_e>(n => "swFeatureFilletType_" + n, complete: false);
+            SameNumbers<BendAllowanceKind, swBendAllowanceTypes_e>(n => "swBendAllowance" + n);
+            SameNumbers<ReliefKind, swSheetMetalReliefTypes_e>(n => "swSheetMetalRelief" + n);
+        }
+
+        [Fact]
+        public void Sheet_metal_override_parameters_are_numbered_as_the_flags_read_them()
+        {
+            // SheetMetalParameters reads GetOverrideDefaultParameter2(0/1/2) into its three flags.
+            Assert.Equal(0, (int)swSheetMetalOverrideDefaultParameters_e.swSheetMetalOverrideDefaultParameters_BendParameters);
+            Assert.Equal(1, (int)swSheetMetalOverrideDefaultParameters_e.swSheetMetalOverrideDefaultParameters_BendAllowance);
+            Assert.Equal(2, (int)swSheetMetalOverrideDefaultParameters_e.swSheetMetalOverrideDefaultParameters_AutoRelief);
+            Assert.Equal(0, (int)swSheetMetalModifierError_e.swSheetMetalModifierError_NoError);
         }
 
         [Fact]

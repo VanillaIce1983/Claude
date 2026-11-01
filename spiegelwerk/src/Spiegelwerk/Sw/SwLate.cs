@@ -36,6 +36,40 @@ namespace Spiegelwerk.Sw
             }
         }
 
+        /// <summary>Calls a method and returns its result; null if the member is missing or failed (or returned null).</summary>
+        public static object? Invoke(object com, string method, params object[] args)
+        {
+            try
+            {
+                return com.GetType().InvokeMember(method, BindingFlags.InvokeMethod, null, com, args);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Calls a method with by-reference (out) parameters: those marked in <paramref name="byRef"/>
+        /// come back in <paramref name="args"/>. Returns the method's result; null if the member is
+        /// missing or failed – then <paramref name="args"/> may be unchanged.
+        /// </summary>
+        public static object? InvokeOut(object com, string method, object?[] args, bool[] byRef)
+        {
+            if (byRef.Length != args.Length) throw new ArgumentException("Für jedes Argument ist anzugeben, ob es als Referenz übergeben wird.", nameof(byRef));
+            if (args.Length == 0) return Invoke(com, method);
+            try
+            {
+                var modifier = new ParameterModifier(args.Length);
+                for (int i = 0; i < byRef.Length; i++) modifier[i] = byRef[i];
+                return com.GetType().InvokeMember(method, BindingFlags.InvokeMethod, null, com, args, new[] { modifier }, null, null);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         /// <summary>Calls a method; true if it exists and did not return false.</summary>
         public static bool Call(object com, string method, params object[] args)
         {

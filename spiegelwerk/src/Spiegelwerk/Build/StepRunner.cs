@@ -133,8 +133,8 @@ namespace Spiegelwerk.Build
             entry.HasEquivalent = result.HasEquivalent;
             entry.Details.AddRange(result.Notes);
             ctx.Report.Entries.AddRange(result.ChildEntries);
-            // Only if the hole is not in the target – one with a rebuild error still has its sketches.
-            if (!entry.IsMirrored && !ctx.Created.ContainsKey(record.Name)) WithdrawParts(ctx, record.Name);
+            // Only if the owner is not in the target – one with a rebuild error still has its parts.
+            if (record.BringsParts && !entry.IsMirrored && !ctx.Created.ContainsKey(record.Name)) WithdrawParts(ctx, record.Name);
             Remember(ctx, record, result, entry);
             return entry;
         }
@@ -202,8 +202,8 @@ namespace Spiegelwerk.Build
         }
 
         /// <summary>
-        /// The sketches of a hole were reported as "built with the hole" before the hole was
-        /// built. If the hole failed, they were not.
+        /// The parts of a feature (the sketches of a hole) were reported as "built with it" before
+        /// it was built. If it failed, they were not.
         /// </summary>
         public static void WithdrawParts(BuildContext ctx, string owner)
         {
@@ -288,9 +288,10 @@ namespace Spiegelwerk.Build
                 ctx.Planes.RemoveStepHelpers(mark);
                 return failed;
             }
-            // A hole's sketches belong to the hole alone and go with it.
-            BuilderSupport.Delete(ctx, result.Feature!, record is PositionedHoleRecord);
-            if (record is PositionedHoleRecord hole) ctx.ForgetSketch(hole.PositionSketchName);
+            // Sketches that belong to the feature alone (a hole's) go with it; a sketch it merely
+            // uses is a record of its own, may be shared, and stays.
+            BuilderSupport.Delete(ctx, result.Feature!, record.DeleteWithAbsorbed);
+            foreach (string sketch in record.OwnedSketches) ctx.ForgetSketch(sketch);
             result.RemoveHelpers?.Invoke();
             ctx.Planes.RemoveStepHelpers(mark);
             ctx.Unregister(record.Name);

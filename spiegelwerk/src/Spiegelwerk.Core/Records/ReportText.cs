@@ -24,7 +24,8 @@ namespace Spiegelwerk.Core.Records
         private static string Triple(Vec3 v, int decimals, IFormatProvider? culture) =>
             $"({Number(v.X, decimals, culture)}|{Number(v.Y, decimals, culture)}|{Number(v.Z, decimals, culture)})";
 
-        private static string Number(double value, int decimals, IFormatProvider? culture)
+        /// <summary>A number rounded to at most <paramref name="decimals"/> places, never "-0".</summary>
+        internal static string Number(double value, int decimals, IFormatProvider? culture)
         {
             double rounded = Math.Round(value, decimals);
             // A tiny negative value would read "-0".

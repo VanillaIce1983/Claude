@@ -219,8 +219,8 @@ namespace Spiegelwerk.Build.Builders
                 {
                     ctx.Shared.Cancelled = true;
                     notes.Add(MirrorFeatureRules.CancelledIn(logical, records.Count - i - 1));
-                    // Sketches already reported as built with a hole that now is not built.
-                    foreach (PositionedHoleRecord hole in records.Skip(i + 1).OfType<PositionedHoleRecord>()) StepRunner.WithdrawParts(child, hole.Name);
+                    // Parts already reported as built with an owner that now is not built.
+                    foreach (FeatureRecord owner in records.Skip(i + 1).Where(x => x.BringsParts)) StepRunner.WithdrawParts(child, owner.Name);
                     return true;
                 }
             }

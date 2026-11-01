@@ -63,9 +63,10 @@ namespace Spiegelwerk.Capture
         }
 
         /// <summary>
-        /// Captures the features in order. Sketches of a hole are rebuilt with the hole – only
-        /// if the hole itself is rebuilt; otherwise the position sketch is read as an ordinary
-        /// sketch and the profile sketch is left out. <paramref name="starting"/> runs before
+        /// Captures the features in order. Parts of a feature (the sketches of a hole) are rebuilt
+        /// with it – only if it is rebuilt itself (<see cref="FeatureRecord.BringsParts"/>);
+        /// otherwise a part is captured on its own as its owner kind says: a position sketch as an
+        /// ordinary sketch, everything else is left out. <paramref name="starting"/> runs before
         /// each feature, <paramref name="cancelled"/> after it: true stops, the result is null.
         /// </summary>
         public List<FeatureRecord>? CaptureAll(IReadOnlyList<Feature> features, Action<Feature>? starting = null, Func<bool>? cancelled = null)
@@ -77,9 +78,9 @@ namespace Spiegelwerk.Capture
                 records.Add(Capture(f));
                 if (cancelled != null && cancelled()) return null;
             }
-            var holes = new HashSet<string>(records.OfType<PositionedHoleRecord>().Select(h => h.Name), StringComparer.Ordinal);
+            var owners = new HashSet<string>(records.Where(r => r.BringsParts).Select(r => r.Name), StringComparer.Ordinal);
             for (int i = 0; i < records.Count; i++)
-                if (records[i] is PartOfFeatureRecord part && !holes.Contains(part.Owner))
+                if (records[i] is PartOfFeatureRecord part && !owners.Contains(part.Owner))
                     records[i] = CaptureOnItsOwn(features[i], part);
             return records;
         }
@@ -89,7 +90,7 @@ namespace Spiegelwerk.Capture
             string type = f.GetTypeName2();
             try
             {
-                if ((type == "ProfileFeature" || type == "3DProfileFeature") && HolePart(f, type) is PartOfFeatureRecord part)
+                if (OwnedPart(f, type) is PartOfFeatureRecord part)
                     return part;
                 if (type == "ProfileFeature") return new SketchRecord(f.Name, ReadSketch(f));
                 if (type == "3DProfileFeature") return new UnsupportedRecord(f.Name, type, "3D-Skizzen werden noch nicht gespiegelt.", false);
@@ -98,6 +99,9 @@ namespace Spiegelwerk.Capture
                 if (type == "CoordSys")
                     return new CoordSysRecord(f.Name, SwDoc.CoordinateSystemFrame(_doc, _math, f.Name)
                                                       ?? throw new NotSupportedException("Lage des Koordinatensystems nicht lesbar."));
+
+                // Every sheet-metal type goes through one exception-safe dispatch, also those without a definition.
+                if (UnsupportedFeatures.IsSheetMetal(type)) return CaptureSheetMetal(f, type);
 
                 object def = f.GetDefinition();
                 switch (def)
@@ -515,12 +519,6 @@ namespace Spiegelwerk.Capture
         private static GeometryRef SketchRef(Sketch sk) =>
             sk.Is3D() ? GeometryRef.Unknown("3D-Skizze") : GeometryRef.ToSketch(SwDoc.SketchNameOf(sk));
 
-        private static bool ChangesSolid(string type) => !NonSolidTypes.Contains(type);
-
-        private static readonly HashSet<string> NonSolidTypes = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "RefAxis", "RefPoint", "CoordSys", "3DProfileFeature", "ProfileFeature", "RefPlane", "Helix", "CompositeCurve",
-            "ReferenceCurve", "CurveInFile", "SplitLine", "CosmeticThread", "Attribute",
-        };
+        private static bool ChangesSolid(string type) => UnsupportedFeatures.ChangesSolid(type);
     }
 }
