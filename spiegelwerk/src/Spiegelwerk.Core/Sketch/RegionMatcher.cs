@@ -21,8 +21,18 @@ namespace Spiegelwerk.Core.Sketch
         /// </summary>
         public List<Vec3> Witnesses { get; } = new List<Vec3>();
 
-        /// <summary>Report notes: a region split or merged in the copy, a region that differs.</summary>
+        /// <summary>
+        /// Report notes for a feature built with this selection: a region split or merged in the
+        /// copy, a region that differs – each with what is selected instead.
+        /// </summary>
         public List<string> Notes { get; } = new List<string>();
+
+        /// <summary>
+        /// Why the selection is not the original's (the regions behind <see cref="Inexact"/>), as
+        /// sentences without the consequence: for a feature that is refused instead of built,
+        /// where "gewählt ist …" would not hold.
+        /// </summary>
+        public List<string> Deviations { get; } = new List<string>();
 
         public string? Reason { get; internal set; }
 
@@ -48,7 +58,8 @@ namespace Spiegelwerk.Core.Sketch
     ///     exactly the union of target regions lying inside it (split by geometry the
     ///     original lacks) – all selected, with a note;
     ///  5. otherwise a mismatch: one hit that contains the source is selected as a larger
-    ///     region (inexact, both areas in the note); anything else is no match.
+    ///     region (inexact, both areas in the note) – containing means no hole, island or
+    ///     notch of it lies inside the source, a slit may; anything else is no match.
     /// Area only backs up the union tests; a 60 % part of a sliver can never pass as "equal".
     /// </summary>
     public static class RegionMatcher
@@ -120,8 +131,10 @@ namespace Spiegelwerk.Core.Sketch
                     ProfileRegion t = targets[hits[i][0]];
                     chosen[i] = new List<int> { hits[i][0] };
                     match.Inexact = true;
-                    match.Notes.Add($"{label} weicht in der Kopie ab ({ReportText.SquareMillimetres(s.Area)} im Original, " +
-                                    $"{ReportText.SquareMillimetres(t.Area)} in der Kopie); gewählt ist der Bereich, in dem er liegt.");
+                    string deviation = $"{label} weicht in der Kopie ab ({ReportText.SquareMillimetres(s.Area)} im Original, " +
+                                       $"{ReportText.SquareMillimetres(t.Area)} in der Kopie)";
+                    match.Deviations.Add(deviation + ".");
+                    match.Notes.Add(deviation + "; gewählt ist der Bereich, in dem er liegt.");
                     continue;
                 }
                 match.Reason = hits[i].Count == 1
@@ -130,6 +143,7 @@ namespace Spiegelwerk.Core.Sketch
                     : $"{label} liegt in der Kopie in {hits[i].Count} Bereichen, die ihn nicht genau zusammensetzen" +
                       (allowCover ? "" : " (bei dünnwandigen Features wird ein geteilter Bereich nicht zusammengesetzt: das ergäbe eine zusätzliche Wand)");
                 match.Notes.Clear();
+                match.Deviations.Clear();
                 match.Inexact = false;
                 return match;
             }
@@ -152,10 +166,30 @@ namespace Spiegelwerk.Core.Sketch
 
         /// <summary>
         /// <paramref name="whole"/> covers <paramref name="part"/>: every vertex of the part lies
-        /// inside the whole or within <paramref name="tolH"/> of its boundary.
+        /// inside the whole or within <paramref name="tolH"/> of its boundary, and no boundary of
+        /// the whole runs through the part's interior – except a slit, which has the whole on both
+        /// sides. A hole, island or notch of the whole inside the part makes the whole smaller there.
         /// </summary>
         public static bool Contains(ProfileRegion whole, ProfileRegion part, double tolH) =>
-            part.Vertices.All(v => whole.Classify(v) == RegionPoint.Inside || RegionGeometry.Distance(whole.Segments, v) <= tolH);
+            part.Vertices.All(v => whole.Classify(v) == RegionPoint.Inside || RegionGeometry.Distance(whole.Segments, v) <= tolH)
+            && !whole.Segments.Any(s => Cuts(whole, part, s, tolH));
+
+        /// <summary>
+        /// A boundary segment of <paramref name="whole"/> inside <paramref name="part"/> (its
+        /// midpoint more than 2·tolH from the part's boundary) without the whole on both sides:
+        /// a hole, island or notch the part lacks. The sides are probed 2·tolH off the midpoint,
+        /// beyond the classification margin; anything but inside on either side counts.
+        /// </summary>
+        private static bool Cuts(ProfileRegion whole, ProfileRegion part, RegionSegment s, double tolH)
+        {
+            double length = s.Length;
+            if (length <= 0) return false;
+            Vec3 mid = (s.A + s.B) * 0.5;
+            if (part.Classify(mid) != RegionPoint.Inside || RegionGeometry.Distance(part.Segments, mid) <= 2 * tolH) return false;
+            // Regions lie in sketch coordinates (Z = 0): the in-plane normal of the segment.
+            Vec3 n = new Vec3(s.A.Y - s.B.Y, s.B.X - s.A.X, 0) * (2 * tolH / length);
+            return whole.Classify(mid + n) != RegionPoint.Inside || whole.Classify(mid - n) != RegionPoint.Inside;
+        }
 
         /// <summary>
         /// <paramref name="whole"/> is exactly the union of <paramref name="parts"/>: the parts'

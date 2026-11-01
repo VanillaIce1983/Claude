@@ -141,6 +141,7 @@ namespace Spiegelwerk.Core.Tests
             Assert.True(m.Success, m.Reason);
             Assert.Equal(new[] { 0, 1 }, m.Indices.OrderBy(i => i));
             Assert.Contains("geteilt", Assert.Single(m.Notes));
+            Assert.Empty(m.Deviations);
             Assert.False(m.Inexact);
 
             // Thin: a split would add an inner wall – no cover.
@@ -202,6 +203,66 @@ namespace Spiegelwerk.Core.Tests
             string note = Assert.Single(m.Notes);
             Assert.Contains("800", note);
             Assert.Contains("1600", note);
+            Assert.Contains("gewählt ist", note);
+            // For a refused feature: the same reason without the selection that would not happen.
+            string deviation = Assert.Single(m.Deviations);
+            Assert.Contains("800", deviation);
+            Assert.Contains("1600", deviation);
+            Assert.DoesNotContain("gewählt ist", deviation);
+            Assert.EndsWith(".", deviation);
+        }
+
+        [Fact]
+        public void A_larger_region_with_an_island_beside_the_selected_one_still_contains_it()
+        {
+            // The copy lost the centerline and has a circle in the other half: still larger and containing.
+            ProfileRegion whole = Region(Rect(-0.04, 0, 0.04, 0.02), Pieces(Circle(-0.02, 0.01, 0.004)));
+            RegionMatch m = Match(LeftHalf, false, whole, Region(Pieces(Circle(-0.02, 0.01, 0.004))));
+            Assert.True(m.Success, m.Reason);
+            Assert.True(m.Inexact);
+            Assert.Equal(new[] { 0 }, m.Indices);
+            Assert.Single(m.Deviations);
+        }
+
+        [Fact]
+        public void A_region_with_an_island_or_notch_inside_the_selected_one_is_smaller_and_no_match_for_a_thin_feature()
+        {
+            // An island the source's witnesses miss: the copy's region holds all of the source's
+            // boundary, but lacks the island – smaller, never "the region it lies in".
+            ProfileRegion disc = Region(Pieces(Circle(0, 0, 0.01)));
+            ProfileRegion island = Region(Pieces(Circle(0.0087, 0, 0.0008)));
+            ProfileRegion holed = Region(Pieces(Circle(0, 0, 0.01)), Pieces(Circle(0.0087, 0, 0.0008)));
+            Assert.All(MirrorToFront(disc).Witnesses, w => Assert.Equal(RegionPoint.Outside, island.Classify(w.Point)));
+            RegionMatch thin = Match(disc, false, holed, island);
+            Assert.False(thin.Success);
+            Assert.Contains("kleiner", thin.Reason);
+            Assert.Empty(thin.Notes);
+            Assert.Empty(thin.Deviations);
+            Assert.Empty(thin.Indices);
+            Assert.False(thin.Inexact);
+            // Not thin: the island has witnesses of its own, the two pieces compose the disc exactly.
+            RegionMatch cover = Match(disc, true, holed, island);
+            Assert.True(cover.Success, cover.Reason);
+            Assert.False(cover.Inexact);
+            Assert.Equal(new[] { 0, 1 }, cover.Indices.OrderBy(i => i));
+
+            // Larger elsewhere, with the island inside the source: not containing either.
+            ProfileRegion wider = Region(Pieces(Circle(0, 0, 0.012)), Pieces(Circle(0.0087, 0, 0.0008)));
+            RegionMatch both = Match(disc, false, wider, island);
+            Assert.False(both.Success);
+            Assert.Contains("kleiner", both.Reason);
+
+            // A notch in the bottom edge of the right half (mirrored to −40…0).
+            ProfileRegion notched = Region(Polygon((-0.04, 0), (-0.0235, 0), (-0.0235, 0.003), (-0.0215, 0.003), (-0.0215, 0),
+                (0, 0), (0, 0.02), (-0.04, 0.02)));
+            foreach (bool allowCover in new[] { false, true })
+            {
+                RegionMatch m = Match(RightHalf, allowCover, notched);
+                Assert.False(m.Success);
+                Assert.Contains("kleiner", m.Reason);
+                Assert.Empty(m.Notes);
+                Assert.Empty(m.Indices);
+            }
         }
 
         [Fact]
@@ -219,6 +280,7 @@ namespace Spiegelwerk.Core.Tests
             Assert.True(m.Success, m.Reason);
             Assert.True(m.Inexact);
             Assert.Single(m.Notes);
+            Assert.DoesNotContain("gewählt ist", Assert.Single(m.Deviations));
         }
 
         [Fact]

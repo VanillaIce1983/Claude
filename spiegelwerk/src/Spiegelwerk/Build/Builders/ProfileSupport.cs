@@ -34,8 +34,11 @@ namespace Spiegelwerk.Build.Builders
         /// <summary>A region of the copy differs from the original's and the containing one stands in (RegionMatch.Inexact).</summary>
         public bool Inexact { get; set; }
 
-        /// <summary>Report notes: split, merged or differing regions.</summary>
+        /// <summary>Report notes for the built feature: split, merged or differing regions, with what is selected.</summary>
         public List<string> Notes { get; } = new List<string>();
+
+        /// <summary>Why the profile is inexact, without the consequence (RegionMatch.Deviations): for a refused feature.</summary>
+        public List<string> Deviations { get; } = new List<string>();
 
         public IEnumerable<object> Items => Contours.Cast<object>().Concat(Regions);
     }
@@ -86,7 +89,8 @@ namespace Spiegelwerk.Build.Builders
             string? why = ProfileRules.LostInCapture;
             Profile? p = r.SelectionLost ? null : Map(ctx, sketch, r, out why);
             if (p != null && !p.Inexact) return null;
-            if (p != null) notes.AddRange(p.Notes);
+            // Refused: only why – the matcher's notes say what would be selected, which does not happen.
+            if (p != null) notes.AddRange(p.Deviations);
             else notes.Add(why + ".");
             return ProfileRules.Refusal;
         }
@@ -113,8 +117,13 @@ namespace Spiegelwerk.Build.Builders
                 notes.Add(ProfileRules.WholeSketch(why));
                 return null;
             }
+            if (o.Used.Inexact && refuses)
+            {
+                notes.AddRange(o.Used.Deviations);
+                return ProfileRules.Refusal;
+            }
             notes.AddRange(o.Used.Notes);
-            return o.Used.Inexact && refuses ? ProfileRules.Refusal : null;
+            return null;
         }
 
         /// <summary>Report text on the profile a feature verifiably uses, for its message; empty without one.</summary>
@@ -183,6 +192,7 @@ namespace Spiegelwerk.Build.Builders
                         p.Witnesses.Add(m.Witnesses[k]);
                     }
                     p.Notes.AddRange(m.Notes);
+                    p.Deviations.AddRange(m.Deviations);
                     p.Inexact = m.Inexact;
                 }
                 return p;
@@ -197,7 +207,8 @@ namespace Spiegelwerk.Build.Builders
         /// <summary>
         /// Creates the feature along the ways of <see cref="ProfileRules.Ways"/>. Without a wanted
         /// profile only the whole-sketch ways, as before. With one: each pre-selection way, read
-        /// back and deleted if it did not take the profile (the profile is then read anew); then
+        /// back and deleted if it did not take the profile; after every way that brought no
+        /// accepted feature the profile is read anew (its objects may be stale); then
         /// the whole sketch with Contours set in ModifyDefinition (object[], then DispatchWrapper[]),
         /// mapped afresh inside the edit, where the model is rolled back to the feature. If none
         /// takes it, the feature is the whole sketch and <see cref="ProfileOutcome.Lost"/> says why.
@@ -217,7 +228,12 @@ namespace Spiegelwerk.Build.Builders
                     profile ??= Map(ctx, sketch, r, out lost);
                     if (profile == null) break;
                     Feature? f = create(way, profile);
-                    if (f == null) continue;
+                    if (f == null)
+                    {
+                        // A failed selection or a feature SOLIDWORKS did not make may leave the objects stale: read afresh.
+                        profile = null;
+                        continue;
+                    }
                     if (Check(ctx, f, sketch, profile, out string? rejected))
                     {
                         outcome.Way = way.Description;
@@ -327,14 +343,21 @@ namespace Spiegelwerk.Build.Builders
         }
 
         /// <summary>
-        /// Selects a region; if the object does not take the selection, picks it at its witness
+        /// Selects a region; if the object does not take the selection (or throws), picks it at its witness
         /// with SelectByID2 – a ray pick, so the picked region must belong to the new sketch: in
         /// the same part a coplanar sketch of the original may lie under the same point, and the
         /// copy would then consume the original's sketch.
         /// </summary>
         private static bool SelectRegion(BuildContext ctx, SketchMap sketch, SketchRegion region, Vec3 witness, int mark, bool append)
         {
-            if (SwSelect.Select(ctx.Doc, region, mark, append)) return true;
+            try
+            {
+                if (SwSelect.Select(ctx.Doc, region, mark, append)) return true;
+            }
+            catch (Exception)
+            {
+                // A stale or unselectable region object: pick it at its witness instead.
+            }
             try
             {
                 string name = SwDoc.SketchNameOf(sketch.Sketch);
