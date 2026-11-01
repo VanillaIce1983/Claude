@@ -11,8 +11,17 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>Metres, written in mm; tolerance 1e-9 m.</summary>
         Length,
 
-        /// <summary>Radians, compared folded (<see cref="SheetMetalCompare.Fold"/>), written in degrees.</summary>
+        /// <summary>
+        /// Radians, compared folded (<see cref="SheetMetalCompare.Fold"/>), written in degrees: a bend
+        /// angle, where 2π − θ is the same bend about a hinge that runs the other way.
+        /// </summary>
         Angle,
+
+        /// <summary>
+        /// Radians, compared mod 2π only, written in degrees: an angle that has no hinge to turn
+        /// around, such as a hem's wrap angle – 200° and 160° are different hems.
+        /// </summary>
+        PlainAngle,
 
         /// <summary>A plain number such as a K-factor or a ratio; tolerance 1e-6.</summary>
         Factor,
@@ -44,8 +53,9 @@ namespace Spiegelwerk.Core.Planning
     /// <summary>
     /// Sheet-metal values compared as data: a read-back against what was written, a bend
     /// against its owner. One rule set for every area (blech-plan §1.2): 1e-9 m for lengths,
-    /// 1e-6 for K-factors and ratios, angles folded into [0, π], table paths in full and
-    /// otherwise by file name with a note. Texts are German, numbers in the given culture.
+    /// 1e-6 for K-factors and ratios, bend angles folded into [0, π] and other angles mod 2π,
+    /// table paths in full and otherwise by file name with a note. Texts are German, numbers
+    /// in the given culture.
     /// </summary>
     public static class SheetMetalCompare
     {
@@ -78,6 +88,7 @@ namespace Spiegelwerk.Core.Planning
         {
             ScalarKind.Length => Math.Abs(want - got) <= LengthTolerance,
             ScalarKind.Angle => Math.Abs(Fold(want) - Fold(got)) <= AngleTolerance,
+            ScalarKind.PlainAngle => Math.Abs(Math.IEEERemainder(want - got, 2 * Math.PI)) <= AngleTolerance,
             ScalarKind.Factor => Math.Abs(want - got) <= FactorTolerance,
             ScalarKind.Flag => (want != 0) == (got != 0),
             _ => want == got,
@@ -86,7 +97,7 @@ namespace Spiegelwerk.Core.Planning
         private static string Format(double value, ScalarKind kind, IFormatProvider? culture) => kind switch
         {
             ScalarKind.Length => Mm(value, culture),
-            ScalarKind.Angle => ReportText.Number(value * 180 / Math.PI, 4, culture) + "°",
+            ScalarKind.Angle or ScalarKind.PlainAngle => ReportText.Number(value * 180 / Math.PI, 4, culture) + "°",
             ScalarKind.Factor => ReportText.Number(value, 6, culture),
             ScalarKind.Flag => value != 0 ? "ja" : "nein",
             _ => ((int)value).ToString(System.Globalization.CultureInfo.InvariantCulture),

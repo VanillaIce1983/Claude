@@ -47,6 +47,19 @@ namespace Spiegelwerk.Core.Tests
             Assert.Single(SheetMetalCompare.Scalars(new[] { ("Biegewinkel", theta, Math.PI - theta, ScalarKind.Angle) }));
         }
 
+        [Fact]
+        public void Scalars_compare_plain_angles_mod_2pi_only()
+        {
+            double theta = 160 * Math.PI / 180;
+            Assert.Equal(new[] { "Saumwinkel: erwartet 160°, gelesen 200°" },
+                SheetMetalCompare.Scalars(new[] { ("Saumwinkel", theta, 2 * Math.PI - theta, ScalarKind.PlainAngle) }, Comma));
+            Assert.Empty(SheetMetalCompare.Scalars(new[] { ("Saumwinkel", theta, theta + 2 * Math.PI, ScalarKind.PlainAngle) }));
+            Assert.Empty(SheetMetalCompare.Scalars(new[] { ("Saumwinkel", theta, theta - 4 * Math.PI, ScalarKind.PlainAngle) }));
+            // Near the seam: 359.9999…° and 0° are a whole turn apart only by rounding.
+            Assert.Empty(SheetMetalCompare.Scalars(new[] { ("Saumwinkel", 2 * Math.PI - 1e-12, 0.0, ScalarKind.PlainAngle) }));
+            Assert.Single(SheetMetalCompare.Scalars(new[] { ("Saumwinkel", theta, theta + 1e-6, ScalarKind.PlainAngle) }));
+        }
+
         // ------------------------------------------------------------ Differences
 
         private static SheetMetalParameters Plate() => new SheetMetalParameters

@@ -132,7 +132,11 @@ namespace Spiegelwerk.Build
         /// later the profile of an edge flange – and writes the mirrored sketch into it. Unlike
         /// <see cref="BuildInto"/> no point stands for an instance: a stand-in may be a point of its
         /// own (A2 P15). In the sketch the model shows the state before the feature, so the edges and
-        /// vertices its relations name are looked up there. A failure leaves the sketch to its feature.
+        /// vertices its relations name are looked up there.
+        /// The mirror is computed before anything is deleted: if it does not fit the sketch's plane,
+        /// the sketch is left untouched. Leaving the sketch always keeps its edits (there is no exit
+        /// that discards them), so a failure after clearing – while clearing or drawing – leaves it
+        /// empty or half-drawn; that is a <see cref="SketchDamagedException"/>, not a plain failure.
         /// </summary>
         public SketchMap ReplaceInto(SketchModel src, Feature existing, List<string> notes)
         {
@@ -145,10 +149,19 @@ namespace Spiegelwerk.Build
             try
             {
                 if (sketch.Is3D()) throw new NotSupportedException($"Skizze \"{existing.Name}\" ist eine 3D-Skizze.");
-                Clear(sketch);
-                _ctx.Topology.Invalidate();
-                map = Write(src, sketch, notes);
-                CheckConstrainedStatus(map, notes);
+                // The frame comes from the sketch's plane, not from what is drawn in it: still valid after clearing.
+                SketchMap prepared = Prepare(src, sketch);
+                try
+                {
+                    Clear(sketch);
+                    _ctx.Topology.Invalidate();
+                    map = Draw(prepared, notes);
+                    CheckConstrainedStatus(map, notes);
+                }
+                catch (Exception ex)
+                {
+                    throw new SketchDamagedException(existing.Name, ex);
+                }
             }
             finally
             {
@@ -181,14 +194,24 @@ namespace Spiegelwerk.Build
         }
 
         /// <summary>Mirrors the model into the open sketch: frame, geometry, relations, dimensions.</summary>
-        private SketchMap Write(SketchModel src, Sketch sketch, List<string> notes)
+        private SketchMap Write(SketchModel src, Sketch sketch, List<string> notes) => Draw(Prepare(src, sketch), notes);
+
+        /// <summary>
+        /// The model mirrored into the open sketch's frame. Changes nothing in the sketch; throws if the
+        /// mirrored plane is not the sketch's (<see cref="SketchMirror.Mirror"/>).
+        /// </summary>
+        private SketchMap Prepare(SketchModel src, Sketch sketch)
         {
             Frame3 target = _ctx.Math.SketchFrame(sketch);
             SketchMirrorResult res = SketchMirror.Mirror(src, _ctx.Mirror, target);
-            notes.AddRange(res.Warnings);
-            notes.AddRange(res.Sketch.Warnings);
-            var map = new SketchMap((Feature)sketch, sketch, src, res);
+            return new SketchMap((Feature)sketch, sketch, src, res);
+        }
 
+        /// <summary>Draws a prepared mirror into its sketch: geometry, relations, dimensions.</summary>
+        private SketchMap Draw(SketchMap map, List<string> notes)
+        {
+            notes.AddRange(map.Mirrored.Warnings);
+            notes.AddRange(map.Mirrored.Sketch.Warnings);
             using (new SketchInputScope(_sm))
             {
                 CreateGeometry(map, notes);
@@ -722,5 +745,21 @@ namespace Spiegelwerk.Build
 
         private static string Format(SkDimension d) =>
             d.Kind == DimensionKind.Angular ? $"{d.Value * 180 / Math.PI:0.###}°" : $"{d.Value * 1000:0.###} mm";
+    }
+
+    /// <summary>
+    /// <see cref="SketchBuilder.ReplaceInto"/> failed after it began to clear the sketch: the sketch is
+    /// saved empty or half-drawn – its feature has to be checked, it does not keep what SOLIDWORKS made.
+    /// </summary>
+    internal sealed class SketchDamagedException : InvalidOperationException
+    {
+        public SketchDamagedException(string sketch, Exception inner)
+            : base($"Skizze \"{sketch}\" wurde geleert und ließ sich nicht vollständig neu zeichnen: {inner.Message}", inner)
+        {
+            Sketch = sketch;
+        }
+
+        /// <summary>The name of the damaged sketch.</summary>
+        public string Sketch { get; }
     }
 }

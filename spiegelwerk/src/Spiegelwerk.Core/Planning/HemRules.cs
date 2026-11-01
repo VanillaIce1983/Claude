@@ -26,7 +26,8 @@ namespace Spiegelwerk.Core.Planning
             if (gapUsed) values.Add(("Spaltabstand", r.Gap, ScalarKind.Length));
             if (arcUsed)
             {
-                values.Add(("Saumwinkel", r.Angle, ScalarKind.Angle));
+                // Not folded: unlike a bend angle, 2π − θ is another hem (a tear-drop hem of 200° is not one of 160°).
+                values.Add(("Saumwinkel", r.Angle, ScalarKind.PlainAngle));
                 values.Add(("Saumradius", r.Radius, ScalarKind.Length));
             }
             values.Add(("Gehrungsspalt", r.MiterGap, ScalarKind.Length));

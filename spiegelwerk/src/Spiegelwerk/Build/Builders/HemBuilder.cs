@@ -20,7 +20,8 @@ namespace Spiegelwerk.Build.Builders
     ///
     /// After creation: the number of edges (another number: removed again), one edit for values
     /// that read back differently, the allowance in an edit of its own (§1.4), the width sketches
-    /// (kept where both are the whole edge, otherwise rewritten), the bends against the original's.
+    /// (kept where both are the whole edge, otherwise rewritten; one that fails after it was cleared
+    /// is a note that it is damaged, not the fallback to SOLIDWORKS's own), the bends against the original's.
     /// The hem's relief is not readable (IHemFeatureData has none): the copy gets the default, and
     /// the report says so only where no check confirms it (A2 P9).
     /// </summary>
@@ -161,8 +162,9 @@ namespace Spiegelwerk.Build.Builders
         /// The original's width sketches in those of the new hem: paired with its edges as at capture
         /// (<see cref="FlangeProfiles.Assign"/>); where both are the whole edge – the default – the new
         /// one stays, otherwise the mirrored sketch is written into it (<see cref="SketchBuilder.ReplaceInto"/>).
-        /// Each gets the original's name. If the new hem's sketches cannot be paired, they stay as
-        /// SOLIDWORKS made them (note).
+        /// Each gets the original's name. If the new hem's sketches cannot be paired, or a mirrored one
+        /// does not fit before anything is cleared, they stay as SOLIDWORKS made them (note). One that
+        /// fails after clearing is saved empty or half-drawn: the note says so, and the hem is rebuilt.
         /// </summary>
         private static void WriteWidthSketches(BuildContext ctx, HemRecord r, List<Feature> native, List<EdgeSignature> targetEdges, List<string> notes, List<string> info)
         {
@@ -185,7 +187,7 @@ namespace Spiegelwerk.Build.Builders
                 notes.Add("Breitenskizzen des neuen Saums lassen sich seinen Kanten nicht zuordnen; sie bleiben, wie SOLIDWORKS sie anlegt.");
                 return;
             }
-            int written = 0;
+            int written = 0, damaged = 0;
             foreach (HemWidthSketch w in r.WidthSketches)
             {
                 int k = Array.IndexOf(pairs, w.EdgeIndex);
@@ -206,16 +208,22 @@ namespace Spiegelwerk.Build.Builders
                     ctx.Register(w.Name, target);
                     written++;
                 }
+                catch (SketchDamagedException ex)
+                {
+                    ctx.Sketches.Remove(w.Name);
+                    damaged++;
+                    notes.Add($"Breitenskizze „{w.Name}“ ist leer oder unvollständig: Sie wurde geleert und ließ sich nicht neu zeichnen ({ex.InnerException?.Message ?? ex.Message}). Saum prüfen.");
+                }
                 catch (Exception ex)
                 {
                     ctx.Sketches.Remove(w.Name);
-                    notes.Add($"Breitenskizze „{w.Name}“ ließ sich nicht übertragen ({ex.Message}).");
+                    notes.Add($"Breitenskizze „{w.Name}“ ließ sich nicht übertragen ({ex.Message}); sie bleibt, wie SOLIDWORKS sie anlegt.");
                 }
             }
-            if (written == 0) return;
+            if (written == 0 && damaged == 0) return;
             ctx.Doc.EditRebuild3();
             ctx.Topology.Invalidate();
-            info.Add($"Breite aus {written} gespiegelte{(written == 1 ? "r" : "n")} Breitenskizze{(written == 1 ? "" : "n")} übernommen.");
+            if (written > 0) info.Add($"Breite aus {written} gespiegelte{(written == 1 ? "r" : "n")} Breitenskizze{(written == 1 ? "" : "n")} übernommen.");
         }
 
         private static string Describe(HemRecord r)

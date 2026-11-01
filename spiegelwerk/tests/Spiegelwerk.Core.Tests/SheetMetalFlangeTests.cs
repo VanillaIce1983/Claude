@@ -217,10 +217,19 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal(new[] { "Saumrichtung umgekehrt: erwartet nein, gelesen ja", "Saumlänge: erwartet 10 mm, gelesen 12 mm" }, HemRules.Differences(want, got, Comma));
             // Another type: the type is the deviation, its values are not compared.
             Assert.Equal(new[] { "Saumart: erwartet 1, gelesen 3" }, HemRules.Differences(want, Hem(HemTypes.Rolled)));
-            // Angles folded: a rolled hem of 2π − θ reads back as the same hem.
+            // A hem angle is not folded: 2π − θ is another hem (a tear-drop hem of 200° is not one of 160°).
             HemRecord rolled = Hem(HemTypes.Rolled), back = Hem(HemTypes.Rolled);
             rolled.Angle = 0.8 * Math.PI;
             back.Angle = 2 * Math.PI - rolled.Angle;
+            Assert.Equal(new[] { "Saumwinkel: erwartet 144°, gelesen 216°" }, HemRules.Differences(rolled, back, Comma));
+            HemRecord tearDrop = Hem(HemTypes.TearDrop), clamped = Hem(HemTypes.TearDrop);
+            tearDrop.Angle = 200 * Math.PI / 180;
+            clamped.Angle = 160 * Math.PI / 180;
+            Assert.Equal(new[] { "Saumwinkel: erwartet 200°, gelesen 160°" }, HemRules.Differences(tearDrop, clamped, Comma));
+            // A whole turn more is the same angle.
+            back.Angle = rolled.Angle + 2 * Math.PI;
+            Assert.Empty(HemRules.Differences(rolled, back));
+            back.Angle = rolled.Angle - 2 * Math.PI;
             Assert.Empty(HemRules.Differences(rolled, back));
         }
 
