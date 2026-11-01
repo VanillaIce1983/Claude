@@ -36,9 +36,9 @@ namespace Spiegelwerk.Core.Planning
         {
             // Reached only if the definition does not answer as IAdvancedHoleFeatureData.
             "AdvHoleWzd" or "AdvancedHole" => "Erweiterte Bohrung: Feature-Daten nicht lesbar.",
-            "MirrorPattern" => $"Spiegel-Feature im Original: {MirrorApi} " +
-                               "Abhilfe: im Original durch die gespiegelten Einzel-Features ersetzen oder nach dem Lauf von Hand spiegeln.",
-            "MirrorSolid" => $"Körper spiegeln im Original: {MirrorApi} Abhilfe: die Körper nach dem Lauf im Ziel von Hand spiegeln.",
+            // Reached only if the definition does not answer as IMirrorPatternFeatureData / IMirrorSolidFeatureData.
+            "MirrorPattern" or "MirrorSolid" => "Spiegel-Feature: Feature-Daten nicht lesbar. " +
+                                                "Abhilfe: die zweite Hälfte nach dem Lauf im Ziel von Hand nachbauen.",
             "MirrorStock" => $"Teil spiegeln im Original: Das Teil ist von einem Ausgangsteil gespiegelt abgeleitet und {MirrorApi} " +
                              "Abhilfe: Das Ausgangsteil ist bis auf die Lage das Gegenstück, aber nur im Stand von „Teil spiegeln“. " +
                              "Features, die danach in diesem Teil angelegt wurden, fehlen ihm; sie gehören gespiegelt in eine Kopie des " +

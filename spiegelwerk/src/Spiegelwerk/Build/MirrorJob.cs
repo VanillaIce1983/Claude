@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
-using Spiegelwerk.Build.Builders;
 using Spiegelwerk.Capture;
 using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Matching;
@@ -51,40 +50,15 @@ namespace Spiegelwerk.Build
     ///  1. Capture – read the original into neutral records (and, for checking, what every
     ///     feature did to the volume). After this the original is not used any more.
     ///  2. Build – create every record mirrored in the target with plain FeatureManager /
-    ///     SketchManager calls. No Mirror feature, no derived part, no external reference.
+    ///     SketchManager calls (one StepRunner step each). No Mirror feature, no derived part,
+    ///     no external reference – a mirror feature of the original becomes ordinary features
+    ///     too (MirrorFeatureBuilder).
     ///  3. Verify – per feature, compare with the mirrored original and pick the right variant.
     /// </summary>
     internal sealed class MirrorJob
     {
         private readonly SldWorks _sw;
         private readonly SwMath _math;
-
-        private static readonly IFeatureBuilder[] Builders =
-        {
-            new SketchFeatureBuilder(),
-            new PartOfBuilder(),
-            new RefPlaneBuilder(),
-            new AxisBuilder(),
-            new CoordSysBuilder(),
-            new ExtrudeBuilder(),
-            new RevolveBuilder(),
-            new SweepBuilder(),
-            new LoftBuilder(),
-            new FilletBuilder(),
-            new VariableFilletBuilder(),
-            new FaceFilletBuilder(),
-            new ChamferBuilder(),
-            new ShellBuilder(),
-            new DraftBuilder(),
-            new HoleBuilder(),
-            new AdvancedHoleBuilder(),
-            new PatternBuilder(),
-            new CurvePatternBuilder(),
-            new SketchPatternBuilder(),
-            new TablePatternBuilder(),
-            new FillPatternBuilder(),
-            new VariablePatternBuilder(),
-        };
 
         public MirrorJob(SldWorks sw)
         {
@@ -139,18 +113,12 @@ namespace Spiegelwerk.Build
                     throw new InvalidOperationException(UnsupportedFeatures.RunRefusal(carrier.Name, carrier.GetTypeName2()));
                 progress.Start(features.Count, opt.VerifySteps);
                 var capture = new FeatureCapture(source, _math);
-                records = new List<FeatureRecord>();
-                foreach (Feature f in features)
-                {
-                    progress.Show(RunSteps.Capture, f.Name);
-                    records.Add(capture.Capture(f));
-                    if (progress.CancelAfterStep()) return CancelledBeforeBuild(report, RunSteps.Capture);
-                }
-                // Sketches of a hole are rebuilt with the hole – only if the hole itself is rebuilt.
-                var holes = new HashSet<string>(records.OfType<PositionedHoleRecord>().Select(h => h.Name), StringComparer.Ordinal);
-                for (int i = 0; i < records.Count; i++)
-                    if (records[i] is PartOfFeatureRecord part && !holes.Contains(part.Owner))
-                        records[i] = capture.CaptureOnItsOwn(features[i], part);
+                List<FeatureRecord>? captured = capture.CaptureAll(features, f => progress.Show(RunSteps.Capture, f.Name), progress.CancelAfterStep);
+                if (captured == null) return CancelledBeforeBuild(report, RunSteps.Capture);
+                records = captured;
+                // A body mirror of a body an earlier one made: that one's seeds are not rebuilt twice.
+                MirrorFeatureRules.FlattenSeeds(records);
+                NoteUnrequestedSeedBodies(records, selectedBodyNames, req.Features);
                 MarkOtherBodies(records, bodyScope);
                 for (int i = 0; i < records.Count; i++) CaptureDimensions(features[i], records[i]);
                 // With selected bodies, a feature may also change a body that is gone at the end; only the rolled-back state shows it.
@@ -175,6 +143,7 @@ namespace Spiegelwerk.Build
             // Whole part, selected bodies, or seed bodies of a selected body pattern: a body of its own.
             bool separateBody = opt.Target == MirrorTarget.SamePart && (req.Features.Count == 0 || req.Bodies.Count > 0 || seedBodies);
             var ctx = new BuildContext(_sw, target, _math, new Reflection(req.MirrorPlane), opt, report, separateBody);
+            ctx.Shared.Progress = progress;
             foreach (PartOfFeatureRecord part in records.OfType<PartOfFeatureRecord>()) ctx.PartOwners[part.Name] = part.Owner;
             foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) ctx.PointSketches.Add(pattern.SketchName);
             report.General.Add($"Spiegelebene: {ReportText.Plane(req.MirrorPlane)}");
@@ -189,19 +158,26 @@ namespace Spiegelwerk.Build
                     for (int i = 0; i < records.Count; i++)
                     {
                         progress.Show(RunSteps.Build, records[i].Name);
-                        ReportEntry entry = BuildOne(ctx, records[i]);
+                        ReportEntry entry = StepRunner.BuildOne(ctx, records[i]);
+                        if (ctx.Shared.AbortReason != null)
+                        {
+                            report.Aborted = true;
+                            report.General.Add($"Abbruch nach „{records[i].Name}“: {ctx.Shared.AbortReason}");
+                            break;
+                        }
                         if (entry.Status == ReportStatus.Failed && opt.StopOnError)
                         {
                             report.Aborted = true;
                             break;
                         }
-                        // Esc: stops like an error with "stop on error", what is built stays.
-                        if (progress.CancelAfterStep())
+                        // Esc: stops like an error with "stop on error", what is built stays. Already
+                        // confirmed within the step (a mirror feature's second half): not asked again.
+                        if (ctx.Shared.Cancelled || progress.CancelAfterStep())
                         {
                             report.Aborted = report.Cancelled = true;
                             report.General.Add(RunSteps.CancelledInBuild(records[i].Name, records.Count - i - 1));
                             // Sketches already reported as built with a hole that now is not built.
-                            foreach (PositionedHoleRecord hole in records.Skip(i + 1).OfType<PositionedHoleRecord>()) WithdrawParts(ctx, hole.Name);
+                            foreach (PositionedHoleRecord hole in records.Skip(i + 1).OfType<PositionedHoleRecord>()) StepRunner.WithdrawParts(ctx, hole.Name);
                             break;
                         }
                     }
@@ -218,15 +194,17 @@ namespace Spiegelwerk.Build
                 }
 
                 // ---- 3. finish
+                // Equations never reach the second half of a mirror feature: said once where they drive copied dimensions.
+                bool secondHalves = ctx.Groups.Count > 0;
                 if (opt.Target == MirrorTarget.NewPart)
                 {
-                    if (opt.CopyEquations) CopyEquations(source, ctx, report);
+                    if (opt.CopyEquations && CopyEquations(source, ctx, report) > 0 && secondHalves) report.General.Add(MirrorFeatureRules.EquationsNote);
                     target.ShowNamedView2("*Isometric", (int)swStandardViews_e.swIsometricView);
                     target.ViewZoomtofit2();
                 }
                 else
                 {
-                    NoteEquationDrivenDimensions(source, ctx, report);
+                    if (NoteEquationDrivenDimensions(source, ctx, report) && secondHalves) report.General.Add(MirrorFeatureRules.EquationsNote);
                     if (opt.DeleteOriginal && !atEnd) report.General.Add("Original nicht gelöscht: Die Rückrollleiste steht nicht am Ende.");
                     // Esc with the last step: everything is built, but the user wanted to stop – deleting cannot be undone.
                     else if (opt.DeleteOriginal && progress.EscAtEnd) report.General.Add("Original nicht gelöscht: Der Lauf wurde mit Esc abgebrochen.");
@@ -250,78 +228,6 @@ namespace Spiegelwerk.Build
             return new MirrorJobResult(report, null);
         }
 
-        private ReportEntry BuildOne(BuildContext ctx, FeatureRecord record)
-        {
-            if (record is UnsupportedRecord u)
-            {
-                var status = u.ChangesSolid ? ReportStatus.Failed : ReportStatus.Skipped;
-                ReportEntry skipped = ctx.Report.Add(record, status, u.Reason);
-                if (u.ChangesSolid) skipped.Details.Add("Folgende Features, die sich auf dieses beziehen, können ebenfalls scheitern.");
-                return skipped;
-            }
-
-            IFeatureBuilder? builder = Builders.FirstOrDefault(b => b.Handles(record));
-            if (builder == null) return ctx.Report.Add(record, ReportStatus.Skipped, "Kein Builder für diesen Typ.");
-
-            MassState before = ctx.Options.VerifySteps && record.ChangesSolid ? SwDoc.MassOf(ctx.Doc) : MassState.Empty;
-            bool guardOriginal = ctx.SeparateBody && record.ChangesSolid;
-            MassState originalBefore = guardOriginal ? SwDoc.MassOf(ctx.OriginalBodies()) : MassState.Empty;
-            var featuresBefore = new HashSet<string>(SwDoc.TopLevelFeatures(ctx.Doc).Select(f => f.Name), StringComparer.Ordinal);
-            BuildResult result;
-            string verification = "";
-            ctx.Planes.BeginStep();
-            try
-            {
-                result = builder.Build(record, ctx);
-            }
-            catch (Exception ex)
-            {
-                result = BuildResult.Failed(ex.Message);
-                // Never leave a half-built sketch open.
-                if (ctx.Doc.SketchManager.ActiveSketch != null) ctx.Doc.SketchManager.InsertSketch(true);
-                SwSelect.Clear(ctx.Doc);
-                RemoveLeftovers(ctx, featuresBefore, result);
-            }
-            finally
-            {
-                // Also after a failure: a feature may have been created (or removed) before it.
-                ctx.Topology.Invalidate();
-            }
-            // No feature came of it (refused or failed after resolving its references): helper planes and axes made for it go again.
-            if (result.Feature == null) ctx.Planes.RemoveStepHelpers();
-
-            try
-            {
-                verification = StepVerifier.Verify(ctx, record, result, before);
-            }
-            catch (Exception ex)
-            {
-                result.Status = ReportStatus.Warning;
-                result.Notes.Add($"Prüfung nicht möglich: {ex.Message}");
-                ctx.Topology.Invalidate();
-            }
-            // What capture already knew could not be carried over (feature scope, setbacks, regions
-            // ...) makes the copy a warning, not "OK" – also for "delete original".
-            if (result.Success && result.Status == ReportStatus.Ok && record.Notes.Count > 0) result.Status = ReportStatus.Warning;
-
-            if (guardOriginal && result.Success && !OriginalUntouched(ctx, originalBefore))
-            {
-                result = RemoveAgain(ctx, record, result);
-                verification = "";
-            }
-            // Only now: a variant tried above may have replaced dimensions.
-            if (result.Success && record.OwnDimensions.Count > 0) RestoreDimensionNames(ctx, record, result);
-            CheckRebuildError(result);
-
-            ReportEntry entry = ctx.Report.Add(record, result.Status, result.Message);
-            entry.Verification = verification;
-            entry.HasEquivalent = result.HasEquivalent;
-            entry.Details.AddRange(result.Notes);
-            // Only if the hole is not in the target – one with a rebuild error still has its sketches.
-            if (!entry.IsMirrored && !ctx.Created.ContainsKey(record.Name)) WithdrawParts(ctx, record.Name);
-            return entry;
-        }
-
         /// <summary>
         /// A feature pulled in through a selected body that also changed other bodies: the copy
         /// acts on the mirrored bodies only, so what the original did is no reference for it.
@@ -332,18 +238,34 @@ namespace Spiegelwerk.Build
                 if (scope.OtherBodiesChanged.TryGetValue(r.Name, out List<string> bodies)) MassCapture.NoteOtherBodies(r, bodies);
         }
 
+        /// <summary>
+        /// „Körper spiegeln“ reached only through a body it made: its seed bodies come along
+        /// unselected. The record says so; the body scope already keeps the original from
+        /// being deleted.
+        /// </summary>
+        private static void NoteUnrequestedSeedBodies(List<FeatureRecord> records, HashSet<string> selectedBodies, List<Feature> chosen)
+        {
+            var chosenNames = new HashSet<string>(chosen.Select(f => f.Name), StringComparer.Ordinal);
+            foreach (MirrorFeatureRecord m in records.OfType<MirrorFeatureRecord>())
+            {
+                m.UnrequestedSeedBodies.Clear();
+                m.UnrequestedSeedBodies.AddRange(MirrorFeatureRules.UnrequestedSeedBodies(m, selectedBodies, chosenNames.Contains(m.Name)));
+            }
+        }
+
         private static string Quoted(IEnumerable<string> names) => string.Join(", ", names.Select(n => $"\"{n}\""));
 
         /// <summary>
         /// The feature's own dimensions of the original, for their names. Not those of sketches
         /// (SketchBuilder names theirs) nor of reference geometry: that is rebuilt on other
-        /// references, so its dimensions measure something else. Unreadable: none, and copied
-        /// equations then leave this feature's dimensions alone.
+        /// references, so its dimensions measure something else. Not those of a mirror feature
+        /// either: it has none of its own, its second half is a set of new features. Unreadable:
+        /// none, and copied equations then leave this feature's dimensions alone.
         /// </summary>
         private static void CaptureDimensions(Feature feature, FeatureRecord record)
         {
             if (record is SketchRecord || record is PartOfFeatureRecord || record is RefPlaneRecord || record is RefAxisRecord ||
-                record is CoordSysRecord || record is UnsupportedRecord)
+                record is CoordSysRecord || record is UnsupportedRecord || record is MirrorFeatureRecord)
                 return;
             try
             {
@@ -352,151 +274,6 @@ namespace Spiegelwerk.Build
             catch (Exception)
             {
                 record.OwnDimensions.Clear();
-            }
-        }
-
-        /// <summary>
-        /// The feature's own dimensions (depth, radius, spacing ...) get their names from the
-        /// original (DimensionMatcher) – via temporary names, so two of them can swap theirs.
-        /// Each that ends up with its original name counts as known for copied equations.
-        /// </summary>
-        private static void RestoreDimensionNames(BuildContext ctx, FeatureRecord record, BuildResult result)
-        {
-            try
-            {
-                List<DisplayDimension> own = SwDoc.OwnDimensions(result.Feature!);
-                List<Dimension> dims = own.Select(dd => dd.GetDimension2(0)).ToList();
-                List<string> before = dims.Select(d => d.Name).ToList();
-                DimensionMatch match = DimensionMatcher.Match(record.OwnDimensions, own.Select(SwDoc.Named).ToList());
-                for (int k = 0; k < match.Renames.Count; k++) SwDoc.TryRename(dims[match.Renames[k].copy], $"Spiegelwerk{k + 1}");
-                foreach (var (copy, name) in match.Renames)
-                    if (!SwDoc.TryRename(dims[copy], name)) SwDoc.TryRename(dims[copy], before[copy]);
-
-                var unmatched = new List<string>();
-                var unnamed = new List<string>();
-                for (int o = 0; o < record.OwnDimensions.Count; o++)
-                {
-                    string name = record.OwnDimensions[o].Name;
-                    int c = match.Counterparts[o];
-                    if (c < 0) unmatched.Add(name);
-                    else if (dims[c].Name != name) unnamed.Add(name);
-                    else ctx.KnownDimensions.Add($"{name}@{record.Name}");
-                }
-                string equations = ctx.CopiesEquations ? "; Gleichungen darauf werden nicht übernommen" : "";
-                if (unmatched.Count > 0)
-                    result.Notes.Add($"Bemaßungen ohne eindeutiges Gegenstück in der Kopie, ihr Name bleibt nicht erhalten: {Quoted(unmatched)}{equations}.");
-                if (unnamed.Count > 0)
-                    result.Notes.Add($"Originalname ließ sich in der Kopie nicht setzen: {Quoted(unnamed)}{equations}.");
-            }
-            catch (Exception ex)
-            {
-                result.Notes.Add($"Bemaßungsnamen nicht wiederhergestellt ({ex.Message})" + (ctx.CopiesEquations ? "; Gleichungen auf dieses Feature werden nicht übernommen." : "."));
-            }
-        }
-
-        /// <summary>
-        /// The sketches of a hole were reported as "built with the hole" before the hole was
-        /// built. If the hole failed, they were not.
-        /// </summary>
-        private static void WithdrawParts(BuildContext ctx, string owner)
-        {
-            foreach (ReportEntry e in ctx.Report.Entries)
-                if (ctx.PartOwners.TryGetValue(e.Feature, out string o) && o == owner && e.HasEquivalent)
-                {
-                    e.HasEquivalent = false;
-                    e.Message = $"Teil von „{owner}“; nicht entstanden, weil „{owner}“ nicht gespiegelt wurde.";
-                }
-        }
-
-        /// <summary>
-        /// Same part, separate body: the original bodies must come out of every step unchanged.
-        /// Patterns have no feature scope before newer API versions, and a cut acts on all bodies until its scope is set;
-        /// a feature that changed the original anyway is removed again.
-        /// </summary>
-        private static bool OriginalUntouched(BuildContext ctx, MassState before)
-        {
-            MassState after = SwDoc.MassOf(ctx.OriginalBodies());
-            return MassComparison.Compare(MassState.Empty, after - before, before).Passes;
-        }
-
-        /// <summary>
-        /// A builder may throw after SOLIDWORKS created the feature or its helpers. Unregistered,
-        /// such a feature would count neither as mirrored nor as the job's own body, and a cut or
-        /// pattern without feature scope may already have changed the original: what the step
-        /// added is deleted again. Deleting keeps absorbed sketches – those of earlier steps were
-        /// at the top level before or sit under an earlier feature too (a shared sketch) and stay,
-        /// one made in this step comes up in the second round.
-        /// </summary>
-        private static void RemoveLeftovers(BuildContext ctx, HashSet<string> before, BuildResult result)
-        {
-            var removed = new List<string>();
-            try
-            {
-                // A shared sketch of an earlier step is also a sub-feature of the new feature; it
-                // stays in the model under the earlier one and must stay registered.
-                var shared = new HashSet<string>(SwDoc.TopLevelFeatures(ctx.Doc).Where(t => before.Contains(t.Name))
-                    .SelectMany(SwDoc.SubFeatures).Select(s => s.Name), StringComparer.Ordinal);
-                for (int round = 0; round < 2; round++)
-                {
-                    List<Feature> made = NewFeatures(ctx.Doc, before);
-                    if (made.Count == 0) break;
-                    var names = new HashSet<string>(StringComparer.Ordinal);
-                    foreach (Feature f in made)
-                    {
-                        names.Add(f.Name);
-                        if (!removed.Contains(f.Name)) removed.Add(f.Name);
-                        foreach (Feature sub in SwDoc.SubFeatures(f).Where(s => !before.Contains(s.Name) && !shared.Contains(s.Name))) names.Add(sub.Name);
-                    }
-                    ctx.Forget(names);
-                    SwSelect.Clear(ctx.Doc);
-                    for (int i = made.Count - 1; i >= 0; i--) SwSelect.Select(ctx.Doc, made[i], 0, true);
-                    ctx.Doc.Extension.DeleteSelection2(0);
-                    SwSelect.Clear(ctx.Doc);
-                }
-                List<string> left = NewFeatures(ctx.Doc, before).Select(f => f.Name).ToList();
-                removed.RemoveAll(left.Contains);
-                if (removed.Count > 0) result.Notes.Add($"Bis zum Fehler angelegt und wieder entfernt: {Quoted(removed)}.");
-                if (left.Count > 0) result.Notes.Add($"Bis zum Fehler angelegt und nicht wieder entfernt: {Quoted(left)} – bitte prüfen und von Hand löschen.");
-            }
-            catch (Exception ex)
-            {
-                result.Notes.Add($"Aufräumen nach dem Fehler nicht möglich ({ex.Message}) – bitte das Modell prüfen.");
-            }
-        }
-
-        /// <summary>Top-level features not there before the step (system folders SOLIDWORKS adds on its own aside).</summary>
-        private static List<Feature> NewFeatures(ModelDoc2 doc, HashSet<string> before) =>
-            SwDoc.TopLevelFeatures(doc).Where(f => !before.Contains(f.Name) && !SwDoc.IsSystemFeature(f)).ToList();
-
-        private static BuildResult RemoveAgain(BuildContext ctx, FeatureRecord record, BuildResult result)
-        {
-            // A hole's sketches belong to the hole alone and go with it.
-            BuilderSupport.Delete(ctx, result.Feature!, record is PositionedHoleRecord);
-            if (record is PositionedHoleRecord hole) ctx.ForgetSketch(hole.PositionSketchName);
-            result.RemoveHelpers?.Invoke();
-            ctx.Planes.RemoveStepHelpers();
-            ctx.Unregister(record.Name);
-            var failed = BuildResult.Failed("Das Feature hätte die Originalkörper verändert und wurde wieder entfernt.");
-            failed.Notes.AddRange(result.Notes);
-            return failed;
-        }
-
-        /// <summary>A feature that SOLIDWORKS created but shows with a rebuild error is not a success.</summary>
-        private static void CheckRebuildError(BuildResult result)
-        {
-            if (result.Feature == null || !result.Success) return;
-            bool isWarning = false;
-            int code = result.Feature.GetErrorCode2(out isWarning);
-            if (code == 0) return;
-            if (isWarning)
-            {
-                result.Notes.Add($"SOLIDWORKS meldet eine Warnung beim Neuaufbau (Code {code}).");
-                if (result.Status == ReportStatus.Ok) result.Status = ReportStatus.Warning;
-            }
-            else
-            {
-                result.Status = ReportStatus.Failed;
-                result.Message += $" – Neuaufbaufehler (Code {code}).";
             }
         }
 
@@ -584,11 +361,12 @@ namespace Spiegelwerk.Build
         /// it would silently drive another. In the original they give the values the copy
         /// already has, so the part must stay as it is – checked by volume and centroid.
         /// </summary>
-        private static void CopyEquations(ModelDoc2 source, BuildContext ctx, MirrorReport report)
+        /// <returns>How many equations were copied.</returns>
+        private static int CopyEquations(ModelDoc2 source, BuildContext ctx, MirrorReport report)
         {
             EquationMgr src = source.GetEquationMgr(), dst = ctx.Doc.GetEquationMgr();
             int n = src.GetCount(), ok = 0;
-            if (n == 0) return;
+            if (n == 0) return 0;
             if (src.LinkToFile) report.General.Add($"Die Gleichungen des Originals sind mit „{src.FilePath}“ verknüpft; die Kopie übernimmt sie ohne diese Verknüpfung.");
             dst.AngularEquationUnits = src.AngularEquationUnits;
             dst.AutomaticSolveOrder = src.AutomaticSolveOrder;
@@ -640,6 +418,7 @@ namespace Spiegelwerk.Build
             foreach (string eq in failed) report.General.Add($"  nicht übernommen: {eq}");
             // As an entry with a notice, so the summary and the assembly report count it.
             if (deviation != null) report.Entries.Add(new ReportEntry("Gleichungen", "Gleichungen", ReportStatus.Warning, deviation));
+            return ok;
         }
 
         /// <summary>Why an equation must not be copied, or null.</summary>
@@ -665,7 +444,8 @@ namespace Spiegelwerk.Build
         /// the copy has a fixed value – a later change of a global variable moves only the
         /// original half. Only a note: never stops the run.
         /// </summary>
-        private static void NoteEquationDrivenDimensions(ModelDoc2 doc, BuildContext ctx, MirrorReport report)
+        /// <returns>Whether equations drive mirrored dimensions.</returns>
+        private static bool NoteEquationDrivenDimensions(ModelDoc2 doc, BuildContext ctx, MirrorReport report)
         {
             try
             {
@@ -675,14 +455,16 @@ namespace Spiegelwerk.Build
                     if (!eq.get_Disabled(i) && !eq.get_Suppression(i) && EquationText.Driven(eq.get_Equation(i)) is string name &&
                         EquationText.Dimension(name) is (string, string owner) && ctx.Created.ContainsKey(owner))
                         driven.Add(name);
-                if (driven.Count == 0) return;
+                if (driven.Count == 0) return false;
                 string more = driven.Count > 5 ? $" und {driven.Count - 5} weitere" : "";
                 report.General.Add($"Gleichungen werden im selben Teil nicht übertragen: Im Original treiben sie {Quoted(driven.Take(5))}{more}, " +
                                    "in der Kopie sind diese Maße feste Werte.");
+                return true;
             }
             catch (Exception)
             {
                 // Equations not readable: no note.
+                return false;
             }
         }
 

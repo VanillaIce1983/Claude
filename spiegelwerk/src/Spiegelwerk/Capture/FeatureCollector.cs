@@ -14,7 +14,9 @@ namespace Spiegelwerk.Capture
     ///  - bodies selected: every feature that contributed to those bodies, plus their sketches
     /// Parents other than sketches are deliberately not pulled in: a mirrored cut is meant to
     /// cut the existing body, not to rebuild the body it was cut from. The one exception are
-    /// the seeds of a pattern: a pattern without its seed has nothing to repeat.
+    /// the seeds of a pattern or mirror feature: without its seed it has nothing to repeat.
+    /// For the second half of a mirror feature, <see cref="CollectCopies"/> picks the job's own
+    /// copies in the target instead.
     /// </summary>
     internal static class FeatureCollector
     {
@@ -163,9 +165,10 @@ namespace Spiegelwerk.Capture
         }
 
         /// <summary>
-        /// What a pattern (linear, circular, curve, sketch, table driven, fill, variable)
-        /// repeats: its seed features, the features the seed faces belong to, the features
-        /// that made the seed bodies (as when bodies are selected).
+        /// What a pattern (linear, circular, curve, sketch, table driven, fill, variable) or a
+        /// mirror feature repeats: its seed features, the features the seed faces belong to,
+        /// the features that made the seed bodies (as when bodies are selected); of a mirror
+        /// feature not the suppressed ones.
         /// </summary>
         private static List<Feature> SeedsOf(ModelDoc2 doc, Feature f, HashSet<string> seedBodyNames, ref bool seedBodies)
         {
@@ -245,12 +248,94 @@ namespace Spiegelwerk.Capture
                         sp.ReleaseSelectionAccess();
                     }
                     break;
+                // Mirror features: rebuilt from their seeds as well (MirrorFeatureBuilder).
+                case MirrorPatternFeatureData mp when mp.AccessSelections(doc, null):
+                    try
+                    {
+                        AddSeeds(result, seedBodyNames, false, (object)mp.PatternFeatureArray, null, null);
+                        // Faces only as whole features (FeatureCapture.FaceOwnersOf); an incomplete set brings nothing, capture reports it.
+                        if ((object)mp.MirrorFaceArray is object[] faces && faces.Length > 0)
+                        {
+                            FeatureCapture.FaceOwners owners = FeatureCapture.FaceOwnersOf(faces);
+                            if (owners.Incomplete.Count == 0) result.AddRange(owners.Complete);
+                        }
+                        // A suppressed seed is not part of what the mirror feature repeats.
+                        result.RemoveAll(seed => seed.IsSuppressed());
+                    }
+                    finally
+                    {
+                        mp.ReleaseSelectionAccess();
+                    }
+                    break;
+                case MirrorSolidFeatureData ms when ms.AccessSelections(doc, null):
+                    try
+                    {
+                        seedBodies |= AddSeeds(result, seedBodyNames, true, null, null, (object)ms.PatternBodyArray);
+                        result.RemoveAll(seed => seed.IsSuppressed());
+                    }
+                    finally
+                    {
+                        ms.ReleaseSelectionAccess();
+                    }
+                    break;
             }
             return result;
         }
 
+        /// <summary>
+        /// The job's own copies a mirror feature's second half is read from: the copies of its
+        /// seeds, their sketches, and the sketches they share with other copies – nothing else.
+        /// No pattern seeds (a pattern among the seeds repeats what is among them too, or fails
+        /// with a clear message), no other parents, and no helper geometry of the job: helper
+        /// planes, axes, coordinate systems and their 3D sketches are no counterparts and are made
+        /// anew where the second half needs them. In creation order; a copy with a rebuild error
+        /// is left out with its reason.
+        /// </summary>
+        /// <param name="isCounterpart">Whether a feature of the target is a registered counterpart of the run.</param>
+        public static List<Feature> CollectCopies(ModelDoc2 target, IReadOnlyCollection<Feature> seedCopies, Func<Feature, bool> isCounterpart,
+            List<(Feature feature, string reason)> skipped)
+        {
+            var wanted = new HashSet<string>(seedCopies.Select(f => f.Name), StringComparer.Ordinal);
+            foreach (Feature f in seedCopies)
+            {
+                // Absorbed 2D sketches: the sketch of an extrusion, the sketches of a hole.
+                foreach (Feature sub in SwDoc.SubFeatures(f).Where(s => s.GetTypeName2() == "ProfileFeature")) wanted.Add(sub.Name);
+                if (f.GetParents() is object[] parents)
+                    foreach (Feature p in parents.OfType<Feature>().Where(SwDoc.IsSketch))
+                        if (isCounterpart(p)) wanted.Add(p.Name);
+            }
+
+            var kept = new List<Feature>();
+            var skippedNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Feature f in SwDoc.FeaturesInCreationOrder(target).Where(x => wanted.Contains(x.Name)))
+            {
+                string? reason = CopySkipReason(f) ?? SkippedSketchOf(f, skippedNames);
+                if (reason == null)
+                {
+                    kept.Add(f);
+                }
+                else
+                {
+                    skipped.Add((f, reason));
+                    skippedNames.Add(f.Name);
+                }
+            }
+            return kept;
+        }
+
+        /// <summary>A copy of the first half that SOLIDWORKS shows with a rebuild error is not mirrored once more.</summary>
+        private static string? CopySkipReason(Feature f)
+        {
+            if (f.IsSuppressed()) return "In der ersten Hälfte unterdrückt – nicht noch einmal gespiegelt.";
+            if (SwDoc.IsSketch(f)) return null;
+            bool isWarning = false;
+            int code = f.GetErrorCode2(out isWarning);
+            if (code != 0 && !isWarning) return $"In der ersten Hälfte fehlerhaft (Code {code}) – nicht noch einmal gespiegelt.";
+            return null;
+        }
+
         /// <returns>True if features of seed bodies were added.</returns>
-        private static bool AddSeeds(List<Feature> into, HashSet<string> seedBodyNames, bool bodyPattern, object features, object faces, object bodies)
+        private static bool AddSeeds(List<Feature> into, HashSet<string> seedBodyNames, bool bodyPattern, object? features, object? faces, object? bodies)
         {
             if (bodyPattern)
             {

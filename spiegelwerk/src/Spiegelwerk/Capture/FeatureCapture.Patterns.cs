@@ -270,7 +270,7 @@ namespace Spiegelwerk.Capture
                     ReadSeeds(r, IsBodyFillPattern(d), (object)d.PatternFeatureArray, (object)d.PatternFaceArray, (object)d.PatternBodyArray, (object)d.SkippedItemArray);
                 r.GeometryPattern = d.GeometryPattern;
                 r.PropagateVisualProperty = d.PropagateVisualProperty;
-                if (d.FeatureScope && !d.AutoSelect) r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
+                NoteScope(r.Notes, d.FeatureScope, d.AutoSelect);
                 return r;
             }
             finally
@@ -474,10 +474,10 @@ namespace Spiegelwerk.Capture
         }
 
         /// <summary>A pattern limited to chosen bodies (newer API versions only) is rebuilt without that limit.</summary>
-        private static void NoteScope(object d, PatternRecord r)
+        private void NoteScope(object d, PatternRecord r)
         {
-            if (SwLate.Get(d, "FeatureScope") is bool scope && scope && SwLate.Get(d, "AutoSelect") is bool auto && !auto)
-                r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
+            if (SwLate.Get(d, "FeatureScope") is bool scope && SwLate.Get(d, "AutoSelect") is bool auto)
+                NoteScope(r.Notes, scope, auto);
         }
 
         /// <summary>

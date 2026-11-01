@@ -50,7 +50,7 @@ namespace Spiegelwerk.Capture
             GeometryRef face;
             GeometryRef? farFace = null;
             FeatureManager fm = _doc.FeatureManager;
-            if (!fm.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToBeforeFeature, f.Name))
+            if (!RollBack((int)swMoveRollbackBarTo_e.swMoveRollbackBarToBeforeFeature, f.Name))
                 throw new NotSupportedException("Zustand vor der Bohrung nicht herstellbar (Rollback).");
             try
             {

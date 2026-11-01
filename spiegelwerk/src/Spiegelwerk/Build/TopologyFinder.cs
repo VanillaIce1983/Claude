@@ -13,12 +13,18 @@ namespace Spiegelwerk.Build
     /// candidate list is cached and thrown away whenever a feature is added. Bodies created
     /// by this job are preferred, which matters in the same part where an edge on the mirror
     /// plane exists twice (once on the original, once on the copy).
+    ///
+    /// Every context has its own finder (what counts as its own body differs), but they all
+    /// see one model: invalidating counts up the job-wide generation
+    /// (<see cref="BuildShared.TopologyGeneration"/>), and a cache read at an older one is
+    /// read again – a helper plane a second-half step made leaves no finder stale.
     /// </summary>
     internal sealed class TopologyFinder
     {
         private readonly BuildContext _ctx;
         private List<(Edge edge, EdgeSignature sig, bool own)>? _edges;
         private List<(Face2 face, FaceSignature sig, bool own)>? _faces;
+        private int _generation;
 
         public TopologyFinder(BuildContext ctx)
         {
@@ -27,13 +33,15 @@ namespace Spiegelwerk.Build
 
         public void Invalidate()
         {
+            _ctx.Shared.TopologyGeneration++;
             _edges = null;
             _faces = null;
         }
 
         private void Load()
         {
-            if (_edges != null) return;
+            if (_edges != null && _generation == _ctx.Shared.TopologyGeneration) return;
+            _generation = _ctx.Shared.TopologyGeneration;
             _edges = new List<(Edge, EdgeSignature, bool)>();
             _faces = new List<(Face2, FaceSignature, bool)>();
             foreach (Body2 body in Sw.SwDoc.SolidBodies(_ctx.Doc))

@@ -58,8 +58,7 @@ namespace Spiegelwerk.Capture
                 if (r.StartTangency == Tangency.DirectionVector) r.StartDirection = ToGeometryRef((object)d.StartDirectionVector);
                 if (r.EndTangency == Tangency.DirectionVector) r.EndDirection = ToGeometryRef((object)d.EndDirectionVector);
                 r.Merge = d.Merge;
-                if (d.FeatureScope && !d.AutoSelect)
-                    r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
+                NoteScope(r.Notes, d.FeatureScope, d.AutoSelect);
             }
             finally
             {
@@ -128,8 +127,7 @@ namespace Spiegelwerk.Capture
                     r.EndDraftAngle = d.EndConstraintDraftAngle;
                     r.ReverseEndDraft = d.EndConstraintDraftAngleDirection;
                 }
-                if (d.FeatureScope && !d.AutoSelect)
-                    r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
+                NoteScope(r.Notes, d.FeatureScope, d.AutoSelect);
             }
             finally
             {

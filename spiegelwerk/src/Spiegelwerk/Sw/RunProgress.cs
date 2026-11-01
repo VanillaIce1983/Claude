@@ -81,9 +81,33 @@ namespace Spiegelwerk.Sw
                 EscAtEnd = true;
                 return false;
             }
-            return _sw.SendMsgToUser2("Spiegeln hier abbrechen? Was bis jetzt aufgebaut wurde, bleibt erhalten.",
-                (int)swMessageBoxIcon_e.swMbQuestion, (int)swMessageBoxBtn_e.swMbYesNo) == (int)swMessageBoxResult_e.swMbHitYes;
+            return Confirm();
         }
+
+        /// <summary>
+        /// Within a step that builds several features (the second half of a mirror feature): true
+        /// if the user pressed Esc meanwhile and confirms stopping here. The bar does not move;
+        /// the step still counts as one.
+        /// </summary>
+        public bool CancelWithinStep()
+        {
+            if (_bar == null) return false;
+            int status;
+            try
+            {
+                status = _bar.UpdateProgress(_steps.Position);
+            }
+            catch (Exception)
+            {
+                _bar = null;
+                return false;
+            }
+            return status == (int)swUpdateProgressError_e.swUpdateProgressError_UserCancel && Confirm();
+        }
+
+        private bool Confirm() =>
+            _sw.SendMsgToUser2("Spiegeln hier abbrechen? Was bis jetzt aufgebaut wurde, bleibt erhalten.",
+                (int)swMessageBoxIcon_e.swMbQuestion, (int)swMessageBoxBtn_e.swMbYesNo) == (int)swMessageBoxResult_e.swMbHitYes;
 
         public void Dispose() => End();
 

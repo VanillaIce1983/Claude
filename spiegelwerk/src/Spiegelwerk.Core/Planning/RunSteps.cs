@@ -34,6 +34,17 @@ namespace Spiegelwerk.Core.Planning
             return feature.Length == 0 ? $"Spiegelwerk – {phase}" : $"Spiegelwerk – {phase}: {feature}";
         }
 
+        /// <summary>
+        /// Label of a mirror feature's second half: it counts as one step of the build, its own
+        /// steps only change the title – „Spiegeln1: erste Hälfte erfassen“, then
+        /// „Spiegeln1 › Boss-Extrude1 (1/3)“.
+        /// </summary>
+        public static string SecondHalf(string mirror, string feature = "", int step = 0, int steps = 0)
+        {
+            if (feature.Length == 0) return $"{mirror}: erste Hälfte erfassen";
+            return steps > 0 ? $"{mirror} › {feature} ({step}/{steps})" : $"{mirror} › {feature}";
+        }
+
         /// <summary>Report note for a run stopped with Esc in capture or measurement: nothing was built yet.</summary>
         public static string CancelledBeforeBuild(string phase) =>
             $"Mit Esc abgebrochen beim {phase} des Originals; es wurde nichts aufgebaut.";

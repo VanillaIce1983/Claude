@@ -312,19 +312,29 @@ namespace Spiegelwerk.Build
             _stepHelpers.RemoveAll(h => names.Contains(h.Name));
         }
 
-        /// <summary>A new feature is about to be built: helper planes and axes made from now on are made for it.</summary>
-        public void BeginStep() => _stepHelpers.Clear();
+        /// <summary>
+        /// A new feature is about to be built: helper planes and axes made from now on are made
+        /// for it. Returns the mark for <see cref="RemoveStepHelpers"/>. A step of a mirror
+        /// feature's second half (<paramref name="nested"/>) begins within the mirror feature's
+        /// own step: what earlier steps made stays on the list, a failed step removes only its own.
+        /// </summary>
+        public int BeginStep(bool nested)
+        {
+            if (!nested) _stepHelpers.Clear();
+            return _stepHelpers.Count;
+        }
 
         /// <summary>
-        /// Removes the helper planes and axes made for the current feature, each with its helper
-        /// sketch – for a feature that came to nothing or that the job removed again. Planes and
-        /// axes it found already there were not made for it and stay; so does a helper something
-        /// else still builds on.
+        /// Removes the helper planes and axes made for the current feature (since
+        /// <paramref name="mark"/>), each with its helper sketch – for a feature that came to
+        /// nothing or that the job removed again. Planes and axes it found already there were
+        /// not made for it and stay; so does a helper something else still builds on.
         /// </summary>
-        public void RemoveStepHelpers()
+        public void RemoveStepHelpers(int mark)
         {
             bool removed = false;
-            for (int i = _stepHelpers.Count - 1; i >= 0; i--)
+            mark = Math.Max(0, Math.Min(mark, _stepHelpers.Count));
+            for (int i = _stepHelpers.Count - 1; i >= mark; i--)
             {
                 Feature helper = _stepHelpers[i];
                 if (HasDependents(helper)) continue;
@@ -336,7 +346,7 @@ namespace Spiegelwerk.Build
                 if (anchor != null) Delete(anchor);
                 removed = true;
             }
-            _stepHelpers.Clear();
+            _stepHelpers.RemoveRange(mark, _stepHelpers.Count - mark);
             if (removed) _ctx.Topology.Invalidate();
         }
 
