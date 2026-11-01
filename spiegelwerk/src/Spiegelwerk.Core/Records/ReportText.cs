@@ -15,6 +15,11 @@ namespace Spiegelwerk.Core.Records
             return $"Ebene durch {Triple(o, 3, culture)} mm, Normale {Triple(n, 4, culture)}";
         }
 
+        /// <summary>"12,5 mm²" from square metres.</summary>
+        /// <param name="culture">Number format; null for the current culture.</param>
+        public static string SquareMillimetres(double squareMetres, IFormatProvider? culture = null) =>
+            Number(squareMetres * 1e6, 3, culture) + " mm²";
+
         // "|" between the values: the decimal separator may be a comma.
         private static string Triple(Vec3 v, int decimals, IFormatProvider? culture) =>
             $"({Number(v.X, decimals, culture)}|{Number(v.Y, decimals, culture)}|{Number(v.Z, decimals, culture)})";

@@ -48,10 +48,7 @@ namespace Spiegelwerk.Core.Sketch
 
             foreach (SkPoint p in source.Points)
             {
-                Vec3 local = target.ToLocal(r.Apply(source.ToModel(p)));
-                // Checked per point: a slightly tilted plane passes the origin check but lifts distant points off it.
-                if (Math.Abs(local.Z) > Tol.Length)
-                    throw new ArgumentException($"Punkt {p.Id} liegt {local.Z * 1000:0.####} mm neben der Zielskizze; die Ebenen sind nicht deckungsgleich.");
+                Vec3 local = MapPoint(source.Frame, r, target, new Vec3(p.X, p.Y, 0), "Punkt " + p.Id);
                 dst.Points.Add(new SkPoint(p.Id, local.X, local.Y) { Standalone = p.Standalone });
             }
 
@@ -103,6 +100,23 @@ namespace Spiegelwerk.Core.Sketch
 
             dst.Warnings.AddRange(source.Warnings);
             return result;
+        }
+
+        /// <summary>
+        /// A point of the source sketch (sketch coordinates, Z ignored) in the coordinates of the
+        /// target sketch: sketch → model → mirror → target. Sketch points and the interior
+        /// witnesses of sketch regions take this one path, for σ = +1 and σ = −1 alike. Throws
+        /// if the point does not land in the target sketch plane (checked per point: a slightly
+        /// tilted plane passes the origin check but lifts distant points off it).
+        /// </summary>
+        public static Vec3 MapPoint(Frame3 source, Reflection r, Frame3 target, Vec3 local) => MapPoint(source, r, target, local, "Punkt");
+
+        private static Vec3 MapPoint(Frame3 source, Reflection r, Frame3 target, Vec3 local, string what)
+        {
+            Vec3 mapped = target.ToLocal(r.Apply(source.ToWorld(local.X, local.Y)));
+            if (Math.Abs(mapped.Z) > Tol.Length)
+                throw new ArgumentException($"{what} liegt {mapped.Z * 1000:0.####} mm neben der Zielskizze; die Ebenen sind nicht deckungsgleich.");
+            return new Vec3(mapped.X, mapped.Y, 0);
         }
 
         /// <summary>Horizontal/vertical follow the axes; every other relation is invariant under mirroring.</summary>

@@ -172,8 +172,35 @@ namespace Spiegelwerk.Core.Records
         }
     }
 
+    /// <summary>
+    /// A feature built from part of its sketch: selected contours and selected sketch regions
+    /// together form the profile; both empty means the whole sketch.
+    /// </summary>
+    public interface IProfileRecord
+    {
+        /// <summary>Original name of the sketch.</summary>
+        string SketchName { get; }
+
+        bool IsThin { get; }
+
+        /// <summary>Selected contours, each as the set of segment ids it consists of.</summary>
+        List<List<string>> Contours { get; }
+
+        /// <summary>Selected sketch regions, in source sketch coordinates (unmirrored).</summary>
+        List<ProfileRegion> Regions { get; }
+
+        /// <summary>ε the regions were sampled with (the smallest of the feature's regions); the target is read with the same.</summary>
+        double RegionChordTolerance { get; set; }
+
+        /// <summary>
+        /// The original used selected contours or regions that could not be captured: the copy
+        /// could only use the whole sketch – more than the original (the fallback policy decides).
+        /// </summary>
+        bool SelectionLost { get; set; }
+    }
+
     /// <summary>Boss-Extrude, Cut-Extrude, thin variants.</summary>
-    public sealed class ExtrudeRecord : FeatureRecord
+    public sealed class ExtrudeRecord : FeatureRecord, IProfileRecord
     {
         public ExtrudeRecord(string name, string typeName, string sketchName) : base(name, typeName)
         {
@@ -206,8 +233,18 @@ namespace Spiegelwerk.Core.Records
 
         public double AutoFilletRadius { get; set; }
 
-        /// <summary>Selected contours, each as the set of segment ids it consists of. Empty: whole sketch.</summary>
+        /// <summary>
+        /// Selected contours, each as the set of segment ids it consists of. Together with
+        /// <see cref="Regions"/> the profile; both empty: whole sketch.
+        /// </summary>
         public List<List<string>> Contours { get; } = new List<List<string>>();
+
+        /// <summary>Selected sketch regions (source sketch coordinates). Together with <see cref="Contours"/> the profile.</summary>
+        public List<ProfileRegion> Regions { get; } = new List<ProfileRegion>();
+
+        public double RegionChordTolerance { get; set; }
+
+        public bool SelectionLost { get; set; }
 
         /// <summary>"Direction of extrusion" (instead of the sketch normal): a line, edge or plane; a second entity for two-point directions.</summary>
         public GeometryRef? DirectionReference1 { get; set; }
@@ -216,7 +253,7 @@ namespace Spiegelwerk.Core.Records
     }
 
     /// <summary>Revolve, Revolve-Cut, thin variants.</summary>
-    public sealed class RevolveRecord : FeatureRecord
+    public sealed class RevolveRecord : FeatureRecord, IProfileRecord
     {
         public RevolveRecord(string name, string typeName, string sketchName) : base(name, typeName)
         {
@@ -241,8 +278,15 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Sketch line, reference axis or linear edge.</summary>
         public GeometryRef? Axis { get; set; }
 
-        /// <summary>Selected contours (segment id sets). Empty: whole sketch.</summary>
+        /// <summary>Selected contours (segment id sets). Together with <see cref="Regions"/> the profile; both empty: whole sketch.</summary>
         public List<List<string>> Contours { get; } = new List<List<string>>();
+
+        /// <summary>Selected sketch regions (source sketch coordinates). Together with <see cref="Contours"/> the profile.</summary>
+        public List<ProfileRegion> Regions { get; } = new List<ProfileRegion>();
+
+        public double RegionChordTolerance { get; set; }
+
+        public bool SelectionLost { get; set; }
 
         /// <summary>Only a one-direction revolve below 360° and a two-direction one have a direction that matters.</summary>
         public bool DirectionMatters =>
