@@ -74,6 +74,7 @@ namespace Spiegelwerk.Build
             Math = parent.Math;
             Options = parent.Options;
             Shared = parent.Shared;
+            RegionSpaces = parent.RegionSpaces;
             Mirror = mirror;
             SeparateBody = separateBody;
             Report = report;
@@ -133,6 +134,12 @@ namespace Spiegelwerk.Build
         public bool CopiesEquations => !SamePart && Options.CopyEquations;
 
         public Dictionary<string, SketchMap> Sketches { get; } = new Dictionary<string, SketchMap>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// What the run has learnt about the coordinate space of sketch region edges – on the
+        /// original during capture, or on the target (shared with <see cref="Capture.FeatureCapture"/>).
+        /// </summary>
+        public RegionSpaceMemory RegionSpaces { get; set; } = new RegionSpaceMemory();
 
         /// <summary>Sketch of a hole (original name) → its hole (original name).</summary>
         public Dictionary<string, string> PartOwners { get; } = new Dictionary<string, string>(StringComparer.Ordinal);

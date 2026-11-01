@@ -8,6 +8,7 @@ using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
+using Spiegelwerk.Core.Sketch;
 using Spiegelwerk.Core.Verification;
 using Spiegelwerk.Sw;
 
@@ -93,6 +94,8 @@ namespace Spiegelwerk.Build
                 throw new InvalidOperationException("Die Rückrollleiste steht nicht am Ende des Feature-Baums. Bitte ans Ende setzen und erneut spiegeln.");
 
             var skipped = new List<(Feature feature, string reason)>();
+            // The coordinate space of sketch region edges, once known for certain, holds for source and target alike.
+            var regionSpaces = new RegionSpaceMemory();
             List<Feature> features;
             List<FeatureRecord> records;
             bool seedBodies;
@@ -112,7 +115,7 @@ namespace Spiegelwerk.Build
                 if (features.FirstOrDefault(f => UnsupportedFeatures.RefusesRun(f.GetTypeName2())) is Feature carrier)
                     throw new InvalidOperationException(UnsupportedFeatures.RunRefusal(carrier.Name, carrier.GetTypeName2()));
                 progress.Start(features.Count, opt.VerifySteps);
-                var capture = new FeatureCapture(source, _math);
+                var capture = new FeatureCapture(source, _math, regionSpaces);
                 List<FeatureRecord>? captured = capture.CaptureAll(features, f => progress.Show(RunSteps.Capture, f.Name), progress.CancelAfterStep);
                 if (captured == null) return CancelledBeforeBuild(report, RunSteps.Capture);
                 records = captured;
@@ -142,7 +145,7 @@ namespace Spiegelwerk.Build
             report.TargetName = target.GetTitle();
             // Whole part, selected bodies, or seed bodies of a selected body pattern: a body of its own.
             bool separateBody = opt.Target == MirrorTarget.SamePart && (req.Features.Count == 0 || req.Bodies.Count > 0 || seedBodies);
-            var ctx = new BuildContext(_sw, target, _math, new Reflection(req.MirrorPlane), opt, report, separateBody);
+            var ctx = new BuildContext(_sw, target, _math, new Reflection(req.MirrorPlane), opt, report, separateBody) { RegionSpaces = regionSpaces };
             ctx.Shared.Progress = progress;
             foreach (PartOfFeatureRecord part in records.OfType<PartOfFeatureRecord>()) ctx.PartOwners[part.Name] = part.Owner;
             foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) ctx.PointSketches.Add(pattern.SketchName);
@@ -183,6 +186,7 @@ namespace Spiegelwerk.Build
                     }
                 }
                 progress.Show(RunSteps.Finish);
+                if (regionSpaces.ReportLine() is string spaceLine) report.General.Add(spaceLine);
                 target.EditRebuild3();
                 bool atEnd = SwDoc.RollToEnd(target);
                 if (!atEnd)

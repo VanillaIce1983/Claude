@@ -6,6 +6,7 @@ using SolidWorks.Interop.swconst;
 using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
+using Spiegelwerk.Core.Sketch;
 using Spiegelwerk.Sw;
 
 namespace Spiegelwerk.Capture
@@ -21,6 +22,7 @@ namespace Spiegelwerk.Capture
         private readonly ModelDoc2 _doc;
         private readonly SwMath _math;
         private readonly SketchCapture _sketches;
+        private readonly RegionSpaceMemory _regionSpaces;
 
         /// <summary>
         /// Reading back the job's own copies in the target (the first half of a mirror
@@ -28,13 +30,15 @@ namespace Spiegelwerk.Capture
         /// </summary>
         private readonly bool _ofOwnCopy;
 
+        /// <param name="regionSpaces">What the run learns about the coordinate space of sketch regions; shared with the build.</param>
         /// <param name="ofOwnCopy">The features are the job's own copies in the target, not the original.</param>
-        public FeatureCapture(ModelDoc2 doc, SwMath math, bool ofOwnCopy = false)
+        public FeatureCapture(ModelDoc2 doc, SwMath math, RegionSpaceMemory regionSpaces, bool ofOwnCopy = false)
         {
             _doc = doc;
             _math = math;
             _ofOwnCopy = ofOwnCopy;
             _sketches = new SketchCapture(math);
+            _regionSpaces = regionSpaces;
         }
 
         /// <summary>
@@ -221,8 +225,7 @@ namespace Spiegelwerk.Capture
                 r.DirectionReference1 = ToGeometryRef(dir1);
                 r.DirectionReference2 = ToGeometryRef(dir2);
 
-                if (d.GetContoursCount() > 0)
-                    ReadContours((object[])(object)d.Contours, r.Contours, r.Notes);
+                ReadProfile(sketch, () => d.GetContoursCount(), () => (object)d.Contours, r);
             }
             finally
             {
@@ -231,16 +234,78 @@ namespace Spiegelwerk.Capture
             return r;
         }
 
-        /// <summary>Selected contours as sets of segment ids; regions cannot be mapped.</summary>
-        private static void ReadContours(object[] contours, List<List<string>> into, List<string> notes)
+        /// <summary>
+        /// Selected contours (as sets of segment ids) and sketch regions (as shapes in sketch
+        /// coordinates), read while AccessSelections is active – region objects only exist then.
+        /// All or nothing: if any item cannot be read, neither list keeps anything, the record
+        /// is marked (<see cref="IProfileRecord.SelectionLost"/>) and gets one note; the builder
+        /// then decides between the whole sketch and not building (same part, merge mode).
+        /// Never throws: an unreadable region must not end the run.
+        /// </summary>
+        private void ReadProfile<T>(Feature sketch, Func<int> count, Func<object?> items, T r) where T : FeatureRecord, IProfileRecord
         {
-            foreach (object c in contours)
+            string? why;
+            try
             {
-                if (c is SketchContour sc)
-                    into.Add(((object[])(object)sc.GetSketchSegments()).Cast<SketchSegment>().Select(SwDoc.IdOf).ToList());
-                else
-                    notes.Add("Ausgewählte Skizzenbereiche (Regionen) werden nicht übernommen; es wird die ganze Skizze verwendet.");
+                int n;
+                try
+                {
+                    n = count();
+                }
+                catch (Exception)
+                {
+                    // Unknown: the list itself tells whether there is a selection.
+                    n = -1;
+                }
+                if (n == 0) return;
+                object[]? list = items() as object[];
+                if (n < 0 && (list == null || list.Length == 0)) return;
+                why = TryReadProfile(sketch, list, r);
             }
+            catch (Exception ex)
+            {
+                why = ex.Message;
+            }
+            if (why == null) return;
+            r.Contours.Clear();
+            r.Regions.Clear();
+            r.RegionChordTolerance = 0;
+            r.SelectionLost = true;
+            r.Notes.Add(ProfileRules.Unreadable(why));
+        }
+
+        /// <summary>Reads the items; returns why not, or null. Regions are told apart from contours first (TypeOf … Is SketchRegion).</summary>
+        private string? TryReadProfile(Feature sketch, object[]? items, IProfileRecord r)
+        {
+            if (items == null || items.Length == 0) return "die Feature-Daten nennen keine Konturen";
+            var regions = new List<SketchRegion>();
+            foreach (object item in items)
+            {
+                switch (item)
+                {
+                    case SketchRegion region:
+                        if (SwDoc.SketchNameOf(region.Sketch) != sketch.Name) return "ein Skizzenbereich gehört zu einer anderen Skizze";
+                        regions.Add(region);
+                        break;
+                    case SketchContour contour:
+                        if (SwDoc.SketchNameOf(contour.Sketch) != sketch.Name) return "eine Kontur gehört zu einer anderen Skizze";
+                        object[] segments = (object)contour.GetSketchSegments() as object[] ?? Array.Empty<object>();
+                        if (segments.Length == 0) return "eine Kontur nennt keine Skizzenelemente";
+                        r.Contours.Add(segments.OfType<SketchSegment>().Select(SwDoc.IdOf).ToList());
+                        break;
+                    default:
+                        return "ein Element ist weder Kontur noch Skizzenbereich";
+                }
+            }
+            if (regions.Count == 0) return null;
+
+            var sk = (Sketch)(object)sketch.GetSpecificFeature2();
+            Frame3 frame = _math.SketchFrame(sk);
+            List<ProfileRegion>? shapes = RegionCapture.ReadSelected(regions, frame, RegionCapture.SketchPoints(sk), _regionSpaces, out double eps, out string? why);
+            if (shapes == null) return why ?? "Skizzenbereich nicht lesbar";
+            r.Regions.AddRange(shapes);
+            r.RegionChordTolerance = eps;
+            return null;
         }
 
         private void ReadSide(ExtrudeFeatureData2 d, bool forward, ExtrudeSide side, bool thin, bool used)
@@ -285,8 +350,7 @@ namespace Spiegelwerk.Capture
                 }
                 r.Axis = ToGeometryRef((object)d.Axis);
                 NoteScope(r.Notes, d.FeatureScope, d.AutoSelect);
-                if (d.GetContoursCount() > 0)
-                    ReadContours((object[])(object)d.Contours, r.Contours, r.Notes);
+                ReadProfile(sketch, () => d.GetContoursCount(), () => (object)d.Contours, r);
             }
             finally
             {

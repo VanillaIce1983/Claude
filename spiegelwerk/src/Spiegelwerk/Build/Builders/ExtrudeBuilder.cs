@@ -23,6 +23,12 @@ namespace Spiegelwerk.Build.Builders
     /// that always succeeds: blind for a boss, through all for a cut (a blind cut from a
     /// sketch plane away from the part would remove nothing and fail). If the final
     /// definition cannot be applied, the feature is removed again.
+    ///
+    /// Selected contours and sketch regions (ProfileSupport): found in the new sketch, handed
+    /// over along the ways of ProfileRules.Ways, every created feature read back; the final
+    /// definition only runs once the profile is settled. What cannot be carried over exactly
+    /// falls back to the whole sketch – or, in the same part without a body of its own, the
+    /// feature is not built.
     /// </summary>
     internal sealed class ExtrudeBuilder : IFeatureBuilder
     {
@@ -42,6 +48,9 @@ namespace Spiegelwerk.Build.Builders
             // ---- separate body: never let the copy touch the original (checked before
             //      references are resolved, which may add helper planes and axes)
             string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
+            if (refused != null) return Fail(refused, notes);
+            // ---- selected contours and regions that cannot be carried over exactly: refused in merge mode
+            refused = ProfileSupport.Plan(ctx, sketch, r, notes);
             if (refused != null) return Fail(refused, notes);
 
             // ---- references, resolved before the feature is created
@@ -81,28 +90,32 @@ namespace Spiegelwerk.Build.Builders
             int t0 = r.Start == StartCondition.Offset ? (int)StartCondition.Offset : (int)StartCondition.SketchPlane;
             bool flipStart = sketch.Sigma < 0 ? !r.StartOffsetReverse : r.StartOffsetReverse;
 
-            List<object>? contours = MapContours(r.Contours, sketch, notes);
+            // ---- create: profile ways (each feature read back), whole sketch otherwise
             bool singleDir = !r.BothDirections;
-            Feature? f = Create(ctx, r, sketch, contours, singleDir, reverse, createMerge, tmp1, tmpDepth1, tmp2, tmpDepth2, t0, flipStart);
-            bool contoursPending = false;
-            if (f == null && contours != null)
-            {
-                f = Create(ctx, r, sketch, null, singleDir, reverse, createMerge, tmp1, tmpDepth1, tmp2, tmpDepth2, t0, flipStart);
-                contoursPending = f != null;
-            }
+            bool wanted = ProfileSupport.Wanted(r);
+            ProfileOutcome made = ProfileSupport.Create(ctx, sketch, r, false, wanted, (way, profile) =>
+                Create(ctx, r, sketch, way, profile, singleDir, reverse, createMerge, tmp1, tmpDepth1, tmp2, tmpDepth2, t0, flipStart));
             bool tempChanged = false;
-            if (f == null && r.IsCut)
+            if (made.Feature == null && r.IsCut)
             {
                 // Last resort for cuts: through all in both directions certainly cuts something.
-                f = Create(ctx, r, sketch, null, true, reverse, createMerge, EndCondition.ThroughAllBoth, 0, EndCondition.Blind, 0, (int)StartCondition.SketchPlane, false);
-                contoursPending = f != null && contours != null;
-                tempChanged = f != null;
+                made = ProfileSupport.Create(ctx, sketch, r, false, wanted, (way, profile) =>
+                    Create(ctx, r, sketch, way, profile, true, reverse, createMerge, EndCondition.ThroughAllBoth, 0, EndCondition.Blind, 0,
+                        (int)StartCondition.SketchPlane, false));
+                tempChanged = made.Feature != null;
             }
+            Feature? f = made.Feature;
             if (f == null)
                 return Fail("SOLIDWORKS hat das Feature nicht erzeugt" + (r.IsCut ? " (auch „durch alles“ hat keinen Körper geschnitten)." : "."), notes);
+            string? profileRefused = ProfileSupport.Finish(ctx, made, wanted, notes);
+            if (profileRefused != null)
+            {
+                Delete(ctx, f);
+                return Fail(profileRefused, notes);
+            }
 
-            // ---- final definition in one step
-            bool needsEdit = tempChanged || contoursPending || scope || end1 != null || end2 != null || startEntity != null || dir1 != null
+            // ---- final definition in one step (the profile is settled by now)
+            bool needsEdit = tempChanged || scope || end1 != null || end2 != null || startEntity != null || dir1 != null
                              || tmp1 != final1 || tmp2 != final2;
             if (needsEdit)
             {
@@ -123,7 +136,6 @@ namespace Spiegelwerk.Build.Builders
                         d.SetFromEntity(startEntity);
                     }
                     if (dir1 != null) d.SetDirectionReference(dir1, dir2);
-                    if (contoursPending) d.Contours = contours!.ToArray();
                     if (scope)
                     {
                         if (!r.IsCut) d.Merge = true;
@@ -140,7 +152,7 @@ namespace Spiegelwerk.Build.Builders
             }
 
             ctx.Register(r.Name, f);
-            var result = BuildResult.Ok(f, Describe(r, reverse != r.Reverse));
+            var result = BuildResult.Ok(f, Describe(r, reverse != r.Reverse) + ProfileSupport.Describe(made));
             result.Notes.AddRange(notes);
             if (notes.Count > 0) result.Status = ReportStatus.Warning;
             AddAlternatives(result, ctx, f, r);
@@ -167,21 +179,30 @@ namespace Spiegelwerk.Build.Builders
             }
         }
 
-        private static Feature? Create(BuildContext ctx, ExtrudeRecord r, SketchMap sketch, List<object>? contours, bool sd,
+        /// <summary>
+        /// Creates the feature with the selection of one profile way (<see cref="ProfileSupport.Select"/>):
+        /// the whole sketch, or contours and regions with mark 0 or 4, contour selection switched on
+        /// for mark 4 as in the API examples. Null if a selection failed or SOLIDWORKS made nothing.
+        /// </summary>
+        private static Feature? Create(BuildContext ctx, ExtrudeRecord r, SketchMap sketch, ProfileWay way, Profile? profile, bool sd,
             bool reverse, bool merge, EndCondition t1, double d1, EndCondition t2, double d2, int t0, bool flipStart)
         {
             ModelDoc2 doc = ctx.Doc;
-            FeatureManager fm = doc.FeatureManager;
-            SwSelect.Clear(doc);
-            if (contours != null)
+            using (way.ContourSelection && profile != null ? new ContourSelectionScope(doc) : null)
             {
-                for (int i = 0; i < contours.Count; i++) SwSelect.Select(doc, contours[i], 0, i > 0);
+                if (!ProfileSupport.Select(ctx, sketch, profile, way))
+                {
+                    SwSelect.Clear(doc);
+                    return null;
+                }
+                return CreateSelected(doc, r, sd, reverse, merge, t1, d1, t2, d2, t0, flipStart);
             }
-            else
-            {
-                SwSelect.Select(doc, sketch.Feature, 0, false);
-            }
+        }
 
+        private static Feature? CreateSelected(ModelDoc2 doc, ExtrudeRecord r, bool sd, bool reverse, bool merge,
+            EndCondition t1, double d1, EndCondition t2, double d2, int t0, bool flipStart)
+        {
+            FeatureManager fm = doc.FeatureManager;
             ExtrudeSide s1 = r.Side1, s2 = r.Side2;
             Feature? f;
             if (!r.IsCut && !r.IsThin)

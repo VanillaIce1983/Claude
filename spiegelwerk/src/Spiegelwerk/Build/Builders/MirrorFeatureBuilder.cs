@@ -163,7 +163,7 @@ namespace Spiegelwerk.Build.Builders
         private static List<FeatureRecord> ReadFirstHalf(BuildContext ctx, List<Feature> copies, string mirrorName)
         {
             ModelDoc2 doc = ctx.Doc;
-            var capture = new FeatureCapture(doc, ctx.Math, ofOwnCopy: true);
+            var capture = new FeatureCapture(doc, ctx.Math, ctx.RegionSpaces, ofOwnCopy: true);
             List<FeatureRecord> records = capture.CaptureAll(copies)!;
             if (capture.RollbackFailures > 0)
             {
@@ -172,7 +172,7 @@ namespace Spiegelwerk.Build.Builders
                 try
                 {
                     fm.EnableFeatureTree = true;
-                    if (SwDoc.RollToEnd(doc)) records = new FeatureCapture(doc, ctx.Math, ofOwnCopy: true).CaptureAll(copies)!;
+                    if (SwDoc.RollToEnd(doc)) records = new FeatureCapture(doc, ctx.Math, ctx.RegionSpaces, ofOwnCopy: true).CaptureAll(copies)!;
                 }
                 finally
                 {
