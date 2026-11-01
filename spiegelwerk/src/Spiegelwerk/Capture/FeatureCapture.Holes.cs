@@ -146,8 +146,7 @@ namespace Spiegelwerk.Capture
                         throw new NotSupportedException($"Bezug der Endbedingung {(EndCondition)end} ist im Original nicht lesbar.");
                 }
                 values = SwHole.Read(d);
-                if (d.FeatureScope && !d.AutoSelect)
-                    notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
+                NoteScope(notes, d.FeatureScope, d.AutoSelect);
             }
             finally
             {

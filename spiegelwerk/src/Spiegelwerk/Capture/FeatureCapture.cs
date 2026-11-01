@@ -22,11 +22,62 @@ namespace Spiegelwerk.Capture
         private readonly SwMath _math;
         private readonly SketchCapture _sketches;
 
-        public FeatureCapture(ModelDoc2 doc, SwMath math)
+        /// <summary>
+        /// Reading back the job's own copies in the target (the first half of a mirror
+        /// feature): the feature scope the job itself set in the same part is no loss to report.
+        /// </summary>
+        private readonly bool _ofOwnCopy;
+
+        /// <param name="ofOwnCopy">The features are the job's own copies in the target, not the original.</param>
+        public FeatureCapture(ModelDoc2 doc, SwMath math, bool ofOwnCopy = false)
         {
             _doc = doc;
             _math = math;
+            _ofOwnCopy = ofOwnCopy;
             _sketches = new SketchCapture(math);
+        }
+
+        /// <summary>
+        /// How often moving the rollback bar for a capture failed (sketch with model references,
+        /// closed shell, advanced hole). Such a feature is read in the final state or not at all.
+        /// </summary>
+        public int RollbackFailures { get; private set; }
+
+        private bool RollBack(int to, string feature)
+        {
+            bool ok = _doc.FeatureManager.EditRollback(to, feature);
+            if (!ok) RollbackFailures++;
+            return ok;
+        }
+
+        private const string ScopeNote = "Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.";
+
+        /// <summary>A feature limited to chosen bodies is rebuilt without that limit – unless the job set it on its own copy.</summary>
+        private void NoteScope(List<string> notes, bool scope, bool autoSelect)
+        {
+            if (scope && !autoSelect && !_ofOwnCopy) notes.Add(ScopeNote);
+        }
+
+        /// <summary>
+        /// Captures the features in order. Sketches of a hole are rebuilt with the hole – only
+        /// if the hole itself is rebuilt; otherwise the position sketch is read as an ordinary
+        /// sketch and the profile sketch is left out. <paramref name="starting"/> runs before
+        /// each feature, <paramref name="cancelled"/> after it: true stops, the result is null.
+        /// </summary>
+        public List<FeatureRecord>? CaptureAll(IReadOnlyList<Feature> features, Action<Feature>? starting = null, Func<bool>? cancelled = null)
+        {
+            var records = new List<FeatureRecord>();
+            foreach (Feature f in features)
+            {
+                starting?.Invoke(f);
+                records.Add(Capture(f));
+                if (cancelled != null && cancelled()) return null;
+            }
+            var holes = new HashSet<string>(records.OfType<PositionedHoleRecord>().Select(h => h.Name), StringComparer.Ordinal);
+            for (int i = 0; i < records.Count; i++)
+                if (records[i] is PartOfFeatureRecord part && !holes.Contains(part.Owner))
+                    records[i] = CaptureOnItsOwn(features[i], part);
+            return records;
         }
 
         public FeatureRecord Capture(Feature f)
@@ -86,6 +137,10 @@ namespace Spiegelwerk.Capture
                         return CaptureShell(f, type, sh);
                     case DraftFeatureData2 dr:
                         return CaptureDraft(f, type, dr);
+                    case MirrorPatternFeatureData mp:
+                        return CaptureMirrorPattern(f, type, mp);
+                    case MirrorSolidFeatureData ms:
+                        return CaptureMirrorSolid(f, type, ms);
                 }
                 return new UnsupportedRecord(f.Name, type, UnsupportedFeatures.Reason(type), ChangesSolid(type));
             }
@@ -107,15 +162,14 @@ namespace Spiegelwerk.Capture
                 .Any(x => x.Kind == Core.Sketch.SkRefKind.ModelEdge || x.Kind == Core.Sketch.SkRefKind.ModelVertex || x.Kind == Core.Sketch.SkRefKind.Plane);
             if (!refersToModel) return model;
 
-            FeatureManager fm = _doc.FeatureManager;
-            if (!fm.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, f.Name)) return model;
+            if (!RollBack((int)swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, f.Name)) return model;
             try
             {
                 return _sketches.Read(f);
             }
             finally
             {
-                fm.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToEnd, "");
+                _doc.FeatureManager.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToEnd, "");
             }
         }
 
@@ -156,8 +210,7 @@ namespace Spiegelwerk.Capture
                     r.AutoFillet = d.GetAutoFilletCorners();
                     r.AutoFilletRadius = d.GetAutoFilletRadius();
                 }
-                if (r.FeatureScope && !r.AutoSelect)
-                    r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
+                NoteScope(r.Notes, r.FeatureScope, r.AutoSelect);
                 ReadSide(d, true, r.Side1, r.IsThin, true);
                 // A single-direction thin feature still needs the second wall thickness; its
                 // direction-2 end condition is unused (and may hold stale settings).
@@ -231,8 +284,7 @@ namespace Spiegelwerk.Capture
                     r.Thickness2 = d.GetWallThickness(false);
                 }
                 r.Axis = ToGeometryRef((object)d.Axis);
-                if (d.FeatureScope && !d.AutoSelect)
-                    r.Notes.Add("Der Feature-Bereich (ausgewählte Körper) wird nicht übernommen.");
+                NoteScope(r.Notes, d.FeatureScope, d.AutoSelect);
                 if (d.GetContoursCount() > 0)
                     ReadContours((object[])(object)d.Contours, r.Contours, r.Notes);
             }

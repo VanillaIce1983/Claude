@@ -46,11 +46,25 @@ namespace Spiegelwerk.Build.Builders
             Message = message;
         }
 
+        /// <summary>The new feature; for the second half of a mirror feature the last of its features.</summary>
         public Feature? Feature { get; }
+
+        /// <summary>The features of a mirror feature's second half, in tree order; null for a single feature.</summary>
+        public IReadOnlyList<Feature>? Group { get; private set; }
+
+        /// <summary>Every feature this step made: the group, or the single feature (none if it failed).</summary>
+        public IReadOnlyList<Feature> AllFeatures => Group ?? (Feature == null ? Array.Empty<Feature>() : new[] { Feature });
+
+        /// <summary>Report entries of the steps of a second half, named under the mirror feature; they follow its own entry.</summary>
+        public List<ReportEntry> ChildEntries { get; } = new List<ReportEntry>();
+
         public ReportStatus Status { get; set; }
         public string Message { get; set; }
         public List<string> Notes { get; } = new List<string>();
         public List<Alternative> Alternatives { get; } = new List<Alternative>();
+
+        /// <summary>A possible reason the builder knows of, added to the report only if the check finds a deviation.</summary>
+        public string? MismatchHint { get; set; }
 
         /// <summary>Removes helpers made for this feature alone – called if the job removes the feature again.</summary>
         public Action? RemoveHelpers { get; set; }
@@ -60,6 +74,10 @@ namespace Spiegelwerk.Build.Builders
         public static BuildResult Ok(Feature f, string message) => new BuildResult(f, ReportStatus.Ok, message);
         public static BuildResult Failed(string message) => new BuildResult(null, ReportStatus.Failed, message);
         public static BuildResult Skipped(string message) => new BuildResult(null, ReportStatus.Skipped, message);
+
+        /// <summary>The second half of a mirror feature: several features, the last one stands for them.</summary>
+        public static BuildResult OfGroup(IReadOnlyList<Feature> group, ReportStatus status, string message) =>
+            new BuildResult(group[group.Count - 1], status, message) { Group = group };
 
         /// <summary>Nothing to build because the target already has the equivalent.</summary>
         public static BuildResult AlreadyThere(string message) => new BuildResult(null, ReportStatus.Skipped, message) { HasEquivalent = true };

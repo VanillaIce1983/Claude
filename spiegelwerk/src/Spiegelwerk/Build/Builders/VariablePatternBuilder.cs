@@ -39,9 +39,11 @@ namespace Spiegelwerk.Build.Builders
             var seeds = new List<Feature>();
             foreach (string name in r.SeedFeatures)
             {
-                if (!ctx.Created.TryGetValue(name, out Feature seed))
+                // A mirror feature as seed: the features of its second half that change the solid.
+                List<Feature> found = ctx.Counterparts(name, solidOnly: true);
+                if (found.Count == 0)
                     return Fail($"Saat „{name}“ des variablen Musters wurde nicht gespiegelt.", notes);
-                seeds.Add(seed);
+                seeds.AddRange(found);
             }
             var columns = new List<(DisplayDimension dimension, string name)>();
             foreach (ControllingDimension c in r.Dimensions)

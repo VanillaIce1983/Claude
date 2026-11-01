@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -40,6 +41,26 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>The original has a counterpart in the target.</summary>
         public bool IsMirrored => Status == ReportStatus.Ok || Status == ReportStatus.Warning || (Status == ReportStatus.Skipped && HasEquivalent);
+    }
+
+    /// <summary>What the report knows of a step of a mirror feature's second half.</summary>
+    public sealed class SecondHalfStep
+    {
+        public SecondHalfStep(string logical, string? target, ReportStatus firstHalf)
+        {
+            Logical = logical;
+            Target = target;
+            FirstHalf = firstHalf;
+        }
+
+        /// <summary>The name the report gives the feature it copies: the original's („Boss-Extrude1“), for nested mirrors „X (Spiegeln1)“.</summary>
+        public string Logical { get; }
+
+        /// <summary>Name of the new feature in the target, if one was made.</summary>
+        public string? Target { get; }
+
+        /// <summary>Status of the first-half copy it was read from.</summary>
+        public ReportStatus FirstHalf { get; }
     }
 
     public sealed class MirrorReport
@@ -86,6 +107,34 @@ namespace Spiegelwerk.Core.Records
             }
             Aborted |= other.Aborted;
             Cancelled |= other.Cancelled;
+        }
+
+        /// <summary>
+        /// The entries of the second half a mirror feature rebuilt, re-homed under it in the
+        /// style of <see cref="Append"/>: „Spiegeln1 › Boss-Extrude1“ (the copy's own name,
+        /// not that of the first-half copy it was read from), with the name of the new feature in
+        /// the target, and not better than its first half
+        /// (<see cref="Planning.MirrorFeatureRules.WithFirstHalf"/>).
+        /// </summary>
+        /// <param name="lookup">Name of a step's record (the first-half copy in the target) → what is known of it; null: nothing.</param>
+        public static List<ReportEntry> Nested(string owner, IEnumerable<ReportEntry> entries, Func<string, SecondHalfStep?> lookup)
+        {
+            var result = new List<ReportEntry>();
+            foreach (ReportEntry e in entries)
+            {
+                SecondHalfStep? step = lookup(e.Feature);
+                ReportStatus status = step == null ? e.Status : Planning.MirrorFeatureRules.WithFirstHalf(e.Status, step.FirstHalf);
+                var copy = new ReportEntry($"{owner} › {step?.Logical ?? e.Feature}", e.Type, status, e.Message)
+                {
+                    Verification = e.Verification,
+                    HasEquivalent = e.HasEquivalent,
+                };
+                copy.Details.AddRange(e.Details);
+                if (step?.Target is string target) copy.Details.Add($"im Ziel: „{target}“");
+                if (status != e.Status) copy.Details.Add($"Die erste Hälfte hat den Status „{StatusText(step!.FirstHalf)}“; die zweite ist ihre Kopie.");
+                result.Add(copy);
+            }
+            return result;
         }
 
         public int Count(ReportStatus s) => Entries.Count(e => e.Status == s);

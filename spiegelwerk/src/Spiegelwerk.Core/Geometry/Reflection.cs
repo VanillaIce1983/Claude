@@ -1,3 +1,5 @@
+using System;
+
 namespace Spiegelwerk.Core.Geometry
 {
     /// <summary>
@@ -34,6 +36,48 @@ namespace Spiegelwerk.Core.Geometry
         /// with origin R(o), X = R(x), Y = R(y) and therefore Z = -R(z).
         /// </summary>
         public Frame3 ApplyKeepingXY(Frame3 f) => new Frame3(Apply(f.Origin), ApplyVector(f.XAxis), ApplyVector(f.YAxis));
+
+        /// <summary>
+        /// The reflection a transform is, or null. x ↦ Mx + t is one if M = I − 2nnᵀ (det −1,
+        /// symmetric, orthogonal – and not −I, a point reflection) and t is parallel to n;
+        /// otherwise it is a glide reflection, which has the same linear part. The plane goes
+        /// through t/2.
+        /// </summary>
+        /// <param name="tol">For the matrix entries; the translation is checked against <see cref="Tol.Length"/>.</param>
+        public static Reflection? TryFromAffine(Affine a, double tol = 1e-9)
+        {
+            Vec3[] cols = { a.Col0, a.Col1, a.Col2 };
+            if (Math.Abs(a.Determinant + 1) > tol) return null;
+            for (int i = 0; i < 3; i++)
+            {
+                if (Math.Abs(cols[i].Length - 1) > tol) return null;
+                for (int j = i + 1; j < 3; j++)
+                {
+                    if (Math.Abs(cols[i].Dot(cols[j])) > tol) return null;
+                    // Symmetric: the entry in row i, column j equals the one in row j, column i.
+                    if (Math.Abs(Component(cols[j], i) - Component(cols[i], j)) > tol) return null;
+                }
+            }
+
+            // I − M = 2nnᵀ: its column with the largest norm is a multiple of n.
+            Vec3[] units = { Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ };
+            Vec3 largest = Vec3.Zero;
+            for (int i = 0; i < 3; i++)
+            {
+                Vec3 c = units[i] - cols[i];
+                if (c.Length > largest.Length) largest = c;
+            }
+            if (largest.Length < 0.5) return null;
+            Vec3 n = largest.Normalized();
+            for (int i = 0; i < 3; i++)
+                if ((units[i] - n * (2 * Component(n, i))).DistanceTo(cols[i]) > 10 * tol) return null;
+
+            Vec3 t = a.Translation;
+            if ((t - n * t.Dot(n)).Length > Tol.Length) return null;
+            return new Reflection(new Plane3(t / 2, n));
+        }
+
+        private static double Component(Vec3 v, int i) => i == 0 ? v.X : i == 1 ? v.Y : v.Z;
 
         public override string ToString() => $"Spiegelung an {Plane}";
     }

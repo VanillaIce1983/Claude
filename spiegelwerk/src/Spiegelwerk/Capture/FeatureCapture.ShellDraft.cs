@@ -49,7 +49,7 @@ namespace Spiegelwerk.Capture
         private FaceSignature? OuterFaceOfShelledBody(Feature shell)
         {
             FeatureManager fm = _doc.FeatureManager;
-            if (!fm.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, shell.Name)) return null;
+            if (!RollBack((int)swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, shell.Name)) return null;
             try
             {
                 if (!(shell.GetFaces() is object[] own) || !(own.OfType<Face2>().FirstOrDefault()?.GetBody() is Body2 body)) return null;

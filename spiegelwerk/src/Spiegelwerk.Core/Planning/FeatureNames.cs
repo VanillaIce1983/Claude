@@ -17,5 +17,12 @@ namespace Spiegelwerk.Core.Planning
             for (int i = 2; name != current && taken(name); i++) name = $"{wanted} ({i})";
             return name;
         }
+
+        /// <summary>
+        /// The wanted name of a new feature: its name in the report, in the same part with the
+        /// name suffix – always last, also after the name of a mirror feature's second half
+        /// („Boss-Extrude1 (Spiegeln1)_gespiegelt“).
+        /// </summary>
+        public static string InTarget(string logical, string? suffix) => string.IsNullOrEmpty(suffix) ? logical : logical + suffix;
     }
 }

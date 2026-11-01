@@ -46,16 +46,24 @@ namespace Spiegelwerk.Core.Tests
 
         // ------------------------------------------------------------ unsupported types
 
-        [Theory]
-        [InlineData("MirrorPattern", "Spiegel-Feature im Original")]
-        [InlineData("MirrorSolid", "Körper spiegeln im Original")]
-        [InlineData("MirrorStock", "Teil spiegeln im Original")]
-        public void Mirror_features_have_their_own_message(string type, string start)
+        [Fact]
+        public void Derived_mirror_parts_have_their_own_message()
         {
-            string reason = UnsupportedFeatures.Reason(type);
-            Assert.StartsWith(start, reason);
+            string reason = UnsupportedFeatures.Reason("MirrorStock");
+            Assert.StartsWith("Teil spiegeln im Original", reason);
             Assert.Contains("Spiegel-API", reason);
             Assert.Contains("Abhilfe", reason);
+        }
+
+        [Theory]
+        [InlineData("MirrorPattern")]
+        [InlineData("MirrorSolid")]
+        public void Mirror_features_are_rebuilt_and_only_unreadable_data_is_reported(string type)
+        {
+            string reason = UnsupportedFeatures.Reason(type);
+            Assert.StartsWith("Spiegel-Feature: Feature-Daten nicht lesbar.", reason);
+            Assert.Contains("Abhilfe", reason);
+            Assert.DoesNotContain("Spiegel-API", reason);
         }
 
         [Theory]

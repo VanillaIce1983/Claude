@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
 using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Core.Sketch;
 using Spiegelwerk.Sw;
@@ -44,7 +45,11 @@ namespace Spiegelwerk.Build
         public Vec3 TargetModelPoint(string id) => Mirrored.Sketch.ToModel(Mirrored.Sketch.Point(id));
     }
 
-    /// <summary>State shared by all builders during one job.</summary>
+    /// <summary>
+    /// State shared by all builders during one job – or, as a child context
+    /// (<see cref="Nested"/>), during the second half of a mirror feature: the same document,
+    /// another reflection, records named after the first-half copies in the target.
+    /// </summary>
     internal sealed class BuildContext
     {
         public BuildContext(SldWorks sw, ModelDoc2 doc, SwMath math, Reflection mirror, MirrorOptions options, MirrorReport report, bool separateBody)
@@ -56,9 +61,38 @@ namespace Spiegelwerk.Build
             Options = options;
             Report = report;
             SeparateBody = separateBody;
-            Planes = new PlaneResolver(this);
+            Shared = new BuildShared();
+            _ownNames = Shared.JobNames;
+            Shared.Planes = new PlaneResolver(this);
             Topology = new TopologyFinder(this);
         }
+
+        private BuildContext(BuildContext parent, Reflection mirror, bool separateBody, HashSet<string> ownNames, string mirrorName, MirrorReport report)
+        {
+            Sw = parent.Sw;
+            Doc = parent.Doc;
+            Math = parent.Math;
+            Options = parent.Options;
+            Shared = parent.Shared;
+            Mirror = mirror;
+            SeparateBody = separateBody;
+            Report = report;
+            Parent = parent;
+            MirrorName = mirrorName;
+            _ownNames = ownNames;
+            Topology = new TopologyFinder(this);
+        }
+
+        /// <summary>
+        /// The context in which the second half of <paramref name="mirrorName"/> is built: the
+        /// same document and plane resolver, the reflection at P′ = R_Π(P), its own sketch maps,
+        /// registrations, report and known dimensions (thrown away: a second half never carries
+        /// a name equations could rely on). <paramref name="ownNames"/>: the features whose
+        /// bodies count as its own – the job's (features mirrored onto the job's bodies) or a
+        /// fresh set („Körper spiegeln“ makes bodies of its own).
+        /// </summary>
+        public static BuildContext Nested(BuildContext parent, Reflection mirror, bool separateBody, HashSet<string> ownNames, string mirrorName) =>
+            new BuildContext(parent, mirror, separateBody, ownNames, mirrorName, new MirrorReport());
 
         public SldWorks Sw { get; }
 
@@ -72,8 +106,20 @@ namespace Spiegelwerk.Build
 
         public MirrorOptions Options { get; }
         public MirrorReport Report { get; }
-        public PlaneResolver Planes { get; }
+        public BuildShared Shared { get; }
+        public PlaneResolver Planes => Shared.Planes;
         public TopologyFinder Topology { get; }
+
+        /// <summary>The context this one builds the second half of a mirror feature for; null for the job's own.</summary>
+        public BuildContext? Parent { get; }
+
+        public bool IsNested => Parent != null;
+
+        /// <summary>Name of the mirror feature whose second half this context builds.</summary>
+        public string? MirrorName { get; }
+
+        /// <summary>How the steps are checked; a second half is checked as its seeds allow.</summary>
+        public StepCheck Check { get; set; } = StepCheck.Full;
 
         /// <summary>
         /// Same part, body or whole-part mode: the mirrored features form their own body. The
@@ -101,29 +147,100 @@ namespace Spiegelwerk.Build
         public Dictionary<string, Feature> Created { get; } = new Dictionary<string, Feature>(StringComparer.Ordinal);
 
         /// <summary>
+        /// Original name of a mirror feature → the features of its second half, in tree order,
+        /// and whether each changes the solid: its counterpart is not one feature but these.
+        /// </summary>
+        public Dictionary<string, List<(Feature feature, bool solid)>> Groups { get; } =
+            new Dictionary<string, List<(Feature, bool)>>(StringComparer.Ordinal);
+
+        /// <summary>
         /// Dimensions of the original ("D1@Skizze1") that the copy has under their original name,
         /// identified as the same one: the only ones a copied equation may name.
         /// </summary>
         public HashSet<string> KnownDimensions { get; } = new HashSet<string>(StringComparer.Ordinal);
 
-        private readonly HashSet<string> _createdNames = new HashSet<string>(StringComparer.Ordinal);
+        /// <summary>Features whose bodies count as this context's own.</summary>
+        private readonly HashSet<string> _ownNames;
 
-        public string NameFor(string original) => SamePart ? original + Options.NameSuffix : original;
+        /// <summary>
+        /// Original name → the name its feature got in the target. Unregistering goes by this
+        /// name: the feature itself may already be deleted, and its Name is not read again.
+        /// </summary>
+        private readonly Dictionary<string, string> _targetNames = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        /// <summary>The features that make this context's own bodies (the job's, or those of a „Körper spiegeln“).</summary>
+        public HashSet<string> OwnNames => _ownNames;
+
+        /// <summary>Name the report gives a feature in the target: the original's, „X (Spiegeln1)“ for a second half.</summary>
+        public string Logical(string target) => Shared.Built.TryGetValue(target, out BuiltFeature b) ? b.Logical : target;
+
+        /// <summary>
+        /// Name in the report of what a record becomes: the original's own name; in a second half
+        /// the name of its first half with the mirror feature's („Boss-Extrude1 (Spiegeln1)“).
+        /// </summary>
+        public string LogicalFor(string recordName) =>
+            MirrorName == null ? recordName : MirrorFeatureRules.SecondHalfName(Logical(recordName), MirrorName);
+
+        /// <summary>The name a new feature gets: its name in the report, in the same part with the suffix last.</summary>
+        public string NameFor(string original) => FeatureNames.InTarget(LogicalFor(original), SamePart ? Options.NameSuffix : null);
 
         /// <summary>Registers a new feature, gives it its name and invalidates cached topology.</summary>
         public string Register(string originalName, Feature created)
         {
             string name = SwDoc.Rename(Doc, created, NameFor(originalName));
-            _createdNames.Add(name);
+            _ownNames.Add(name);
+            Shared.JobNames.Add(name);
             Created[originalName] = created;
+            _targetNames[originalName] = name;
+            Shared.Built[name] = new BuiltFeature(LogicalFor(originalName));
             Topology.Invalidate();
             return name;
         }
 
-        /// <summary>A registered feature that was removed again: later features must not use it.</summary>
+        /// <summary>The second half of a mirror feature: its counterpart for later features (patterns of it, mirrors of it).</summary>
+        public void RegisterGroup(string originalName, List<(Feature feature, bool solid)> members)
+        {
+            Groups[originalName] = members;
+            foreach (var (feature, _) in members)
+            {
+                _ownNames.Add(feature.Name);
+                Shared.JobNames.Add(feature.Name);
+            }
+            Topology.Invalidate();
+        }
+
+        /// <summary>
+        /// The counterparts of a feature of the original: its rebuilt feature, or the features of a
+        /// mirror feature's second half (with <paramref name="solidOnly"/> only those that change
+        /// the solid). Only this context's own: a second half never falls back on the first half.
+        /// </summary>
+        public List<Feature> Counterparts(string original, bool solidOnly)
+        {
+            if (Groups.TryGetValue(original, out List<(Feature feature, bool solid)> group))
+                return group.Where(m => !solidOnly || m.solid).Select(m => m.feature).ToList();
+            return Created.TryGetValue(original, out Feature f) ? new List<Feature> { f } : new List<Feature>();
+        }
+
+        /// <summary>Whether a feature of the target is a counterpart registered in this context.</summary>
+        public bool IsCounterpart(Feature f)
+        {
+            string name = f.Name;
+            return Created.Values.Any(c => c.Name == name) || Groups.Values.Any(g => g.Any(m => m.feature.Name == name));
+        }
+
+        /// <summary>Whether the counterpart <paramref name="f"/> changes the solid (as its record said).</summary>
+        public bool ChangesSolid(Feature f) => Shared.Built.TryGetValue(f.Name, out BuiltFeature b) && b.ChangesSolid;
+
+        /// <summary>
+        /// A registered feature that was removed again: later features must not use it. Callers
+        /// may delete it first, so the feature itself is not touched here.
+        /// </summary>
         public void Unregister(string originalName)
         {
+            if (_targetNames.TryGetValue(originalName, out string target)) Shared.Built.Remove(target);
+            _targetNames.Remove(originalName);
             Created.Remove(originalName);
+            Groups.Remove(originalName);
             Topology.Invalidate();
         }
 
@@ -135,28 +252,34 @@ namespace Spiegelwerk.Build
         }
 
         /// <summary>
-        /// Features of a failed step about to be deleted again: neither registered (as feature or
-        /// sketch map) nor known to the plane resolver any more.
+        /// Features of a failed step about to be deleted again: neither registered (as feature,
+        /// sketch map or member of a second half) nor known to the plane resolver any more.
         /// </summary>
         public void Forget(ICollection<string> names)
         {
             List<string> keys = Created.Where(kv => names.Contains(kv.Value.Name)).Select(kv => kv.Key)
                 .Concat(Sketches.Where(kv => names.Contains(kv.Value.Feature.Name)).Select(kv => kv.Key))
+                .Concat(Groups.Where(kv => kv.Value.Any(m => names.Contains(m.feature.Name))).Select(kv => kv.Key))
                 .Distinct().ToList();
             foreach (string key in keys) ForgetSketch(key);
+            foreach (string name in names) Shared.Built.Remove(name);
             Planes.Forget(names);
             Topology.Invalidate();
         }
 
         /// <summary>Helper features (planes, anchor sketches) also count as "ours".</summary>
-        public void RegisterHelper(Feature f) => _createdNames.Add(f.Name);
+        public void RegisterHelper(Feature f)
+        {
+            _ownNames.Add(f.Name);
+            Shared.JobNames.Add(f.Name);
+        }
 
         public bool IsOwnBody(Body2 b) =>
-            b.GetFeatures() is object[] fs && fs.OfType<Feature>().Any(f => _createdNames.Contains(f.Name));
+            b.GetFeatures() is object[] fs && fs.OfType<Feature>().Any(f => _ownNames.Contains(f.Name));
 
         public List<Body2> OwnBodies() => SwDoc.SolidBodies(Doc).Where(IsOwnBody).ToList();
 
-        /// <summary>Bodies no feature of this job has touched – in the same part, the original.</summary>
+        /// <summary>Bodies no feature of this context has touched – in the same part, the original (and, for „Körper spiegeln“, the first half).</summary>
         public List<Body2> OriginalBodies() => SwDoc.SolidBodies(Doc).Where(b => !IsOwnBody(b)).ToList();
     }
 }

@@ -41,7 +41,9 @@ namespace Spiegelwerk.Build.Builders
             var missing = new List<string>();
             foreach (string name in r.SeedFeatures)
             {
-                if (ctx.Created.TryGetValue(name, out Feature f)) seeds.Features.Add(f);
+                // A mirror feature as seed: the features of its second half that change the solid.
+                List<Feature> found = ctx.Counterparts(name, solidOnly: true);
+                if (found.Count > 0) seeds.Features.AddRange(found);
                 else missing.Add($"\"{name}\"");
             }
             foreach (var face in r.SeedFaces)
@@ -61,8 +63,8 @@ namespace Spiegelwerk.Build.Builders
             return seeds.Features.Count + seeds.Faces.Count + seeds.Bodies.Count == 0 ? null : seeds;
         }
 
-        /// <summary>The body with the given volume and centroid; bodies of this job first.</summary>
-        private static Body2? FindBody(BuildContext ctx, MassState wanted)
+        /// <summary>The body with the given volume and centroid; bodies of this job (of the context) first, in the same part only those.</summary>
+        internal static Body2? FindBody(BuildContext ctx, MassState wanted)
         {
             Body2? fallback = null;
             foreach (Body2 b in SwDoc.SolidBodies(ctx.Doc))
