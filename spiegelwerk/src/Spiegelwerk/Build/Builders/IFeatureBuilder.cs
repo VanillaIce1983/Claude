@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
 using Spiegelwerk.Core.Matching;
+using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
+using Spiegelwerk.Sw;
 
 namespace Spiegelwerk.Build.Builders
 {
@@ -97,6 +99,9 @@ namespace Spiegelwerk.Build.Builders
 
         /// <summary>A possible reason the builder knows of, added to the report only if the check finds a deviation.</summary>
         public string? MismatchHint { get; set; }
+
+        /// <summary>What a passing check confirms besides volume and shape (a hem's default relief), added to its text; nothing if it does not pass.</summary>
+        public string? PassNote { get; set; }
 
         /// <summary>Removes helpers made for this feature alone – called if the job removes the feature again.</summary>
         public Action? RemoveHelpers { get; set; }
@@ -248,6 +253,73 @@ namespace Spiegelwerk.Build.Builders
         {
             var d = (FlatPatternFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool Hem(ModelDoc2 doc, Feature f, Action<HemFeatureData> change)
+        {
+            var d = (HemFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool MiterFlange(ModelDoc2 doc, Feature f, Action<MiterFlangeFeatureData> change)
+        {
+            var d = (MiterFlangeFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        /// <summary>
+        /// A feature's own bend allowance in an edit of its own (blech-plan §1.4, A2 P7) – never
+        /// together with the geometric values, so a refused allowance costs only itself. Order of
+        /// <see cref="AllowanceRules.WriteOrder"/>: UseDefaultBendAllowance = false first (otherwise
+        /// the values silently revert), the value of its kind, Type last, SetCustomBendAllowance;
+        /// null: back to the default. Typed for hem and miter flange; any other sheet-metal data
+        /// late-bound (the same members, static on every bend data interface since 2019). Only the
+        /// read-back tells whether it took.
+        /// </summary>
+        public static bool Allowance(ModelDoc2 doc, Feature f, BendAllowanceData? own)
+        {
+            object? def = (object)f.GetDefinition();
+            switch (def)
+            {
+                case HemFeatureData h:
+                    return Edit(doc, f, h, () => h.AccessSelections(doc, null),
+                        () => WriteAllowance(own, v => h.UseDefaultBendAllowance = v, () => (object)h.GetCustomBendAllowance(), h.SetCustomBendAllowance),
+                        h.ReleaseSelectionAccess);
+                case MiterFlangeFeatureData m:
+                    return Edit(doc, f, m, () => m.AccessSelections(doc, null),
+                        () => WriteAllowance(own, v => m.UseDefaultBendAllowance = v, () => (object)m.GetCustomBendAllowance(), m.SetCustomBendAllowance),
+                        m.ReleaseSelectionAccess);
+                case null:
+                    return false;
+                default:
+                    // VBA's "Nothing" for the component: a null dispatch pointer.
+                    var nothing = new System.Runtime.InteropServices.DispatchWrapper(null);
+                    return Edit(doc, f, def, () => SwLate.Call(def, "AccessSelections", doc, nothing),
+                        () => WriteAllowance(own, v =>
+                            {
+                                if (!SwLate.Set(def, "UseDefaultBendAllowance", v)) throw new InvalidOperationException("UseDefaultBendAllowance nicht setzbar.");
+                            },
+                            () => SwLate.Invoke(def, "GetCustomBendAllowance"),
+                            c =>
+                            {
+                                if (!SwLate.Call(def, "SetCustomBendAllowance", c)) throw new InvalidOperationException("SetCustomBendAllowance nicht aufrufbar.");
+                            }),
+                        () => SwLate.Call(def, "ReleaseSelectionAccess"));
+            }
+        }
+
+        private static void WriteAllowance(BendAllowanceData? own, Action<bool> useDefault, Func<object?> get, Action<CustomBendAllowance> set)
+        {
+            if (own == null)
+            {
+                useDefault(true);
+                return;
+            }
+            useDefault(false);
+            if (!(get() is CustomBendAllowance cba)) throw new InvalidOperationException("Biegezugabe-Objekt nicht lesbar.");
+            // The value of its kind, Type last.
+            SwSheetMetal.Fill(cba, own);
+            set(cba);
         }
 
         /// <summary>A setter that throws (stale entity, invalid value) must not leave the model rolled back either.</summary>

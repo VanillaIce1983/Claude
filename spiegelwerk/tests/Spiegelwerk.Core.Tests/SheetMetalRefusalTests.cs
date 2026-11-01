@@ -10,7 +10,7 @@ namespace Spiegelwerk.Core.Tests
     /// Refusal (blech-plan §1.5): before capture by type, after capture by position in the body.
     /// S0 was inert; S1a opens base flange, flat pattern and the template folders, decides the user
     /// corner trim as not rebuilt and refuses every other sheet-metal type as before; S1b opens the
-    /// same types in the same part.
+    /// same types in the same part; S2 opens hem and miter flange.
     /// </summary>
     public class SheetMetalRefusalTests
     {
@@ -23,16 +23,16 @@ namespace Spiegelwerk.Core.Tests
             "TemplateSheetMetal", "TemplateFlatPattern",
         };
 
-        /// <summary>What S1a decides.</summary>
-        private static readonly string[] OpenedByS1a = { "SMBaseFlange", "FlatPattern", "CornerTrim", "TemplateSheetMetal", "TemplateFlatPattern" };
+        /// <summary>What S1a and S2 decide.</summary>
+        private static readonly string[] OpenedSoFar = { "SMBaseFlange", "FlatPattern", "CornerTrim", "TemplateSheetMetal", "TemplateFlatPattern", "Hem", "SMMiteredFlange" };
 
         [Fact]
-        public void Every_type_not_decided_by_S1a_is_still_refused()
+        public void Every_type_not_decided_by_S2_is_still_refused()
         {
             foreach (string type in OldSet)
             {
                 Assert.True(UnsupportedFeatures.IsSheetMetal(type), type);
-                bool open = OpenedByS1a.Contains(type);
+                bool open = OpenedSoFar.Contains(type);
                 Assert.Equal(!open, UnsupportedFeatures.RefusesRun(type));
                 // Not decided yet: the fallback switch does not help either.
                 Assert.Equal(!open, UnsupportedFeatures.RefusesBeforeCapture(type, partOfAcceptedOwner: false, fallbackOn: true));
@@ -40,13 +40,13 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
-        public void The_table_has_the_S1a_states_and_lists_the_closed_corner_too()
+        public void The_table_has_the_S2_states_and_lists_the_closed_corner_too()
         {
             foreach (string type in SheetMetalTypes.Names)
             {
                 SheetMetalState expected = type switch
                 {
-                    "SMBaseFlange" or "FlatPattern" or "TemplateSheetMetal" or "TemplateFlatPattern" => SheetMetalState.Rebuilt,
+                    "SMBaseFlange" or "FlatPattern" or "TemplateSheetMetal" or "TemplateFlatPattern" or "Hem" or "SMMiteredFlange" => SheetMetalState.Rebuilt,
                     "CornerTrim" => SheetMetalState.Unsupported,
                     _ => SheetMetalState.NotYet,
                 };
@@ -88,10 +88,16 @@ namespace Spiegelwerk.Core.Tests
             var owners = new Dictionary<string, (string, PartOwnerKind)> { ["Sheet-Metal1"] = ("Base-Flange1", PartOwnerKind.SheetMetal) };
             var collected = new List<(string, string)> { ("Sheet-Metal1", "SheetMetal"), ("Sketch1", "ProfileFeature"), ("Base-Flange1", "SMBaseFlange"), ("Flat-Pattern1", "FlatPattern") };
             Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(collected, owners, fallbackOn: false));
+            // S2: a hem and a miter flange go on as well, with the hem's width sketch as its part.
+            collected.Add(("Sketch3", "ProfileFeature"));
             collected.Add(("Hem1", "Hem"));
-            Assert.Equal("Blech-Feature „Hem1“ (Hem) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.",
+            collected.Add(("Miter-Flange1", "SMMiteredFlange"));
+            owners["Sketch3"] = ("Hem1", PartOwnerKind.Hem);
+            Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(collected, owners, fallbackOn: false));
+            collected.Add(("Jog1", "Jog"));
+            Assert.Equal("Blech-Feature „Jog1“ (Jog) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.",
                 UnsupportedFeatures.RefusalBeforeCapture(collected, owners, fallbackOn: false));
-            // The table is that of S1a: S1b opens the same types, now in the same part too.
+            // S1b opens the same types as S1a, now in the same part too.
             Assert.Equal(SheetMetalState.Rebuilt, SheetMetalTypes.Of("SMBaseFlange")!.State);
             Assert.Equal(SheetMetalState.NotYet, SheetMetalTypes.Of("SheetMetal")!.State);
         }

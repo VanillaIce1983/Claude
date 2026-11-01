@@ -250,6 +250,27 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Hem_width_sketches_belong_to_the_hem()
+        {
+            var top = new List<TreeFeature>
+            {
+                F("Sheet-Metal1", "SheetMetal"),
+                F("Base-Flange1", "SMBaseFlange", new[] { "Sheet-Metal1", "Sketch1" }, F("Sketch1", "ProfileFeature")),
+                F("Hem1", "Hem", new[] { "Base-Flange1" }, F("Sketch2", "ProfileFeature"), F("Sketch3", "ProfileFeature"), F("HemBend1", "OneBend")),
+                F("Miter-Flange1", "SMMiteredFlange", new[] { "Base-Flange1", "Sketch4" }, F("Sketch4", "ProfileFeature"), F("Miterbend1", "OneBend")),
+            };
+            SheetMetalTree tree = SheetMetalTree.Of(top);
+            Assert.Equal(("Hem1", PartOwnerKind.Hem), tree.Owners["Sketch2"]);
+            Assert.Equal(("Hem1", PartOwnerKind.Hem), tree.Owners["Sketch3"]);
+            // The bend is no sketch; the miter flange's profile is an ordinary sketch of its own.
+            Assert.False(tree.Owners.ContainsKey("HemBend1"));
+            Assert.False(tree.Owners.ContainsKey("Sketch4"));
+            // Only sketches are listed with their owner in the creation order; bends never.
+            Assert.True(SheetMetalTree.ListsSubFeature("Hem", "ProfileFeature"));
+            Assert.False(SheetMetalTree.ListsSubFeature("Hem", "OneBend"));
+        }
+
+        [Fact]
         public void A_part_without_sheet_metal_has_an_empty_tree()
         {
             SheetMetalTree tree = SheetMetalTree.Of(new[] { F("Boss-Extrude1", "Extrusion", null, F("Sketch1", "ProfileFeature")) });

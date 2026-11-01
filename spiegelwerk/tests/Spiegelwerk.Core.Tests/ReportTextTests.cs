@@ -68,19 +68,27 @@ namespace Spiegelwerk.Core.Tests
 
         [Theory]
         [InlineData("SheetMetal")]
-        [InlineData("SMBaseFlange")]
         [InlineData("EdgeFlange")]
-        [InlineData("SMMiteredFlange")]
         [InlineData("SketchBend")]
         [InlineData("FlattenBends")]
         [InlineData("ProcessBends")]
         [InlineData("CrossBreak")]
-        [InlineData("FlatPattern")]
-        [InlineData("TemplateSheetMetal")]
         public void Sheet_metal_features_get_one_clear_message(string type)
         {
             Assert.True(UnsupportedFeatures.IsSheetMetal(type));
             Assert.StartsWith("Blech wird nicht unterstützt", UnsupportedFeatures.Reason(type));
+        }
+
+        [Theory]
+        [InlineData("SMBaseFlange")]
+        [InlineData("SMMiteredFlange")]
+        [InlineData("Hem")]
+        [InlineData("FlatPattern")]
+        [InlineData("TemplateSheetMetal")]
+        public void Rebuilt_sheet_metal_types_are_reported_as_unreadable_not_as_unsupported(string type)
+        {
+            // Reached only if the definition does not answer as its reader expects.
+            Assert.Equal("Blech-Feature: Feature-Daten nicht lesbar.", UnsupportedFeatures.Reason(type));
         }
 
         [Fact]

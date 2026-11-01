@@ -92,6 +92,17 @@ namespace Spiegelwerk.Core.Tests
             SameConstants<swWzdGeneralHoleTypes_e>(typeof(HoleTypes), "swWzd");
             SameConstants<swAdvWzdGeneralHoleTypes_e>(typeof(AdvancedHoleTypes), "swAdvWzd");
             SameConstants<swRevolveType_e>(typeof(RevolveTypes), "swRevolveType");
+            SameConstants<swHemTypes_e>(typeof(HemTypes), "swHemType");
+        }
+
+        [Fact]
+        public void Hem_and_miter_flange_numbers()
+        {
+            // HemRecord.Position and MiterFlangeRecord.PositionType carry these numbers through unchanged (blech-plan S2).
+            Assert.Equal(0, (int)swHemPositionTypes_e.swHemPositionTypeInside);
+            Assert.Equal(1, (int)swHemPositionTypes_e.swHemPositionTypeOutside);
+            Assert.Equal((int)swFlangePositionTypes_e.swFlangePositionTypeMaterialInside, new MiterFlangeRecord("M", "SMMiteredFlange", "S").PositionType);
+            Assert.Equal(3, (int)swFlangePositionTypes_e.swFlangePositionTypeBendOutside);
         }
 
         /// <summary>The general type a detailed Hole Wizard type belongs to, read from its name.</summary>

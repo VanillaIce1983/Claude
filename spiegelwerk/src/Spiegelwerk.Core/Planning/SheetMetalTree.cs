@@ -55,7 +55,8 @@ namespace Spiegelwerk.Core.Planning
     ///    it (B9: the run reads the tree folded, the flat pattern suppressed), to the base flange
     ///    its parents lead to, or in a part with one flat pattern and one SheetMetal to that
     ///    SheetMetal's base flange;
-    ///  - features after a flat pattern exist only in the flattened state.
+    ///  - features after a flat pattern exist only in the flattened state;
+    ///  - the width sketches of a hem belong to it (S2): the new hem brings its own, they are written into those.
     /// Template folders are system features: never collected, their flat patterns listed before them.
     /// </summary>
     public sealed class SheetMetalTree
@@ -98,6 +99,11 @@ namespace Spiegelwerk.Core.Planning
                 TreeFeature? flange = all.FirstOrDefault(f => f.Type == "SMBaseFlange" && f.Parents.Contains(sm.Name));
                 if (flange != null) tree._owners[sm.Name] = (flange.Name, PartOwnerKind.SheetMetal);
             }
+
+            // A hem's sketches are its width sketches: they come into being with it.
+            foreach (TreeFeature hem in all.Where(f => f.Type == "Hem"))
+                foreach (TreeFeature sub in hem.SubFeatures.Where(s => IsSketchType(s.Type)))
+                    tree._owners[sub.Name] = (hem.Name, PartOwnerKind.Hem);
 
             foreach (TreeFeature fp in all.Where(f => f.Type == "FlatPattern"))
             {
@@ -183,7 +189,7 @@ namespace Spiegelwerk.Core.Planning
             (ownerType == "TemplateFlatPattern" && subType == "FlatPattern") ||
             ownerType == "FlatPattern";
 
-        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern).</summary>
+        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem).</summary>
         public IReadOnlyDictionary<string, (string owner, PartOwnerKind kind)> Owners => _owners;
 
         /// <summary>Flat pattern → the base flange of its body.</summary>

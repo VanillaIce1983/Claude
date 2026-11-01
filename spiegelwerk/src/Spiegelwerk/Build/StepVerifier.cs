@@ -53,7 +53,9 @@ namespace Spiegelwerk.Build
             Outcome best = Measure(ctx, expected, before, features, samples);
             // Halves that interact: the step is shown, the mirror feature decides.
             if (informOnly) return MirrorFeatureRules.InformationOnly(best.ToString(), ctx.MirrorName ?? "");
-            if (best.Passes) return best.ToString();
+            // What a passing check confirms besides (a hem's relief): said with it, only then.
+            string Text(Outcome o) => o.Passes && result.PassNote != null ? $"{o}; {result.PassNote}" : o.ToString();
+            if (best.Passes) return Text(best);
             bool passOnly = ctx.Check == StepCheck.PassOnly;
 
             // Every alternative kept stays applied. The toggles are self-inverse and commute, so
@@ -99,7 +101,7 @@ namespace Spiegelwerk.Build
                 result.Notes.Add("Das Feature weicht vom gespiegelten Original ab – bitte prüfen.");
                 if (result.MismatchHint != null) result.Notes.Add(result.MismatchHint);
             }
-            return best.ToString();
+            return Text(best);
         }
 
         /// <param name="features">The step's feature, or all features of a mirror feature's second half.</param>

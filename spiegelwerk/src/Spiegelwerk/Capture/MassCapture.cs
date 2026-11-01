@@ -178,8 +178,33 @@ namespace Spiegelwerk.Capture
             }
         }
 
-        /// <summary>Points on the feature's faces for the shape check, spread over at most <see cref="MaxSamples"/> faces.</summary>
-        private static void SampleFaces(Feature f, FeatureRecord r) => SampleFaces(f, r.FaceSamples);
+        /// <summary>
+        /// Points on the feature's faces for the shape check, spread over at most <see cref="MaxSamples"/>
+        /// faces. The faces of a hem belong to its bend (HemBend), those of a flange partly to its bends
+        /// (B24): for such a record (<see cref="FeatureRecord.SampleSubFeatures"/>), or when the feature
+        /// itself has fewer than two faces, the faces of its non-sketch sub-features count too (K16).
+        /// </summary>
+        private static void SampleFaces(Feature f, FeatureRecord r)
+        {
+            List<Face2> faces = FacesOf(f);
+            if (r.SampleSubFeatures || faces.Count < 2)
+                foreach (Feature sub in SwDoc.SubFeatures(f).Where(s => !SwDoc.IsSketch(s)))
+                    faces.AddRange(FacesOf(sub));
+            SampleFaces(faces.ToArray(), r.FaceSamples);
+        }
+
+        private static List<Face2> FacesOf(Feature f)
+        {
+            try
+            {
+                return ((object)f.GetFaces() as object[])?.OfType<Face2>().ToList() ?? new List<Face2>();
+            }
+            catch (Exception)
+            {
+                // A sub-feature without faces (a cosmetic thread) or one the kernel will not list.
+                return new List<Face2>();
+            }
+        }
 
         private static void SampleFaces(Feature f, List<Vec3> into)
         {

@@ -72,17 +72,38 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   gewählten Features darf eine Lasche am Körper des Originals anschließen (A1 §11 nennt nur den eigenen Körper; A2/A3 §8
   erlauben Bezüge auf das Original). Scheitert B14 im Live-Test, kommt die Ablehnung im selben Teil zurück.
   Nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+- Blech S2 (Zweig `feat-blech`): Saum und Gehrungslasche samt Bausteinen für alle Laschen und Biegungen. Core:
+  `SheetMetalFlangeRecords` (`HemRecord` mit `HemWidthSketch`, `MiterFlangeRecord`), `FlangeProfiles` (`Assign`,
+  `IsFullEdgeLine`, `LiesOn`), `MiterRules` (`Variants`, `Marks`, `OffersSwap`, `Differences`, `Parent`), `HemRules` (Werte
+  je Art, `Differences`, `Parent`, Entlastung nur ohne Prüfung als Hinweis), `BendOverrides.UnexpectedInCopy`/`CountNote`,
+  Breitenskizzen gehören dem Saum (`SheetMetalTree`), `Hem` und `SMMiteredFlange` „nachgebaut“; Tests
+  `SheetMetalFlangeTests`, Baum, Ablehnung. Add-In: Leser in `FeatureCapture.SheetMetalFlanges` (Kanten, Werte, Breitenskizzen
+  zweimal gelesen und den Kanten zugeordnet, Biegungen nach Definition), `SwSheetMetal.ReadBends`/`ReadHemScalars`/
+  `ReadMiterScalars`/`ReadBackHem`/`ReadBackMiter`, `HemBuilder`, `MiterFlangeBuilder`, `FlangeSupport` (Kanten nur auf
+  eigenen Körpern, Biegezugabe in eigener Bearbeitung und nach jeder Variante, Biegungen der Kopie), `FeatureEdit.Hem`/
+  `MiterFlange`/`Allowance`, `SketchBuilder.ReplaceInto`, Flächenproben auf Unter-Features (`MassCapture`),
+  `BuildResult.PassNote` im Prüftext. STOLPERSTEINE 201–210, Prüftabelle (B23–B27).
+  Abweichend vom Plan: Die Regeln des Saums stehen in einer eigenen Datei `HemRules` (der Plan nennt nur `FlangeProfiles` und
+  `MiterRules`), das Gemeinsame der beiden Builder in `FlangeSupport`. `FeatureEdit.Allowance` ist für Saum und
+  Gehrungslasche typisiert und nur für andere Blech-Daten spät gebunden (der Plan: allgemein spät gebunden). „Entlastung:
+  Standard (geprüft)“ kommt über ein neues `BuildResult.PassNote` in den Prüftext. `UnsupportedFeatures.Reason` nennt einen
+  nachgebauten Blech-Typ, dessen Definition nicht antwortet, „Feature-Daten nicht lesbar“ statt „wird nicht unterstützt“ (auch
+  Basislasche und Abwicklung). Der Saum entsteht mit den Entlastungswerten des verifizierten Drittanbieter-Aufrufs
+  (`true, 0, 0, false, 0.5, 0, 0`; mit Standard-Entlastung ohne Wirkung). Die Biegereihenfolge wird nur bei je einer Biegung
+  verglichen (K25), eigene Werte der Biegungen der Kopie über das, was abweicht, nicht über Namen. `Assign` hat noch keinen
+  Beleg über den Skizzenrahmen (kommt mit den Profilen der Kantenlasche in S3). Bei einer einzelnen Kante versucht die
+  Gehrungslasche vor der Markierung 0 auch „Kette zuerst“. Nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 und S1a stehen und sind geprüft, S1b (selbes Teil) steht (Zweig `feat-blech`), als Nächstes seine Prüfung und S2 (Saum, Gehrungslasche, Biegungen); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0, S1a und S1b stehen und sind geprüft, S2 (Saum, Gehrungslasche, Biegungen) steht (Zweig `feat-blech`), als Nächstes seine Prüfung und S3 (Kantenlasche) bzw. S4 (skizzierte Biegung, Kröpfung); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S1b prüfen und gegenprüfen, dann S2 (Saum, Gehrungslasche, Biegungen) usw. nach `blech-plan.md`; jeder
-   Schritt mit Core-Tests, Prüfung und Gegenprüfung.
+1. Blech S2 prüfen und gegenprüfen, dann S3 (Kantenlasche) und S4 (skizzierte Biegung, Kröpfung) usw. nach
+   `blech-plan.md`; jeder Schritt mit Core-Tests, Prüfung und Gegenprüfung.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.
 3. Doku, Version, Regressionsprüfung, Release (Tag nur nach Rückfrage).

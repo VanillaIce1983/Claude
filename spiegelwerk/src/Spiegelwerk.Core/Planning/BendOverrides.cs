@@ -42,6 +42,27 @@ namespace Spiegelwerk.Core.Planning
         }
 
         /// <summary>
+        /// The copy's bends with values of their own that the original's do not have – compared by
+        /// what differs, not by name (the copy's bends have names of their own, and a reflection may
+        /// reverse their order). What the original has is already a note of its own; this names
+        /// only what the copy brought in, e.g. a relief the creation call set.
+        /// </summary>
+        public static List<string> UnexpectedInCopy(IEnumerable<BendOverride> original, IEnumerable<BendOverride> copy)
+        {
+            var left = new List<string>();
+            foreach (BendOverride o in original) left.Add(o.What);
+            var result = new List<string>();
+            foreach (BendOverride c in copy)
+                if (!left.Remove(c.What))
+                    result.Add($"Biegung „{c.Bend}“ der Kopie hat {c.What}; im Original hat keine Biegung das.");
+            return result;
+        }
+
+        /// <summary>The note for a copy with another number of bends than the original (counted by definition); null if equal.</summary>
+        public static string? CountNote(int original, int copy) =>
+            original == copy ? null : $"Die Kopie hat {copy} Biegung{(copy == 1 ? "" : "en")}, das Original {original}.";
+
+        /// <summary>
         /// Bends whose place in the bend sequence differs from their counterpart's in the copy
         /// (pairs from the bend matching, both read back). Information only, never a warning: the
         /// sequence orders a drawing's bend table and does not change the part, SOLIDWORKS numbers

@@ -74,6 +74,8 @@ namespace Spiegelwerk.Core.Planning
             // Reached only if the definition does not answer as the pattern's data interface.
             "CurvePattern" or "SketchPattern" or "TablePattern" or "FillPattern" or "DimPattern" or "VarPattern" => "Muster: Feature-Daten nicht lesbar.",
             _ when SheetMetalTypes.Of(type)?.Reason is string own => own,
+            // Reached only if the definition does not answer as the data interface its reader expects.
+            _ when SheetMetalTypes.Of(type)?.State == SheetMetalState.Rebuilt => "Blech-Feature: Feature-Daten nicht lesbar.",
             _ when IsSheetMetal(type) => "Blech wird nicht unterstützt: Blech-Features werden nicht nachgebaut.",
             _ => $"Feature-Typ {type} wird nicht unterstützt.",
         };

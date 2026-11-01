@@ -127,6 +127,59 @@ namespace Spiegelwerk.Build
             return map;
         }
 
+        /// <summary>
+        /// Clears a sketch SOLIDWORKS made together with a feature – the width sketch of a hem (S2),
+        /// later the profile of an edge flange – and writes the mirrored sketch into it. Unlike
+        /// <see cref="BuildInto"/> no point stands for an instance: a stand-in may be a point of its
+        /// own (A2 P15). In the sketch the model shows the state before the feature, so the edges and
+        /// vertices its relations name are looked up there. A failure leaves the sketch to its feature.
+        /// </summary>
+        public SketchMap ReplaceInto(SketchModel src, Feature existing, List<string> notes)
+        {
+            SwSelect.Clear(_doc);
+            SwSelect.Select(_doc, existing, 0, false);
+            _doc.EditSketch();
+            Sketch sketch = _sm.ActiveSketch ?? throw new InvalidOperationException($"Skizze \"{existing.Name}\" konnte nicht bearbeitet werden.");
+
+            SketchMap map;
+            try
+            {
+                if (sketch.Is3D()) throw new NotSupportedException($"Skizze \"{existing.Name}\" ist eine 3D-Skizze.");
+                Clear(sketch);
+                _ctx.Topology.Invalidate();
+                map = Write(src, sketch, notes);
+                CheckConstrainedStatus(map, notes);
+            }
+            finally
+            {
+                SwSelect.Clear(_doc);
+                if (_sm.ActiveSketch != null) _sm.InsertSketch(true);
+                _ctx.Topology.Invalidate();
+            }
+            _ctx.Sketches[src.Name] = map;
+            return map;
+        }
+
+        /// <summary>Deletes everything drawn in the open sketch: segments (their relations go with them), then the points left.</summary>
+        private void Clear(Sketch sketch)
+        {
+            var segments = ((object)sketch.GetSketchSegments() as object[])?.OfType<SketchSegment>().ToList() ?? new List<SketchSegment>();
+            if (segments.Count > 0)
+            {
+                SwSelect.Clear(_doc);
+                for (int i = 0; i < segments.Count; i++) SwSelect.Select(_doc, segments[i], 0, i > 0);
+                _doc.EditDelete();
+            }
+            foreach (SketchPoint p in ((object)sketch.GetUserPoints2() as object[])?.OfType<SketchPoint>().ToList() ?? new List<SketchPoint>())
+            {
+                SwSelect.Clear(_doc);
+                if (SwSelect.Select(_doc, p, 0, false)) _doc.EditDelete();
+            }
+            SwSelect.Clear(_doc);
+            if (((object)sketch.GetSketchSegments() as object[])?.Length > 0)
+                throw new InvalidOperationException("Die vorhandene Skizze ließ sich nicht leeren.");
+        }
+
         /// <summary>Mirrors the model into the open sketch: frame, geometry, relations, dimensions.</summary>
         private SketchMap Write(SketchModel src, Sketch sketch, List<string> notes)
         {

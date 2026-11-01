@@ -517,6 +517,168 @@ namespace Spiegelwerk.Sw
             GaugeTableFile = got.GaugeTableFile,
         };
 
+        // ---- flanges on edges: bends and scalar readers (A2 P5, P11)
+
+        /// <summary>
+        /// The bend sub-features of a feature: those whose definition is IOneBendFeatureData –
+        /// counted by definition, not by type name (HemBend, Miterbend and OneBend are not all
+        /// confirmed, B23) –, each read under its own AccessSelections, never written. A bend whose
+        /// values do not read comes back with null values; it still counts.
+        /// </summary>
+        public static List<(Feature sub, BendValues? values)> ReadBends(ModelDoc2 doc, Feature f)
+        {
+            var result = new List<(Feature, BendValues?)>();
+            foreach (Feature sub in SwDoc.SubFeatures(f))
+            {
+                OneBendFeatureData? d;
+                try
+                {
+                    d = (object)sub.GetDefinition() as OneBendFeatureData;
+                }
+                catch (Exception)
+                {
+                    d = null;
+                }
+                if (d == null) continue;
+                BendValues? values;
+                try
+                {
+                    values = ReadBend(doc, sub.Name, d);
+                }
+                catch (Exception)
+                {
+                    values = null;
+                }
+                result.Add((sub, values));
+            }
+            return result;
+        }
+
+        private static BendValues ReadBend(ModelDoc2 doc, string name, OneBendFeatureData d)
+        {
+            var v = new BendValues { Name = name };
+            bool access = d.AccessSelections(doc, null);
+            try
+            {
+                v.UseDefaultRadius = d.UseDefaultBendRadius;
+                v.Radius = d.BendRadius;
+                v.UseDefaultAllowance = d.UseDefaultBendAllowance;
+                if (!v.UseDefaultAllowance && (object)d.GetCustomBendAllowance() is CustomBendAllowance cba) v.Allowance = ReadAllowance(cba);
+                v.UseDefaultRelief = d.UseDefaultBendRelief;
+                if (!v.UseDefaultRelief)
+                    v.Relief = new ReliefData
+                    {
+                        UseAutoRelief = d.UseAutoRelief,
+                        Kind = (ReliefKind)d.AutoReliefType,
+                        UseRatio = d.UseReliefRatio,
+                        Ratio = d.ReliefRatio,
+                        Width = d.ReliefWidth,
+                        Depth = d.ReliefDepth,
+                    };
+                v.BendOrder = d.BendOrder;
+            }
+            finally
+            {
+                if (access) d.ReleaseSelectionAccess();
+            }
+            return v;
+        }
+
+        /// <summary>
+        /// A feature's own allowance: null if it uses the default. <paramref name="unreadable"/>: it
+        /// has one of its own that does not read (then null too – the copy gets the default, with a note).
+        /// </summary>
+        private static BendAllowanceData? OwnAllowanceOf(bool useDefault, Func<object?> get, out bool unreadable)
+        {
+            unreadable = false;
+            if (useDefault) return null;
+            if (get() is CustomBendAllowance cba) return ReadAllowance(cba);
+            unreadable = true;
+            return null;
+        }
+
+        /// <summary>
+        /// The scalars of a hem into a record – the same code at capture (the original) and for the
+        /// read-back (the copy, into a fresh record). Under the caller's AccessSelections; no sketch,
+        /// no rollback. Returns whether an own allowance did not read.
+        /// </summary>
+        public static bool ReadHemScalars(HemFeatureData d, HemRecord r)
+        {
+            r.HemType = d.Type;
+            r.Position = d.BendPosition;
+            r.Reverse = d.ReverseDirection;
+            r.Length = d.Length;
+            r.Gap = d.GapDistance;
+            r.Angle = d.Angle;
+            r.Radius = d.Radius;
+            r.MiterGap = d.MiterGap;
+            r.OwnAllowance = OwnAllowanceOf(d.UseDefaultBendAllowance, () => (object)d.GetCustomBendAllowance(), out bool unreadable);
+            return unreadable;
+        }
+
+        /// <summary>The scalars of a miter flange into a record (as <see cref="ReadHemScalars"/>); returns whether an own allowance did not read.</summary>
+        public static bool ReadMiterScalars(MiterFlangeFeatureData d, MiterFlangeRecord r)
+        {
+            r.UseDefaultRadius = d.UseDefaultBendRadius;
+            r.BendRadius = d.BendRadius;
+            r.PositionType = d.PositionType;
+            r.TrimSideBends = d.UsePositionTrimSideBends;
+            r.GapDistance = d.GapDistance;
+            r.StartOffset = d.StartOffset;
+            r.EndOffset = d.EndOffset;
+            r.OwnRelief = d.UseDefaultBendRelief
+                ? null
+                : new ReliefData
+                {
+                    UseAutoRelief = true,
+                    Kind = (ReliefKind)d.ReliefType,
+                    UseRatio = d.UseReliefRatio,
+                    Ratio = d.ReliefRatio,
+                    Width = d.ReliefWidth,
+                    Depth = d.ReliefDepth,
+                };
+            r.OwnAllowance = OwnAllowanceOf(d.UseDefaultBendAllowance, () => (object)d.GetCustomBendAllowance(), out bool unreadable);
+            return unreadable;
+        }
+
+        /// <summary>The hem as it is now, read back under its own AccessSelections (no capture, no rollback); null if its data do not open.</summary>
+        public static HemRecord? ReadBackHem(ModelDoc2 doc, Feature f, out int edges)
+        {
+            edges = -1;
+            var d = (object)f.GetDefinition() as HemFeatureData;
+            if (d == null || !d.AccessSelections(doc, null)) return null;
+            try
+            {
+                var r = new HemRecord(f.Name, "Hem");
+                ReadHemScalars(d, r);
+                edges = d.GetEdgesCount();
+                return r;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+        }
+
+        /// <summary>The miter flange as it is now (as <see cref="ReadBackHem"/>); null if its data do not open.</summary>
+        public static MiterFlangeRecord? ReadBackMiter(ModelDoc2 doc, Feature f, out int edges)
+        {
+            edges = -1;
+            var d = (object)f.GetDefinition() as MiterFlangeFeatureData;
+            if (d == null || !d.AccessSelections(doc, null)) return null;
+            try
+            {
+                var r = new MiterFlangeRecord(f.Name, "SMMiteredFlange", "");
+                ReadMiterScalars(d, r);
+                edges = d.IGetEdgesCount();
+                return r;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+        }
+
         private static string OverrideName(int i) => i switch
         {
             0 => "Biegeparameter",
