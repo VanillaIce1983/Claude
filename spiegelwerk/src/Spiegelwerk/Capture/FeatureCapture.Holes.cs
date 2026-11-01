@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
 using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
 
@@ -19,12 +20,16 @@ namespace Spiegelwerk.Capture
 
         /// <summary>
         /// The owner a feature is part of, if it does not come into being on its own: the
-        /// sketches of a Hole Wizard hole (position and profile) or an Advanced Hole. Those are
-        /// not rebuilt on their own: the new hole brings its own, and the position sketch is
-        /// written into that. Only sketches are parts so far.
+        /// sketches of a Hole Wizard hole (position and profile) or an Advanced Hole – the new
+        /// hole brings its own, and the position sketch is written into that –, and in sheet metal
+        /// the SheetMetal of a base flange and the sketches and own corner features of a flat
+        /// pattern (<see cref="SheetMetalTree.Owners"/>).
         /// </summary>
         private PartOfFeatureRecord? OwnedPart(Feature f, string type)
         {
+            // Sheet metal: the SheetMetal of a base flange, the sketches and own corners of a flat pattern.
+            if (_sheetMetal.Owners.TryGetValue(f.Name, out var sheetMetal))
+                return new PartOfFeatureRecord(f.Name, type, sheetMetal.owner, sheetMetal.kind);
             if (type != "ProfileFeature" && type != "3DProfileFeature") return null;
             // Tree walk only – no selection access, so runs without holes cost nothing extra.
             if (_ownedParts == null)

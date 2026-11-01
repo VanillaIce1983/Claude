@@ -1,12 +1,15 @@
+using System.Collections.Generic;
 using System.Linq;
 using Spiegelwerk.Core.Planning;
+using Spiegelwerk.Core.Records;
 using Xunit;
 
 namespace Spiegelwerk.Core.Tests
 {
     /// <summary>
-    /// Refusal before capture (blech-plan §1.5). S0 is inert: every sheet-metal type is still
-    /// refused, exactly as before the type table existed; the slices open their types one by one.
+    /// Refusal (blech-plan §1.5): before capture by type, after capture by position in the body.
+    /// S0 was inert; S1a opens base flange, flat pattern and the template folders, decides the user
+    /// corner trim as not rebuilt and refuses every other sheet-metal type as before.
     /// </summary>
     public class SheetMetalRefusalTests
     {
@@ -19,24 +22,156 @@ namespace Spiegelwerk.Core.Tests
             "TemplateSheetMetal", "TemplateFlatPattern",
         };
 
+        /// <summary>What S1a decides.</summary>
+        private static readonly string[] OpenedByS1a = { "SMBaseFlange", "FlatPattern", "CornerTrim", "TemplateSheetMetal", "TemplateFlatPattern" };
+
         [Fact]
-        public void Every_type_of_the_old_set_is_still_refused()
+        public void Every_type_not_decided_by_S1a_is_still_refused()
         {
             foreach (string type in OldSet)
             {
                 Assert.True(UnsupportedFeatures.IsSheetMetal(type), type);
-                Assert.True(UnsupportedFeatures.RefusesRun(type), type);
+                bool open = OpenedByS1a.Contains(type);
+                Assert.Equal(!open, UnsupportedFeatures.RefusesRun(type));
                 // Not decided yet: the fallback switch does not help either.
-                Assert.True(UnsupportedFeatures.RefusesBeforeCapture(type, partOfAcceptedOwner: false, fallbackOn: true), type);
+                Assert.Equal(!open, UnsupportedFeatures.RefusesBeforeCapture(type, partOfAcceptedOwner: false, fallbackOn: true));
             }
         }
 
         [Fact]
-        public void The_table_is_inert_and_lists_the_closed_corner_too()
+        public void The_table_has_the_S1a_states_and_lists_the_closed_corner_too()
         {
-            Assert.All(SheetMetalTypes.Names, type => Assert.Equal(SheetMetalState.NotYet, SheetMetalTypes.Of(type)!.State));
+            foreach (string type in SheetMetalTypes.Names)
+            {
+                SheetMetalState expected = type switch
+                {
+                    "SMBaseFlange" or "FlatPattern" or "TemplateSheetMetal" or "TemplateFlatPattern" => SheetMetalState.Rebuilt,
+                    "CornerTrim" => SheetMetalState.Unsupported,
+                    _ => SheetMetalState.NotYet,
+                };
+                Assert.Equal(expected, SheetMetalTypes.Of(type)!.State);
+            }
             Assert.Equal(OldSet.OrderBy(t => t).Concat(new[] { "CornerFeat" }).OrderBy(t => t), SheetMetalTypes.Names.OrderBy(t => t));
             Assert.Equal(SheetMetalRole.Leaf, SheetMetalTypes.Of("CornerFeat")!.Role);
+        }
+
+        [Fact]
+        public void Unowned_SheetMetal_is_a_carrier()
+        {
+            Assert.Equal(SheetMetalRole.Carrier, SheetMetalTypes.Of("SheetMetal")!.Role);
+            // Without an accepted owner (convert, lofted bend, swept flange …) it is refused, with the fallback off and – not yet decided – on.
+            Assert.True(UnsupportedFeatures.RefusesBeforeCapture("SheetMetal", partOfAcceptedOwner: false, fallbackOn: false));
+            var owners = new Dictionary<string, (string, PartOwnerKind)>();
+            string? text = UnsupportedFeatures.RefusalBeforeCapture(new[] { ("Sheet-Metal1", "SheetMetal") }, owners, samePart: false, fallbackOn: false);
+            Assert.Equal("Blech-Feature „Sheet-Metal1“ (SheetMetal) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.", text);
+        }
+
+        [Fact]
+        public void A_SheetMetal_of_a_collected_base_flange_is_accepted()
+        {
+            var owners = new Dictionary<string, (string, PartOwnerKind)> { ["Sheet-Metal1"] = ("Base-Flange1", PartOwnerKind.SheetMetal) };
+            var collected = new List<(string, string)> { ("Sheet-Metal1", "SheetMetal"), ("Sketch1", "ProfileFeature"), ("Base-Flange1", "SMBaseFlange"), ("Flat-Pattern1", "FlatPattern") };
+            Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(collected, owners, samePart: false, fallbackOn: false));
+            // Its base flange not collected: the SheetMetal stands alone and is refused.
+            Assert.NotNull(UnsupportedFeatures.RefusalBeforeCapture(collected.Where(c => c.Item1 != "Base-Flange1").ToList(), owners, false, false));
+            // An edge flange later in the part still refuses the run.
+            collected.Add(("Edge-Flange1", "EdgeFlange"));
+            Assert.Equal("Blech-Feature „Edge-Flange1“ (EdgeFlange) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.",
+                UnsupportedFeatures.RefusalBeforeCapture(collected, owners, false, false));
+        }
+
+        [Fact]
+        public void Same_part_with_sheet_metal_is_refused_until_S1b()
+        {
+            var owners = new Dictionary<string, (string, PartOwnerKind)> { ["Sheet-Metal1"] = ("Base-Flange1", PartOwnerKind.SheetMetal) };
+            var collected = new List<(string, string)> { ("Sheet-Metal1", "SheetMetal"), ("Base-Flange1", "SMBaseFlange") };
+            Assert.Equal("Blech im selben Teil wird noch nicht unterstützt („Sheet-Metal1“). Bitte in ein neues Teil spiegeln. Es wurde nichts gespiegelt.",
+                UnsupportedFeatures.RefusalBeforeCapture(collected, owners, samePart: true, fallbackOn: false));
+            // Without sheet metal the same part goes on.
+            Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(new[] { ("Boss-Extrude1", "Extrusion") }, owners, true, false));
+        }
+
+        [Fact]
+        public void Unsupported_first_feature_of_a_sheet_metal_body_refuses_without_a_plan()
+        {
+            var tree = SheetMetalTree.Of(new[]
+            {
+                new TreeFeature("Sheet-Metal1", "SheetMetal"),
+                new TreeFeature("Swept-Flange1", "SweptFlange", new[] { "Sheet-Metal1" }),
+                new TreeFeature("Cut-Extrude1", "Cut"),
+            });
+            var types = new Dictionary<string, string> { ["Sheet-Metal1"] = "SheetMetal", ["Swept-Flange1"] = "SweptFlange", ["Cut-Extrude1"] = "Cut" };
+            var body = new BodyHistory("Körper1", new[] { "Sheet-Metal1", "Swept-Flange1", "Cut-Extrude1" }, false, isSheetMetal: true);
+            var records = new List<FeatureRecord>
+            {
+                new UnsupportedRecord("Swept-Flange1", "SweptFlange", "Feature-Typ SweptFlange wird nicht unterstützt.", true),
+                new ExtrudeRecord("Cut-Extrude1", "Cut", "Sketch2") { IsCut = true },
+            };
+            Assert.Equal("„Swept-Flange1“ trägt den Blechkörper „Körper1“ und wird nicht nachgebaut (Feature-Typ SweptFlange wird nicht unterstützt). Es wurde nichts gespiegelt.",
+                SheetMetalPlanner.Refusal(new[] { body }, records, types, tree));
+            // Only the cut selected: the run does not rebuild the body – ordinary rules.
+            Assert.Null(SheetMetalPlanner.Refusal(new[] { body }, records.Skip(1).ToList(), types, tree));
+            // Not a sheet-metal body: not this rule's business.
+            Assert.Null(SheetMetalPlanner.Refusal(new[] { new BodyHistory("Körper1", body.Features, false) }, records, types, tree));
+        }
+
+        [Fact]
+        public void Body_without_a_rebuilt_base_flange_is_refused()
+        {
+            var tree = SheetMetalTree.Of(new[]
+            {
+                new TreeFeature("Sheet-Metal1", "SheetMetal"),
+                new TreeFeature("Boss-Extrude1", "Extrusion"),
+            });
+            var types = new Dictionary<string, string> { ["Sheet-Metal1"] = "SheetMetal", ["Boss-Extrude1"] = "Extrusion" };
+            var body = new BodyHistory("Körper1", new[] { "Sheet-Metal1", "Boss-Extrude1" }, false, isSheetMetal: true);
+            var records = new List<FeatureRecord> { new ExtrudeRecord("Boss-Extrude1", "Extrusion", "Sketch1") };
+            Assert.Equal("„Sheet-Metal1“ trägt den Blechkörper „Körper1“ und wird nicht nachgebaut (der Blechkörper hat keine eigene Basislasche). Es wurde nichts gespiegelt.",
+                SheetMetalPlanner.Refusal(new[] { body }, records, types, tree));
+        }
+
+        [Fact]
+        public void Base_flange_body_with_a_flat_pattern_is_not_refused()
+        {
+            var tree = SheetMetalTree.Of(new[]
+            {
+                new TreeFeature("Sheet-Metal1", "SheetMetal"),
+                new TreeFeature("Base-Flange1", "SMBaseFlange", new[] { "Sheet-Metal1" }),
+                new TreeFeature("Flat-Pattern1", "FlatPattern", new[] { "Base-Flange1" }),
+            });
+            var types = new Dictionary<string, string> { ["Sheet-Metal1"] = "SheetMetal", ["Base-Flange1"] = "SMBaseFlange", ["Flat-Pattern1"] = "FlatPattern" };
+            var body = new BodyHistory("Körper1", new[] { "Sheet-Metal1", "Base-Flange1", "Flat-Pattern1" }, false, isSheetMetal: true);
+            var records = new List<FeatureRecord>
+            {
+                new PartOfFeatureRecord("Sheet-Metal1", "SheetMetal", "Base-Flange1", PartOwnerKind.SheetMetal),
+                new BaseFlangeRecord("Base-Flange1", "SMBaseFlange", "Sketch1"),
+                new FlatPatternRecord("Flat-Pattern1", "FlatPattern", "Base-Flange1"),
+            };
+            Assert.Null(SheetMetalPlanner.Refusal(new[] { body }, records, types, tree));
+            // A base flange that could not be read is the first feature of its body.
+            records[1] = new UnsupportedRecord("Base-Flange1", "SMBaseFlange", "Blech-Feature nicht lesbar (x).", true);
+            Assert.StartsWith("„Base-Flange1“ trägt den Blechkörper „Körper1“", SheetMetalPlanner.Refusal(new[] { body }, records, types, tree));
+        }
+
+        [Fact]
+        public void Leaf_of_unknown_type_does_not_refuse()
+        {
+            var tree = SheetMetalTree.Of(new[]
+            {
+                new TreeFeature("Sheet-Metal1", "SheetMetal"),
+                new TreeFeature("Base-Flange1", "SMBaseFlange", new[] { "Sheet-Metal1" }),
+                new TreeFeature("Vent1", "Vent"),
+            });
+            var types = new Dictionary<string, string> { ["Sheet-Metal1"] = "SheetMetal", ["Base-Flange1"] = "SMBaseFlange", ["Vent1"] = "Vent" };
+            var body = new BodyHistory("Körper1", new[] { "Sheet-Metal1", "Base-Flange1", "Vent1" }, false, isSheetMetal: true);
+            var records = new List<FeatureRecord>
+            {
+                new PartOfFeatureRecord("Sheet-Metal1", "SheetMetal", "Base-Flange1", PartOwnerKind.SheetMetal),
+                new BaseFlangeRecord("Base-Flange1", "SMBaseFlange", "Sketch1"),
+                new UnsupportedRecord("Vent1", "Vent", "Feature-Typ Vent wird nicht unterstützt.", true),
+            };
+            Assert.Null(SheetMetalPlanner.Refusal(new[] { body }, records, types, tree));
+            Assert.False(UnsupportedFeatures.RefusesRun("Vent"));
         }
 
         [Fact]
@@ -113,8 +248,8 @@ namespace Spiegelwerk.Core.Tests
         [Fact]
         public void Unsupported_records_trigger_the_fallback_as_their_type_says()
         {
-            // S0: every listed type triggers; a type the table does not know triggers too (K17).
-            Assert.All(SheetMetalTypes.Names, type => Assert.True(SheetMetalTypes.TriggersFallback(type), type));
+            // Every listed type triggers but the user corner trim (non-solid, A3 P3); a type the table does not know triggers too (K17).
+            Assert.All(SheetMetalTypes.Names, type => Assert.Equal(type != "CornerTrim", SheetMetalTypes.TriggersFallback(type)));
             Assert.True(SheetMetalTypes.TriggersFallback("WeldedCornerUnknown"));
             Assert.False(new SheetMetalType(SheetMetalRole.Leaf, SheetMetalState.Unsupported, triggersFallback: false).TriggersFallback);
         }

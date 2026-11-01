@@ -259,6 +259,12 @@ namespace Spiegelwerk.Core.Records
         public bool NormalCut { get; set; }
         public bool OptimizeGeometry { get; set; }
 
+        /// <summary>
+        /// Sheet metal: the depth follows the sheet thickness („an Dicke binden“). Same value in the
+        /// copy; set in an edit of its own, so a refusal costs only the link, not the feature.
+        /// </summary>
+        public bool LinkToThickness { get; set; }
+
         /// <summary>Thin feature from an open profile: round the corners automatically.</summary>
         public bool AutoFillet { get; set; }
 

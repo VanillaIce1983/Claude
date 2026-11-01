@@ -27,9 +27,42 @@ namespace Spiegelwerk.Core.Planning
         public static bool RefusesRun(string type) => RefusesBeforeCapture(type, partOfAcceptedOwner: false, fallbackOn: false);
 
         /// <summary>Why the run was refused (<see cref="RefusesBeforeCapture"/>).</summary>
-        public static string RunRefusal(string feature, string type) => IsSheetMetal(type)
-            ? $"Blechteile werden nicht unterstützt (\"{feature}\"). Es wurde nichts gespiegelt."
-            : $"\"{feature}\": {Reason(type)} Es wurde nichts gespiegelt.";
+        public static string RunRefusal(string feature, string type)
+        {
+            if (!IsSheetMetal(type)) return $"\"{feature}\": {Reason(type)} Es wurde nichts gespiegelt.";
+            if (SheetMetalTypes.Of(type)!.State == SheetMetalState.NotYet)
+                return $"Blech-Feature „{feature}“ ({type}) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.";
+            return $"Blech-Feature „{feature}“ ({type}): {Reason(type)} Es wurde nichts gespiegelt.";
+        }
+
+        /// <summary>Sheet metal in the same part (until blech-plan S1b).</summary>
+        public static string SamePartRefusal(string feature) =>
+            $"Blech im selben Teil wird noch nicht unterstützt („{feature}“). Bitte in ein neues Teil spiegeln. Es wurde nichts gespiegelt.";
+
+        /// <summary>
+        /// Step 1 for the collected features in creation order: the first refused one
+        /// (<see cref="RefusesBeforeCapture"/>), then – until S1b – sheet metal in the same part.
+        /// A part (a SheetMetal, a flat pattern's sketch or own corner) counts as part of an
+        /// accepted owner if its owner is collected and not refused itself. Null: the run goes on.
+        /// </summary>
+        /// <param name="owners">Part → owner (<see cref="SheetMetalTree.Owners"/>).</param>
+        public static string? RefusalBeforeCapture(IReadOnlyList<(string name, string type)> collected,
+            IReadOnlyDictionary<string, (string owner, Records.PartOwnerKind kind)> owners, bool samePart, bool fallbackOn)
+        {
+            var types = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var (name, type) in collected) types[name] = type;
+            bool Accepted(string name) =>
+                owners.TryGetValue(name, out var o) && types.TryGetValue(o.owner, out string ownerType) &&
+                !RefusesBeforeCapture(ownerType, partOfAcceptedOwner: false, fallbackOn);
+            foreach (var (name, type) in collected)
+                if (RefusesBeforeCapture(type, Accepted(name), fallbackOn))
+                    return RunRefusal(name, type);
+            if (samePart)
+                foreach (var (name, type) in collected)
+                    if (IsSheetMetal(type))
+                        return SamePartRefusal(name);
+            return null;
+        }
 
         /// <summary>A mirror feature with a sheet-metal seed: its second half would have to be read back under the sheet-metal session.</summary>
         public const string MirrorOverSheetMetal = "Spiegel-Feature über Blech-Features wird noch nicht nachgebaut.";
@@ -55,7 +88,8 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>
         /// Does a feature of this type change solid bodies? For records that are not rebuilt:
         /// one that does is a failure („Folgende Features … können ebenfalls scheitern“), one
-        /// that does not is only skipped. A cross break is cosmetic – lines on the flat pattern.
+        /// that does not is only skipped. A cross break is cosmetic – lines on the flat pattern; a
+        /// flat pattern and a corner trim under it act on the flattened state only.
         /// </summary>
         public static bool ChangesSolid(string type) => !NonSolidTypes.Contains(type);
 
@@ -63,6 +97,8 @@ namespace Spiegelwerk.Core.Planning
         {
             "RefAxis", "RefPoint", "CoordSys", "3DProfileFeature", "ProfileFeature", "RefPlane", "Helix", "CompositeCurve",
             "ReferenceCurve", "CurveInFile", "SplitLine", "CosmeticThread", "Attribute", "CrossBreak",
+            // Sheet metal that leaves the folded solid as it is: the flat pattern and what lives under it, the template folders.
+            "FlatPattern", "CornerTrim", "TemplateSheetMetal", "TemplateFlatPattern",
         };
     }
 }

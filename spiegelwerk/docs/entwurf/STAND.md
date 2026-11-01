@@ -32,17 +32,32 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   stehen als 164–172 in einem eigenen Abschnitt. Die geschlossene Ecke (`CornerFeat`) steht schon in der Tabelle, die
   Eckentlastung nicht (Name unbestätigt, §1.5). `RefusesRun` bleibt als Kurzform von `RefusesBeforeCapture` (ohne
   angenommenen Besitzer, Ersatzweg aus) für die unveränderten `ReportTextTests`.
+- Blech S1a (Zweig `feat-blech`): Basislasche und Lasche, Blech-Feature als Begleiter, Abwicklung, Schnitte mit „an Dicke
+  binden“ – in ein neues Teil und in Baugruppen. Core: `SheetMetalRules` (Seiten, Endbedingungen, Werte beim Anlegen,
+  Wege), `SheetMetalTree` (Besitz, Ordner, Auswahl, Ecke trimmen, Features hinter der Abwicklung), `SheetMetalPlanner`
+  (zweite Stufe der Ablehnung ohne Pläne), `UnsupportedFeatures.RefusalBeforeCapture` (Besitzer, selbes Teil),
+  Zustände in `SheetMetalTypes`; Tests `SheetMetalTests` (Seiten am Zufall, L-Blech-Prüfung), `SheetMetalTreeTests`,
+  Ablehnung. Add-In: `SwSheetMetal`, `SheetMetalSession`, `SheetMetalGuard`, Leser in `FeatureCapture.SheetMetal`,
+  `BaseFlangeBuilder`, `FlatPatternBuilder`, Ordnerinhalt in Erstellungsreihenfolge, Snapshot und Aufräumen,
+  Begleiter, Wächter und Messung des abgewickelten Zustands. STOLPERSTEINE 173–186, Prüftabelle.
+  Abweichend vom Plan: Der Wächter erwartet auch im neuen Teil den Stand vor dem Schritt (nicht `Defaults ?? Body`,
+  STOLPERSTEINE 173); `BodyHistory` (schon in `BodyScope.cs`) bekam `IsSheetMetal`, statt in `SheetMetalPlanner` neu zu
+  entstehen; die Meldung der zweiten Stufe hat noch keinen Satz zur Ersatzweg-Option (die gibt es erst mit S7a); die
+  Ordner stehen als „nachgebaut“ in der Tabelle (nie gesammelt); nur das Blech-Feature ist Begleiter, die Abwicklung hat
+  ihren eigenen Datensatz und Builder; Flächenproben auf Biegungen (`SampleSubFeatures`) erst mit S2. Normal Cut bleibt
+  bei S6. Nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 steht (Zweig `feat-blech`), als Nächstes S1a; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusesBeforeCapture` den Lauf ab (`SheetMetalTypes`) |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 und S1a stehen (Zweig `feat-blech`), als Nächstes Prüfung von S1a, dann S1b (selbes Teil); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S0 prüfen und gegenprüfen, dann S1a (Basislasche, Abwicklung, neues Teil) usw. nach `blech-plan.md`;
-   jeder Schritt mit Core-Tests, Prüfung und Gegenprüfung.
+1. Blech S1a prüfen und gegenprüfen, dann S1b (selbes Teil: Wächter im Schnappschussmodus, Lasche mit Bereich, beide
+   Zustände wiederherstellen, „Original löschen“ abgelehnt) usw. nach `blech-plan.md`; jeder Schritt mit Core-Tests,
+   Prüfung und Gegenprüfung.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.
 3. Doku, Version, Regressionsprüfung, Release (Tag nur nach Rückfrage).

@@ -32,13 +32,18 @@ namespace Spiegelwerk.Capture
 
         /// <param name="regionSpaces">What the run learns about the coordinate space of sketch regions; shared with the build.</param>
         /// <param name="ofOwnCopy">The features are the job's own copies in the target, not the original.</param>
-        public FeatureCapture(ModelDoc2 doc, SwMath math, RegionSpaceMemory regionSpaces, bool ofOwnCopy = false)
+        /// <param name="sheetMetal">Who comes into being with whom in a sheet-metal part; none for other parts.</param>
+        /// <param name="wasFlattened">Whether a flat pattern was flattened before the run folded it; none: folded.</param>
+        public FeatureCapture(ModelDoc2 doc, SwMath math, RegionSpaceMemory regionSpaces, bool ofOwnCopy = false, SheetMetalTree? sheetMetal = null,
+            Func<string, bool>? wasFlattened = null)
         {
             _doc = doc;
             _math = math;
             _ofOwnCopy = ofOwnCopy;
             _sketches = new SketchCapture(math);
             _regionSpaces = regionSpaces;
+            _sheetMetal = sheetMetal ?? SheetMetalTree.Empty;
+            _wasFlattened = wasFlattened;
         }
 
         /// <summary>
@@ -78,6 +83,11 @@ namespace Spiegelwerk.Capture
                 records.Add(Capture(f));
                 if (cancelled != null && cancelled()) return null;
             }
+            // A flat pattern comes into being only with its base flange; without it, it and its parts are left out.
+            var baseFlanges = new HashSet<string>(records.OfType<BaseFlangeRecord>().Select(r => r.Name), StringComparer.Ordinal);
+            for (int i = 0; i < records.Count; i++)
+                if (records[i] is FlatPatternRecord fp && !baseFlanges.Contains(fp.Owner))
+                    records[i] = new UnsupportedRecord(fp.Name, fp.TypeName, SheetMetalTree.FlatPatternWithoutOwner(fp.Owner), false) { TriggersFallback = false };
             var owners = new HashSet<string>(records.Where(r => r.BringsParts).Select(r => r.Name), StringComparer.Ordinal);
             for (int i = 0; i < records.Count; i++)
                 if (records[i] is PartOfFeatureRecord part && !owners.Contains(part.Owner))
@@ -210,6 +220,8 @@ namespace Spiegelwerk.Capture
                     r.NormalCut = d.NormalCut;
                     r.OptimizeGeometry = d.OptimizeGeometry;
                 }
+                // Only ever true in sheet metal: the depth follows the sheet thickness.
+                r.LinkToThickness = d.LinkToThickness;
                 if (r.IsThin)
                 {
                     r.ThinType = d.ThinWallType;

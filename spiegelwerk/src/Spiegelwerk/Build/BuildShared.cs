@@ -40,5 +40,11 @@ namespace Spiegelwerk.Build
 
         /// <summary>The user stopped the run with Esc within a step (the second half of a mirror feature).</summary>
         public bool Cancelled { get; set; }
+
+        /// <summary>Keeps the target's shared sheet-metal values as they were (steps with TouchesSheetMetalDefaults); null without sheet metal.</summary>
+        public SheetMetalGuard? Guard { get; set; }
+
+        /// <summary>The folded state of the original for the run; null without sheet metal.</summary>
+        public SheetMetalSession? Session { get; set; }
     }
 }

@@ -88,9 +88,13 @@ namespace Spiegelwerk.Core.Tests
         {
             // The first of them carries the body: nothing after it could be built.
             Assert.True(UnsupportedFeatures.RefusesRun("SheetMetal"));
-            Assert.True(UnsupportedFeatures.RefusesRun("SMBaseFlange"));
+            Assert.True(UnsupportedFeatures.RefusesRun("EdgeFlange"));
             Assert.True(UnsupportedFeatures.RefusesRun("MirrorStock"));
-            Assert.Equal("Blechteile werden nicht unterstützt (\"Blech1\"). Es wurde nichts gespiegelt.", UnsupportedFeatures.RunRefusal("Blech1", "SheetMetal"));
+            // Decided by blech-plan S1a: the base flange is rebuilt.
+            Assert.False(UnsupportedFeatures.RefusesRun("SMBaseFlange"));
+            Assert.Equal("Blech-Feature „Blech1“ (SheetMetal) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.", UnsupportedFeatures.RunRefusal("Blech1", "SheetMetal"));
+            Assert.Equal("Blech-Feature „Ecke1“ (CornerTrim): Ecke trimmen (abgewickelt): Freistellungsart und -größe sind über die API nicht lesbar – bitte im Ziel von Hand anlegen. Es wurde nichts gespiegelt.",
+                UnsupportedFeatures.RunRefusal("Ecke1", "CornerTrim"));
             Assert.StartsWith("\"Teil spiegeln1\": Teil spiegeln im Original", UnsupportedFeatures.RunRefusal("Teil spiegeln1", "MirrorStock"));
             Assert.EndsWith("Es wurde nichts gespiegelt.", UnsupportedFeatures.RunRefusal("Teil spiegeln1", "MirrorStock"));
             // Other unsupported features fail on their own; the rest of the part is still rebuilt.

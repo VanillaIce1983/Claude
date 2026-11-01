@@ -1,0 +1,554 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using SolidWorks.Interop.sldworks;
+using SolidWorks.Interop.swconst;
+using Spiegelwerk.Core.Planning;
+using Spiegelwerk.Core.Records;
+using Spiegelwerk.Sw;
+using static Spiegelwerk.Build.Builders.BuilderSupport;
+
+namespace Spiegelwerk.Build.Builders
+{
+    /// <summary>
+    /// Base flange and tab (A1 §8, blech-plan S1a). SOLIDWORKS makes the body's SheetMetal and
+    /// flat pattern with it – and, in a new part, the part's defaults.
+    ///
+    /// Sides: the plate side of a closed profile and the depth of an open one follow σ like an
+    /// extrusion; the material side of an open contour follows the in-plane rule
+    /// (<see cref="SheetMetalRules.BaseFlangeFlags"/>). Values: the first body makes the defaults
+    /// from the original's, every later one is created with what the target has and gets its own
+    /// values through the overrides of its SheetMetal – so creating it does not rewrite the
+    /// defaults the earlier bodies use (the guard checks that).
+    ///
+    /// Creation: the data object, v1, v2 (<see cref="SheetMetalRules.CreationPathOrder"/>), each
+    /// attempt checked – exactly one new base flange, the body count as expected (a tab joins its
+    /// body) – and removed again before the next. References, symmetric thickness and the gauge
+    /// table follow in one edit, everything is read back.
+    /// </summary>
+    internal sealed class BaseFlangeBuilder : IFeatureBuilder
+    {
+        private const double PlaceholderDepth = 0.01;
+
+        public bool Handles(FeatureRecord record) => record is BaseFlangeRecord;
+
+        public BuildResult Build(FeatureRecord record, BuildContext ctx)
+        {
+            var r = (BaseFlangeRecord)record;
+            if (!ctx.Sketches.TryGetValue(r.SketchName, out SketchMap sketch))
+                return BuildResult.Failed($"Skizze \"{r.SketchName}\" wurde nicht neu aufgebaut.");
+            ModelDoc2 doc = ctx.Doc;
+            var notes = new List<string>();
+
+            // Same part: a tab only on the job's own bodies, the first mirrored body never merges.
+            string? refused = PlanSeparateBody(ctx, false, r.MergesIntoExisting, out bool scope, out bool _);
+            if (refused != null) return Fail(refused, notes);
+
+            var (revDir, revThk) = SheetMetalRules.BaseFlangeFlags(r.ClosedProfile, r.ReverseDirection, r.ReverseThickness, sketch.Sigma, r.SymmetricThickness);
+
+            // ---- end references of an open profile, resolved before creation (blind equivalent as for extrusions)
+            var sides = new List<SideTarget>();
+            if (!r.ClosedProfile)
+            {
+                sides.Add(ResolveSide(ctx, sketch, r.Side1, 1, notes));
+                if (r.OffsetDirections == 2) sides.Add(ResolveSide(ctx, sketch, r.Side2, 2, notes));
+                if (sides.Any(s => ExtrudeSide.NeedsReference(s.End) && s.Reference == null))
+                    return Fail("Bezug der Endbedingung im Ziel nicht gefunden.", notes);
+            }
+
+            // ---- creation values: the first body makes the defaults, later ones take what the target has
+            SheetMetalSnapshot before = SwSheetMetal.Snapshot(doc);
+            Feature? targetTemplate = SwSheetMetal.Template(doc);
+            bool first = targetTemplate == null && SwSheetMetal.OfType(doc, "SheetMetal").Count == 0;
+            SheetMetalParameters? template = first || targetTemplate == null ? null : TryRead(doc, targetTemplate, false);
+            SheetMetalParameters? targetBody = r.MergesIntoExisting ? TabTarget(ctx, r) : null;
+            FlangeCreation values = SheetMetalRules.CreationValues(first, r.MergesIntoExisting, r.Defaults, r.Body, template, targetBody,
+                r.OwnBendAllowance, r.OwnRelief, r.Thickness, r.BendRadius);
+            if (r.UsesMaterialParameters) notes.Add(SheetMetalRules.MaterialNote);
+            bool gauge = first && r.Gauge != null && File.Exists(r.Gauge.TablePath);
+            if (r.Gauge != null && first && !gauge)
+                notes.Add($"Blechstärkentabelle „{r.Gauge.TablePath}“ nicht gefunden; die Werte werden fest übernommen.");
+            else if (r.Gauge != null && !first && !(template?.UseGaugeTable ?? false))
+                notes.Add($"Blechstärkentabelle „{r.Gauge.TablePath}“: Ein Teil hat nur die des ersten Blechkörpers; die Werte werden fest übernommen.");
+
+            // ---- create: each path checked and cleaned up before the next
+            int expectedDelta = SheetMetalRules.ExpectedBodyDelta(r.MergesIntoExisting);
+            var tried = new List<string>();
+            // Why attempts failed: said only if none succeeds.
+            var failures = new List<string>();
+            Feature? f = null;
+            List<Feature> made = new List<Feature>();
+            BaseFlangePath used = BaseFlangePath.DataObject;
+            bool allowanceAtCreation = false;
+            foreach (BaseFlangePath path in SheetMetalRules.CreationPathOrder(r.MergesIntoExisting && ctx.SeparateBody))
+            {
+                foreach (Attempt attempt in Attempts(path, r, sides))
+                {
+                    tried.Add(attempt.Name);
+                    bool withAllowance = false;
+                    try
+                    {
+                        withAllowance = Create(ctx, sketch, r, attempt, values, revDir, revThk, scope);
+                    }
+                    catch (Exception ex)
+                    {
+                        // A call that throws is one more attempt that did not work.
+                        failures.Add($"Weg {attempt.Name}: {ex.Message}");
+                    }
+                    finally
+                    {
+                        SwSelect.Clear(doc);
+                        ctx.Topology.Invalidate();
+                    }
+                    List<Feature> now = SwSheetMetal.NewSince(doc, before.Names);
+                    List<Feature> flanges = now.Where(x => x.GetTypeName2() == "SMBaseFlange").ToList();
+                    if (flanges.Count == 1 && SwDoc.SolidBodies(doc).Count - before.Bodies == expectedDelta)
+                    {
+                        f = flanges[0];
+                        made = now;
+                        used = path;
+                        allowanceAtCreation = withAllowance;
+                        break;
+                    }
+                    List<string> left = SwSheetMetal.RemoveNew(doc, before.Names);
+                    ctx.Topology.Invalidate();
+                    if (left.Count > 0)
+                    {
+                        notes.AddRange(failures);
+                        notes.Add($"Nach dem Weg {attempt.Name} nicht wieder entfernt: {string.Join(", ", left.Select(n => $"„{n}“"))} – bitte prüfen.");
+                        return Fail($"SOLIDWORKS hat die Basislasche nicht erzeugt (Wege: {string.Join(", ", tried)}).", notes);
+                    }
+                }
+                if (f != null) break;
+            }
+            if (f == null)
+            {
+                notes.AddRange(failures);
+                return Fail($"SOLIDWORKS hat die Basislasche nicht erzeugt (Wege: {string.Join(", ", tried)}).", notes);
+            }
+
+            Feature? sheetMetal = made.FirstOrDefault(x => x.GetTypeName2() == "SheetMetal");
+            Feature? flatPattern = made.FirstOrDefault(x => x.GetTypeName2() == "FlatPattern");
+            if (sheetMetal == null && r.SheetMetalName.Length > 0)
+                notes.Add($"Das Blech-Feature der Kopie wurde nicht gefunden; „{r.SheetMetalName}“ hat in der Kopie kein Gegenstück (Gleichungen darauf werden nicht übernommen).");
+            if ((r.OwnBendAllowance != null || r.OwnRelief != null) && !allowanceAtCreation)
+                notes.Add($"Eigene Biegezugabe oder Entlastung der Basislasche über den Weg {SheetMetalRules.PathName(used)} nicht übertragbar; die Kopie verwendet die Standardwerte.");
+
+            // ---- one edit: directions, end conditions with references, symmetric thickness, gauge table of the first body
+            bool needsEdit = sides.Any(s => s.Reference != null || s.Temporary) || r.SymmetricThickness || gauge;
+            if (needsEdit && !FeatureEdit.BaseFlange(doc, f, d => ApplyDefinition(d, r, sides, revDir, revThk, gauge)))
+            {
+                RemoveMade(ctx, before.Names, notes);
+                return Fail("Endbedingungen, Bezüge, Richtungen oder Blechstärkentabelle ließen sich nicht setzen; die Basislasche wurde wieder entfernt.", notes);
+            }
+
+            // ---- parameters: the first body makes the defaults, a body's own values go on its SheetMetal
+            SheetMetalParameters? defaults = r.Defaults ?? r.Body;
+            if (first && defaults != null && !gauge)
+            {
+                // Without the gauge table (not found): fixed values, the table is not expected back.
+                SheetMetalParameters want = WithoutGauge(defaults);
+                if (SwSheetMetal.Template(doc) is Feature t) notes.AddRange(SwSheetMetal.Apply(doc, t, want, false, Array.Empty<int>()));
+                else if (sheetMetal != null) notes.AddRange(SwSheetMetal.Apply(doc, sheetMetal, want, false, Array.Empty<int>()));
+            }
+            IReadOnlyList<int> overrides = SheetMetalRules.BodyOverrides(r.Body);
+            if (sheetMetal != null && !r.MergesIntoExisting && overrides.Count > 0)
+                notes.AddRange(SwSheetMetal.Apply(doc, sheetMetal, r.Body!, true, overrides));
+            // Newer versions: the flange's own thickness and radius over the defaults, only once the override took.
+            if (!first && r.OverrideDefaults == true) notes.AddRange(OverrideOnFlange(doc, f, r));
+
+            notes.AddRange(ReadBack(doc, f, r, revDir, revThk, sides));
+
+            // ---- registration: the flange, its SheetMetal (equations on the thickness), the body for the flat pattern
+            ctx.Register(r.Name, f);
+            if (sheetMetal != null && r.SheetMetalName.Length > 0) ctx.Register(r.SheetMetalName, sheetMetal);
+            ctx.SheetMetalBodies[r.Name] = new SheetMetalBody(sheetMetal, flatPattern, sketch.Sigma);
+
+            BuildResult result = Ok(f, Describe(r, revDir != r.ReverseDirection, revThk != r.ReverseThickness), notes);
+            result.Info.Add($"Angelegt über {SheetMetalRules.PathName(used)}.");
+            if (sheetMetal != null && r.SheetMetalName.Length > 0)
+                result.Companions.Add(new Companion(sheetMetal, r.SheetMetalName, r.CompanionDimensions));
+            result.RemoveHelpers = () => RemoveCompanions(ctx, flatPattern, sheetMetal);
+            AddAlternatives(result, ctx, f, r, sides);
+            return result;
+        }
+
+        // ---- end conditions
+
+        /// <summary>One direction of an open profile in the target: its end condition and depth, its reference, whether it is created with a placeholder first.</summary>
+        private sealed class SideTarget
+        {
+            public SideTarget(int which, FlangeSide source, EndCondition end, double distance, object? reference)
+            {
+                Which = which;
+                Source = source;
+                End = end;
+                Distance = distance;
+                Reference = reference;
+            }
+
+            public int Which { get; }
+            public FlangeSide Source { get; }
+            public EndCondition End { get; }
+            public double Distance { get; }
+            public object? Reference { get; }
+
+            /// <summary>Created blind with a placeholder depth; the edit sets the real condition.</summary>
+            public bool Temporary => ExtrudeSide.NeedsReference(End);
+
+            /// <summary>The condition used while creating.</summary>
+            public EndCondition CreateEnd => Temporary ? EndCondition.Blind : End;
+
+            public double CreateDistance => Temporary || Distance <= 0 ? PlaceholderDepth : Distance;
+        }
+
+        /// <summary>
+        /// The mirrored reference of an up-to or offset end; not found but a plane parallel to the
+        /// sketch: the equivalent blind depth, as for extrusions (<see cref="ExtrudeSide.BlindEquivalent"/>).
+        /// </summary>
+        private static SideTarget ResolveSide(BuildContext ctx, SketchMap sketch, FlangeSide side, int which, List<string> notes)
+        {
+            if (!ExtrudeSide.NeedsReference(side.End) || side.Reference == null)
+                return new SideTarget(which, side, side.End, side.Distance, null);
+            object? target;
+            try
+            {
+                target = Safe(ctx.Topology.Resolve(side.Reference.Mirror(ctx.Mirror), notes));
+            }
+            catch (InvalidOperationException ex)
+            {
+                notes.Add(ex.Message);
+                ctx.Topology.Invalidate();
+                target = null;
+            }
+            if (target != null) return new SideTarget(which, side, side.End, side.Distance, target);
+            var equivalent = new ExtrudeSide { End = side.End, Depth = side.Distance, OffsetReverse = side.ReverseOffset, Reference = side.Reference };
+            double? blind = equivalent.BlindEquivalent(sketch.Source.Frame.Plane);
+            if (!blind.HasValue) return new SideTarget(which, side, side.End, side.Distance, null);
+            notes.Add($"Endbedingung {side.End} (Richtung {which}) ohne Bezug im Ziel, ersetzt durch Blind {blind.Value * 1000:0.###} mm.");
+            return new SideTarget(which, side, EndCondition.Blind, blind.Value, null);
+        }
+
+        /// <summary>Writes one direction: the newer members late-bound where the running version has them, else the 2019 ones.</summary>
+        private static void ApplySide(BaseFlangeFeatureData d, SideTarget s)
+        {
+            int type = SheetMetalRules.ToFlangeOffset(s.End) ?? 1;
+            bool one = s.Which == 1;
+            if (!SwLate.Set(d, $"D{s.Which}EndConditionType", type))
+            {
+                if (one) d.D1OffsetType = type;
+                else d.D2OffsetType = type;
+            }
+            if (s.End == EndCondition.Blind || s.End == EndCondition.MidPlane || s.End == EndCondition.OffsetFromSurface)
+            {
+                if (!SwLate.Set(d, $"D{s.Which}EndConditionDistance", s.Distance))
+                {
+                    if (one) d.D1OffsetDistance = s.Distance;
+                    else d.D2OffsetDistance = s.Distance;
+                }
+            }
+            if (one) d.D1ReverseOffset = s.Source.ReverseOffset;
+            else d.D2ReverseOffset = s.Source.ReverseOffset;
+            if (s.Reference != null && !SwLate.Set(d, $"D{s.Which}EndConditionReference", s.Reference))
+            {
+                if (one) d.D1OffsetReference = s.Reference;
+                else d.D2OffsetReference = s.Reference;
+            }
+        }
+
+        /// <summary>The definition after creation: directions, sides, symmetric thickness, the gauge table in the order of the API example.</summary>
+        private static void ApplyDefinition(BaseFlangeFeatureData d, BaseFlangeRecord r, List<SideTarget> sides, bool revDir, bool revThk, bool gauge)
+        {
+            // Only what differs: ReverseThickness takes a write only with own sheet-metal values (help), and a refused write would cost the flange.
+            if (d.ReverseDirection != revDir) d.ReverseDirection = revDir;
+            if (d.ReverseThickness != revThk) d.ReverseThickness = revThk;
+            if (!r.ClosedProfile && d.OffsetDirections != r.OffsetDirections) d.OffsetDirections = r.OffsetDirections;
+            foreach (SideTarget s in sides) ApplySide(d, s);
+            if (r.SymmetricThickness) SwLate.Set(d, "SymmetricThickness", true);
+            if (gauge)
+            {
+                GaugeData g = r.Gauge!;
+                d.UseGaugeTable = true;
+                d.GaugeTablePath = g.TablePath;
+                d.ThicknessTableName = g.ThicknessName;
+                d.TableRadius = g.TableRadius;
+                d.OverrideThickness = g.OverrideThickness;
+                d.OverrideRadius = g.OverrideRadius;
+                d.OverrideKFactor = g.OverrideKFactor;
+                if (g.OverrideThickness) d.Thickness = r.Thickness;
+                if (g.OverrideRadius) d.BendRadius = r.BendRadius;
+                if (g.OverrideKFactor) d.KFactor = g.KFactor;
+            }
+        }
+
+        // ---- creation paths
+
+        /// <summary>One call of a path: v1 with each way of passing directions and end conditions.</summary>
+        private sealed class Attempt
+        {
+            public Attempt(BaseFlangePath path, string name, int dirToUse = 1, bool flangeOffsetCodes = false)
+            {
+                Path = path;
+                Name = name;
+                DirToUse = dirToUse;
+                FlangeOffsetCodes = flangeOffsetCodes;
+            }
+
+            public BaseFlangePath Path { get; }
+            public string Name { get; }
+
+            /// <summary>Most likely the number of directions (every working call passes 1); the help calls it an end condition.</summary>
+            public int DirToUse { get; }
+
+            /// <summary>End conditions as swFlangeOffsetTypes_e instead of swEndConditions_e.</summary>
+            public bool FlangeOffsetCodes { get; }
+        }
+
+        /// <summary>
+        /// The attempts of a path. v1 and v2: DirToUse as the number of directions, then 1; end
+        /// conditions as swEndConditions_e (as third parties call it), then as swFlangeOffsetTypes_e.
+        /// A closed profile has neither: one attempt.
+        /// </summary>
+        private static IEnumerable<Attempt> Attempts(BaseFlangePath path, BaseFlangeRecord r, List<SideTarget> sides)
+        {
+            string name = SheetMetalRules.PathName(path);
+            if (path == BaseFlangePath.DataObject || r.ClosedProfile)
+            {
+                yield return new Attempt(path, name);
+                yield break;
+            }
+            var dirs = new List<int> { r.OffsetDirections };
+            if (!dirs.Contains(1)) dirs.Add(1);
+            foreach (bool offsetCodes in new[] { false, true })
+                foreach (int dir in dirs)
+                    yield return new Attempt(path, $"{name} ({dir} Richtung{(dir == 1 ? "" : "en")}, {(offsetCodes ? "Laschenversatz" : "Endbedingung")})", dir, offsetCodes);
+        }
+
+        /// <summary>Creates by one attempt; true if the call took the allowance and relief at creation.</summary>
+        private static bool Create(BuildContext ctx, SketchMap sketch, BaseFlangeRecord r, Attempt attempt, FlangeCreation v, bool revDir, bool revThk, bool scope)
+        {
+            ModelDoc2 doc = ctx.Doc;
+            FeatureManager fm = doc.FeatureManager;
+            if (!Select(ctx, sketch, scope && attempt.Path == BaseFlangePath.V2)) return false;
+            SideTarget? s1 = r.ClosedProfile ? null : Side(r, 1);
+            SideTarget? s2 = r.ClosedProfile || r.OffsetDirections != 2 ? null : Side(r, 2);
+            int Code(SideTarget? s) => s == null ? 0
+                : attempt.FlangeOffsetCodes ? SheetMetalRules.ToFlangeOffset(s.CreateEnd) ?? 1 : (int)s.CreateEnd;
+            double d1 = s1?.CreateDistance ?? PlaceholderDepth, d2 = s2?.CreateDistance ?? 0;
+
+            switch (attempt.Path)
+            {
+                case BaseFlangePath.V1:
+                    fm.InsertSheetMetalBaseFlange(v.Thickness, revThk, v.BendRadius, d1, d2, revDir, Code(s1), Code(s2), attempt.DirToUse,
+                        SwSheetMetal.NewAllowance(fm, v.Allowance), v.UseDefaultRelief, (int)v.Relief.Kind, v.Relief.Width, v.Relief.Depth,
+                        v.Relief.Ratio, v.Relief.UseRatio);
+                    return true;
+                case BaseFlangePath.V2:
+                    fm.InsertSheetMetalBaseFlange2(v.Thickness, revThk, v.BendRadius, d1, d2, revDir, Code(s1), Code(s2), attempt.DirToUse,
+                        SwSheetMetal.NewAllowance(fm, v.Allowance), v.UseDefaultRelief, (int)v.Relief.Kind, v.Relief.Width, v.Relief.Depth,
+                        v.Relief.Ratio, v.Relief.UseRatio, r.MergesIntoExisting, scope, !scope);
+                    return true;
+                default:
+                {
+                    var d = (BaseFlangeFeatureData)(object)fm.CreateDefinition((int)swFeatureNameID_e.swFmBaseFlange);
+                    if (d == null) return false;
+                    d.Thickness = v.Thickness;
+                    d.BendRadius = v.BendRadius;
+                    d.ReverseDirection = revDir;
+                    d.ReverseThickness = revThk;
+                    if (!r.ClosedProfile)
+                    {
+                        d.OffsetDirections = r.OffsetDirections;
+                        foreach (SideTarget? s in new[] { s1, s2 })
+                            if (s != null) ApplySide(d, new SideTarget(s.Which, s.Source, s.CreateEnd, s.CreateDistance, null));
+                    }
+                    // Without Initialize first (the 2015 example; third parties found it works so on 2026): no allowance at creation.
+                    if (fm.CreateFeature(d) != null) return false;
+                    // Newer versions want the data object initialised (the 2022 example); only then, so 2019 is not asked for a member it lacks.
+                    if (!Select(ctx, sketch, false)) return false;
+                    object? cba = SwSheetMetal.NewAllowance(fm, v.Allowance);
+                    if (!SwLate.Call(d, "Initialize", false, cba != null, cba!, !v.UseDefaultRelief, (int)v.Relief.Kind, v.Relief.UseRatio,
+                            v.Relief.Ratio, v.Relief.Width, v.Relief.Depth))
+                        return false;
+                    fm.CreateFeature(d);
+                    return true;
+                }
+            }
+        }
+
+        /// <summary>The side as created by this attempt (references come in the edit).</summary>
+        private static SideTarget Side(BaseFlangeRecord r, int which)
+        {
+            FlangeSide src = which == 1 ? r.Side1 : r.Side2;
+            return new SideTarget(which, src, src.End, src.Distance, null);
+        }
+
+        /// <summary>The profile sketch on mark 0 (API examples), with a scope the job's own bodies on mark 8 (help of v2).</summary>
+        private static bool Select(BuildContext ctx, SketchMap sketch, bool scope)
+        {
+            SwSelect.Clear(ctx.Doc);
+            if (!SwSelect.Select(ctx.Doc, sketch.Feature, 0, false)) return false;
+            if (!scope) return true;
+            foreach (Body2 b in ctx.OwnBodies())
+                if (!SwSelect.Select(ctx.Doc, b, 8, true))
+                    return false;
+            return true;
+        }
+
+        // ---- values
+
+        private static SheetMetalParameters? TryRead(ModelDoc2 doc, Feature f, bool bodyLevel)
+        {
+            try
+            {
+                return SwSheetMetal.ReadParameters(doc, f, bodyLevel);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private static SheetMetalParameters WithoutGauge(SheetMetalParameters p) => new SheetMetalParameters
+        {
+            Thickness = p.Thickness,
+            BendRadius = p.BendRadius,
+            BendAllowance = p.BendAllowance,
+            Relief = p.Relief,
+            UseMaterialParameters = p.UseMaterialParameters == null ? (bool?)null : false,
+        };
+
+        /// <summary>The SheetMetal of the body a tab joins: the copy of the shared one, else the only one in the target.</summary>
+        private static SheetMetalParameters? TabTarget(BuildContext ctx, BaseFlangeRecord r)
+        {
+            Feature? sm = r.TabOfSheetMetal != null && ctx.Created.TryGetValue(r.TabOfSheetMetal, out Feature copy) ? copy : null;
+            if (sm == null)
+            {
+                List<Feature> all = SwSheetMetal.OfType(ctx.Doc, "SheetMetal");
+                if (all.Count == 1) sm = all[0];
+            }
+            return sm == null ? null : TryRead(ctx.Doc, sm, true);
+        }
+
+        /// <summary>Newer versions: OverrideDefaultSheetMetalParameters on the flange, then its thickness and radius – only if the switch took.</summary>
+        private static List<string> OverrideOnFlange(ModelDoc2 doc, Feature f, BaseFlangeRecord r)
+        {
+            var notes = new List<string>();
+            bool took = false;
+            bool ok = FeatureEdit.BaseFlange(doc, f, d =>
+            {
+                if (!SwLate.Set(d, "OverrideDefaultSheetMetalParameters", true) || !(SwLate.Get(d, "OverrideDefaultSheetMetalParameters") is bool on && on)) return;
+                took = true;
+                d.Thickness = r.Thickness;
+                d.BendRadius = r.BendRadius;
+            });
+            if (!took || !ok) notes.Add("Eigene Blechdicke und eigener Biegeradius der Basislasche ließen sich nicht über die Standardwerte setzen.");
+            return notes;
+        }
+
+        /// <summary>
+        /// Reads the flange back under its own selection access (no capture, no rollback) and
+        /// names what differs from the copy's intended values.
+        /// </summary>
+        private static List<string> ReadBack(ModelDoc2 doc, Feature f, BaseFlangeRecord r, bool revDir, bool revThk, List<SideTarget> sides)
+        {
+            var d = (BaseFlangeFeatureData)(object)f.GetDefinition();
+            if (d == null || !d.AccessSelections(doc, null)) return new List<string> { "Basislasche ließ sich nicht zurücklesen." };
+            var values = new List<(string, double, double, ScalarKind)>();
+            try
+            {
+                values.Add(("Blechdicke", r.Thickness, d.Thickness, ScalarKind.Length));
+                values.Add(("Biegeradius", r.BendRadius, d.BendRadius, ScalarKind.Length));
+                values.Add(("Richtung umkehren", revDir ? 1 : 0, d.ReverseDirection ? 1 : 0, ScalarKind.Flag));
+                if (!r.ClosedProfile)
+                {
+                    values.Add(("Materialseite umkehren", revThk ? 1 : 0, d.ReverseThickness ? 1 : 0, ScalarKind.Flag));
+                    values.Add(("Richtungen", r.OffsetDirections, d.OffsetDirections, ScalarKind.Choice));
+                    foreach (SideTarget s in sides)
+                    {
+                        int type = SwLate.Get(d, $"D{s.Which}EndConditionType") is int t ? t : s.Which == 1 ? d.D1OffsetType : d.D2OffsetType;
+                        values.Add(($"Endbedingung Richtung {s.Which}", SheetMetalRules.ToFlangeOffset(s.End) ?? 0, type, ScalarKind.Choice));
+                        if (s.End == EndCondition.Blind || s.End == EndCondition.MidPlane)
+                        {
+                            double dist = SwLate.Get(d, $"D{s.Which}EndConditionDistance") is double x ? x : s.Which == 1 ? d.D1OffsetDistance : d.D2OffsetDistance;
+                            values.Add(($"Tiefe Richtung {s.Which}", s.Distance, dist, ScalarKind.Length));
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+            return SheetMetalCompare.Scalars(values).Select(x => $"Basislasche: {x}").ToList();
+        }
+
+        // ---- removal
+
+        /// <summary>Everything the step made since the snapshot; what stays is said.</summary>
+        private static void RemoveMade(BuildContext ctx, HashSet<string> before, List<string> notes)
+        {
+            List<string> left = SwSheetMetal.RemoveNew(ctx.Doc, before);
+            ctx.Topology.Invalidate();
+            if (left.Count > 0) notes.Add($"Nicht wieder entfernt: {string.Join(", ", left.Select(n => $"„{n}“"))} – bitte prüfen und von Hand löschen.");
+        }
+
+        /// <summary>
+        /// The companions of a flange removed again (the flange itself is deleted first): the flat
+        /// pattern with its own sketches, then the SheetMetal. A template folder stays.
+        /// </summary>
+        private static void RemoveCompanions(BuildContext ctx, Feature? flatPattern, Feature? sheetMetal)
+        {
+            foreach (var (feature, absorbed) in new[] { (flatPattern, true), (sheetMetal, false) })
+            {
+                if (feature == null) continue;
+                string name;
+                try
+                {
+                    name = feature.Name;
+                }
+                catch (Exception)
+                {
+                    // Gone with the flange.
+                    continue;
+                }
+                if (SwDoc.FeatureByName(ctx.Doc, name) is Feature live) Delete(ctx, live, absorbed);
+            }
+        }
+
+        // ---- variants for the check
+
+        private static void AddAlternatives(BuildResult result, BuildContext ctx, Feature f, BaseFlangeRecord r, List<SideTarget> sides)
+        {
+            ModelDoc2 doc = ctx.Doc;
+            bool midPlane = sides.Any(s => s.End == EndCondition.MidPlane);
+            if (r.ClosedProfile)
+            {
+                result.Alternatives.Add(new Alternative("Blechdicke auf die andere Seite",
+                    () => FeatureEdit.BaseFlange(doc, f, d => d.ReverseDirection = !d.ReverseDirection)));
+                // In the same part it would write the shared defaults and has no effect on a closed profile anyway (A1 P1).
+                if (!ctx.SamePart && !r.SymmetricThickness)
+                    result.Alternatives.Add(new Alternative("Dickenrichtung umgekehrt",
+                        () => FeatureEdit.BaseFlange(doc, f, d => d.ReverseThickness = !d.ReverseThickness)));
+                return;
+            }
+            if (!midPlane)
+                result.Alternatives.Add(new Alternative("Richtung umgekehrt",
+                    () => FeatureEdit.BaseFlange(doc, f, d => d.ReverseDirection = !d.ReverseDirection)));
+            if (!r.SymmetricThickness)
+                result.Alternatives.Add(new Alternative("Materialseite der Kontur gewechselt",
+                    () => FeatureEdit.BaseFlange(doc, f, d => d.ReverseThickness = !d.ReverseThickness)));
+        }
+
+        private static string Describe(BaseFlangeRecord r, bool directionFlipped, bool sideFlipped)
+        {
+            string what = r.MergesIntoExisting ? "Lasche" : "Basislasche";
+            string profile = r.ClosedProfile ? "geschlossenes Profil" : "offenes Profil";
+            string text = $"{what}, {profile}, Dicke {(r.Thickness * 1000).ToString("0.###", System.Globalization.CultureInfo.CurrentCulture)} mm";
+            if (directionFlipped) text += ", Richtungsflag umgekehrt (Skizzennormale entgegengesetzt)";
+            if (sideFlipped) text += ", Materialseite der Kontur gewechselt (gespiegelt)";
+            return text;
+        }
+    }
+}

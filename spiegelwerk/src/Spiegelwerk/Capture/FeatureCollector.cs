@@ -30,20 +30,26 @@ namespace Spiegelwerk.Capture
         /// selected bodies, they have to be rebuilt as a body of their own.
         /// </param>
         /// <param name="scope">What the features pulled in through bodies also did to other bodies.</param>
+        /// <param name="sheetMetal">
+        /// Who comes into being with whom in a sheet-metal part: a selected base flange brings its
+        /// SheetMetal and flat pattern; a flat pattern and what lives under it are suppressed
+        /// whenever the part is folded (the run folds it) and are not skipped for that.
+        /// </param>
         public static List<Feature> Collect(ModelDoc2 doc, SwMath math, IReadOnlyCollection<Feature> features, IReadOnlyCollection<Body2> bodies,
-            List<(Feature feature, string reason)> skipped, out bool seedBodies, out BodyScope scope)
+            List<(Feature feature, string reason)> skipped, out bool seedBodies, out BodyScope scope, SheetMetalTree? sheetMetal = null)
         {
+            sheetMetal ??= SheetMetalTree.Empty;
             List<Feature> all = SwDoc.FeaturesInCreationOrder(doc);
             var standard = new HashSet<string>(SwDoc.StandardPlanes(doc, math).Select(f => f.Name), StringComparer.Ordinal);
             var selectedBodies = new HashSet<string>(StringComparer.Ordinal);
-            List<Feature> result = Select(doc, all, standard, features, bodies, selectedBodies, out seedBodies);
+            List<Feature> result = Select(doc, all, standard, features, bodies, selectedBodies, sheetMetal, out seedBodies);
             scope = bodies.Count > 0 || seedBodies ? ScopeOf(doc, all, result, features, selectedBodies) : BodyScope.None;
 
             var kept = new List<Feature>();
             var skippedNames = new HashSet<string>(StringComparer.Ordinal);
             foreach (Feature f in result)
             {
-                string? reason = SkipReason(f) ?? SkippedSketchOf(f, skippedNames);
+                string? reason = SkipReason(f, sheetMetal) ?? SkippedSketchOf(f, skippedNames);
                 if (reason == null)
                 {
                     kept.Add(f);
@@ -61,9 +67,14 @@ namespace Spiegelwerk.Capture
         /// Suppressed features, and features (not sketches) that fail in the original. A sketch
         /// with an error may still feed a healthy feature; the copy gets its own status check.
         /// </summary>
-        private static string? SkipReason(Feature f)
+        private static string? SkipReason(Feature f, SheetMetalTree sheetMetal)
         {
-            if (f.IsSuppressed()) return "Im Original unterdrückt – nicht gespiegelt.";
+            if (f.IsSuppressed())
+            {
+                // Folded on purpose: the flat pattern and its sub-features are a state, not a choice of the user.
+                if (sheetMetal.SuppressedWhenFolded(f.Name)) return null;
+                return sheetMetal.IsAfterFlatPattern(f.Name) ? SheetMetalTree.OnlyFlattened : "Im Original unterdrückt – nicht gespiegelt.";
+            }
             if (SwDoc.IsSketch(f)) return null;
             bool isWarning = false;
             int code = f.GetErrorCode2(out isWarning);
@@ -82,7 +93,7 @@ namespace Spiegelwerk.Capture
 
         /// <param name="selectedBodies">Receives the names of the selected bodies and of the seed bodies pulled in.</param>
         private static List<Feature> Select(ModelDoc2 doc, List<Feature> all, HashSet<string> standard, IReadOnlyCollection<Feature> features,
-            IReadOnlyCollection<Body2> bodies, HashSet<string> selectedBodies, out bool seedBodies)
+            IReadOnlyCollection<Body2> bodies, HashSet<string> selectedBodies, SheetMetalTree sheetMetal, out bool seedBodies)
         {
             seedBodies = false;
             if (features.Count == 0 && bodies.Count == 0)
@@ -115,6 +126,9 @@ namespace Spiegelwerk.Capture
                     if (added || promoted) queue.Enqueue((seed, isChosen));
                 }
             }
+
+            // A base flange comes with its SheetMetal and its flat pattern, a flat pattern with its own parts (A1 P6).
+            foreach (string name in sheetMetal.Closure(wanted)) wanted.Add(name);
 
             // Sketches the wanted features are built from (absorbed or shared). Planes, axes and
             // coordinate systems are rebuilt from their geometry alone; the 2D sketches they sit

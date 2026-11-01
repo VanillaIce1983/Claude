@@ -55,6 +55,8 @@ namespace Spiegelwerk.Build
             new FillPatternBuilder(),
             new VariablePatternBuilder(),
             new MirrorFeatureBuilder(),
+            new BaseFlangeBuilder(),
+            new FlatPatternBuilder(),
         };
 
         /// <summary>
@@ -78,6 +80,8 @@ namespace Spiegelwerk.Build
             bool guardOriginal = ctx.SeparateBody && record.ChangesSolid;
             MassState originalBefore = guardOriginal ? SwDoc.MassOf(ctx.OriginalBodies()) : MassState.Empty;
             HashSet<string> featuresBefore = TopLevelNames(ctx.Doc);
+            // A step that may write the shared sheet-metal values runs under the guard (A1 P1).
+            SheetMetalGuard.State? guardBefore = record.TouchesSheetMetalDefaults ? ctx.Shared.Guard?.Take() : null;
             BuildResult result;
             string verification = "";
             int mark = ctx.Planes.BeginStep(ctx.IsNested);
@@ -115,6 +119,7 @@ namespace Spiegelwerk.Build
                 }
                 ctx.Topology.Invalidate();
             }
+            if (verification.Length == 0 && result.Verification != null) verification = result.Verification;
             // What capture already knew could not be carried over (feature scope, setbacks, regions
             // ...) makes the copy a warning, not "OK" – also for "delete original".
             if (result.Success && result.Status == ReportStatus.Ok && record.Notes.Count > 0) result.Status = ReportStatus.Warning;
@@ -124,14 +129,26 @@ namespace Spiegelwerk.Build
                 result = RemoveAgain(ctx, record, result, featuresBefore, mark);
                 verification = "";
             }
+            // After the check and its variants, and after a removal: the shared sheet-metal values must be as before.
+            if (guardBefore != null && ctx.Shared.Guard!.Check(guardBefore, result.Notes) is string abort)
+            {
+                if (result.Success) result = RemoveAgain(ctx, record, result, featuresBefore, mark, abort);
+                else result.Notes.Add(abort);
+                ctx.Shared.AbortReason = abort;
+                verification = "";
+            }
             // Only now: a variant tried above may have replaced dimensions.
-            if (result.Success && record.OwnDimensions.Count > 0) RestoreDimensionNames(ctx, record, result);
+            if (result.Success && record.OwnDimensions.Count > 0) RestoreDimensionNames(ctx, result.Feature!, record.Name, record.OwnDimensions, result.Notes);
+            if (result.Success)
+                foreach (Companion c in result.Companions.Where(c => c.Dimensions.Count > 0))
+                    RestoreDimensionNames(ctx, c.Feature, c.OriginalName, c.Dimensions, result.Notes);
             CheckRebuildError(result);
 
             ReportEntry entry = ctx.Report.Add(record, result.Status, result.Message);
             entry.Verification = verification;
             entry.HasEquivalent = result.HasEquivalent;
             entry.Details.AddRange(result.Notes);
+            entry.Details.AddRange(result.Info);
             ctx.Report.Entries.AddRange(result.ChildEntries);
             // Only if the owner is not in the target – one with a rebuild error still has its parts.
             if (record.BringsParts && !entry.IsMirrored && !ctx.Created.ContainsKey(record.Name)) WithdrawParts(ctx, record.Name);
@@ -157,8 +174,8 @@ namespace Spiegelwerk.Build
             built.Status = entry.Status;
         }
 
-        public static HashSet<string> TopLevelNames(ModelDoc2 doc) =>
-            new HashSet<string>(SwDoc.TopLevelFeatures(doc).Select(f => f.Name), StringComparer.Ordinal);
+        /// <summary>The names of the top-level features and of what the sheet-metal folders hold – a step may add a SheetMetal or flat pattern there.</summary>
+        public static HashSet<string> TopLevelNames(ModelDoc2 doc) => SwSheetMetal.AllNames(doc);
 
         private static string Quoted(IEnumerable<string> names) => string.Join(", ", names.Select(n => $"\"{n}\""));
 
@@ -167,37 +184,37 @@ namespace Spiegelwerk.Build
         /// original (DimensionMatcher) – via temporary names, so two of them can swap theirs.
         /// Each that ends up with its original name counts as known for copied equations.
         /// </summary>
-        private static void RestoreDimensionNames(BuildContext ctx, FeatureRecord record, BuildResult result)
+        private static void RestoreDimensionNames(BuildContext ctx, Feature feature, string originalName, List<NamedDimension> originals, List<string> notes)
         {
             try
             {
-                List<DisplayDimension> own = SwDoc.OwnDimensions(result.Feature!);
+                List<DisplayDimension> own = SwDoc.OwnDimensions(feature);
                 List<Dimension> dims = own.Select(dd => dd.GetDimension2(0)).ToList();
                 List<string> before = dims.Select(d => d.Name).ToList();
-                DimensionMatch match = DimensionMatcher.Match(record.OwnDimensions, own.Select(SwDoc.Named).ToList());
+                DimensionMatch match = DimensionMatcher.Match(originals, own.Select(SwDoc.Named).ToList());
                 for (int k = 0; k < match.Renames.Count; k++) SwDoc.TryRename(dims[match.Renames[k].copy], $"Spiegelwerk{k + 1}");
                 foreach (var (copy, name) in match.Renames)
                     if (!SwDoc.TryRename(dims[copy], name)) SwDoc.TryRename(dims[copy], before[copy]);
 
                 var unmatched = new List<string>();
                 var unnamed = new List<string>();
-                for (int o = 0; o < record.OwnDimensions.Count; o++)
+                for (int o = 0; o < originals.Count; o++)
                 {
-                    string name = record.OwnDimensions[o].Name;
+                    string name = originals[o].Name;
                     int c = match.Counterparts[o];
                     if (c < 0) unmatched.Add(name);
                     else if (dims[c].Name != name) unnamed.Add(name);
-                    else ctx.KnownDimensions.Add($"{name}@{record.Name}");
+                    else ctx.KnownDimensions.Add($"{name}@{originalName}");
                 }
                 string equations = ctx.CopiesEquations ? "; Gleichungen darauf werden nicht übernommen" : "";
                 if (unmatched.Count > 0)
-                    result.Notes.Add($"Bemaßungen ohne eindeutiges Gegenstück in der Kopie, ihr Name bleibt nicht erhalten: {Quoted(unmatched)}{equations}.");
+                    notes.Add($"Bemaßungen ohne eindeutiges Gegenstück in der Kopie, ihr Name bleibt nicht erhalten: {Quoted(unmatched)}{equations}.");
                 if (unnamed.Count > 0)
-                    result.Notes.Add($"Originalname ließ sich in der Kopie nicht setzen: {Quoted(unnamed)}{equations}.");
+                    notes.Add($"Originalname ließ sich in der Kopie nicht setzen: {Quoted(unnamed)}{equations}.");
             }
             catch (Exception ex)
             {
-                result.Notes.Add($"Bemaßungsnamen nicht wiederhergestellt ({ex.Message})" + (ctx.CopiesEquations ? "; Gleichungen auf dieses Feature werden nicht übernommen." : "."));
+                notes.Add($"Bemaßungsnamen von „{originalName}“ nicht wiederhergestellt ({ex.Message})" + (ctx.CopiesEquations ? "; Gleichungen darauf werden nicht übernommen." : "."));
             }
         }
 
@@ -272,13 +289,16 @@ namespace Spiegelwerk.Build
             }
         }
 
-        /// <summary>Top-level features not there before the step (system folders SOLIDWORKS adds on its own aside).</summary>
-        private static List<Feature> NewFeatures(ModelDoc2 doc, HashSet<string> before) =>
-            SwDoc.TopLevelFeatures(doc).Where(f => !before.Contains(f.Name) && !SwDoc.IsSystemFeature(f)).ToList();
+        /// <summary>
+        /// Features not there before the step: at the top level (system folders SOLIDWORKS adds on
+        /// its own aside, also a sheet-metal or flat-pattern folder) and inside those folders.
+        /// </summary>
+        private static List<Feature> NewFeatures(ModelDoc2 doc, HashSet<string> before) => SwSheetMetal.NewSince(doc, before);
 
-        private static BuildResult RemoveAgain(BuildContext ctx, FeatureRecord record, BuildResult result, HashSet<string> before, int mark)
+        /// <param name="why">The report message; default: the original bodies would have changed.</param>
+        private static BuildResult RemoveAgain(BuildContext ctx, FeatureRecord record, BuildResult result, HashSet<string> before, int mark, string? why = null)
         {
-            var failed = BuildResult.Failed("Das Feature hätte die Originalkörper verändert und wurde wieder entfernt.");
+            var failed = BuildResult.Failed(why ?? "Das Feature hätte die Originalkörper verändert und wurde wieder entfernt.");
             failed.Notes.AddRange(result.Notes);
             if (result.Group != null)
             {
@@ -292,7 +312,9 @@ namespace Spiegelwerk.Build
             // uses is a record of its own, may be shared, and stays.
             BuilderSupport.Delete(ctx, result.Feature!, record.DeleteWithAbsorbed);
             foreach (string sketch in record.OwnedSketches) ctx.ForgetSketch(sketch);
+            // Companions (the SheetMetal and flat pattern of a base flange) go through the builder's own removal.
             result.RemoveHelpers?.Invoke();
+            foreach (Companion c in result.Companions) ctx.Unregister(c.OriginalName);
             ctx.Planes.RemoveStepHelpers(mark);
             ctx.Unregister(record.Name);
             return failed;
@@ -321,7 +343,19 @@ namespace Spiegelwerk.Build
             }
             bool isWarning = false;
             int code = result.Feature.GetErrorCode2(out isWarning);
-            if (code == 0) return;
+            if (code == 0)
+            {
+                // Companions count with the feature; a folded flat pattern is suppressed on purpose.
+                foreach (Companion c in result.Companions.Where(c => !c.Feature.IsSuppressed()))
+                {
+                    bool w = false;
+                    int cc = c.Feature.GetErrorCode2(out w);
+                    if (cc == 0) continue;
+                    result.Notes.Add($"SOLIDWORKS meldet {(w ? "eine Warnung" : "einen Neuaufbaufehler")} bei „{c.Feature.Name}“ (Code {cc}).");
+                    if (result.Status == ReportStatus.Ok) result.Status = ReportStatus.Warning;
+                }
+                return;
+            }
             if (isWarning)
             {
                 result.Notes.Add($"SOLIDWORKS meldet eine Warnung beim Neuaufbau (Code {code}).");

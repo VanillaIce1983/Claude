@@ -151,12 +151,31 @@ namespace Spiegelwerk.Build.Builders
                 }
             }
 
+            // Sheet metal: the depth bound to the thickness, in an edit of its own (A1 P14) – a refusal costs the link, not the feature.
+            if (r.LinkToThickness && !(FeatureEdit.Extrude(doc, f, d => d.LinkToThickness = true) && LinkedToThickness(doc, f)))
+                notes.Add("Tiefe nicht an die Blechdicke gebunden (gleicher Wert).");
+
             ctx.Register(r.Name, f);
             var result = BuildResult.Ok(f, Describe(r, reverse != r.Reverse) + ProfileSupport.Describe(made));
             result.Notes.AddRange(notes);
             if (notes.Count > 0) result.Status = ReportStatus.Warning;
             AddAlternatives(result, ctx, f, r);
             return result;
+        }
+
+        /// <summary>Read back under its own selection access: ModifyDefinition can report success and change nothing.</summary>
+        private static bool LinkedToThickness(ModelDoc2 doc, Feature f)
+        {
+            var d = (ExtrudeFeatureData2)(object)f.GetDefinition();
+            if (d == null || !d.AccessSelections(doc, null)) return false;
+            try
+            {
+                return d.LinkToThickness;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
         }
 
         /// <summary>The condition used while creating; references are attached afterwards.</summary>

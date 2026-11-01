@@ -65,6 +65,28 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Sheet_metal_feature_and_flange_offset_numbers()
+        {
+            // CreateDefinition numbers the add-in uses or names (blech-plan S1a).
+            Assert.Equal(30, (int)swFeatureNameID_e.swFmSheetMetal);
+            Assert.Equal(31, (int)swFeatureNameID_e.swFmFlattenBends);
+            Assert.Equal(32, (int)swFeatureNameID_e.swFmProcessBends);
+            Assert.Equal(34, (int)swFeatureNameID_e.swFmBaseFlange);
+            Assert.Equal(38, (int)swFeatureNameID_e.swFmFlatPattern);
+            Assert.Equal(115, (int)swFeatureNameID_e.swFmNormalCut);
+            // swFlangeOffsetTypes_e 1–5 map to end conditions; 6 (up to edge and merge) exists only from the 2024 interop and is not rebuilt.
+            foreach (swFlangeOffsetTypes_e t in Enum.GetValues(typeof(swFlangeOffsetTypes_e)))
+            {
+                EndCondition? end = Spiegelwerk.Core.Planning.SheetMetalRules.FromFlangeOffset((int)t);
+                Assert.Equal(t != swFlangeOffsetTypes_e.swFlangeOffsetUptoEdgeAndMerge, end.HasValue);
+                if (end.HasValue) Assert.Equal((int)t, Spiegelwerk.Core.Planning.SheetMetalRules.ToFlangeOffset(end.Value));
+            }
+            Assert.Equal(6, (int)swFlangeOffsetTypes_e.swFlangeOffsetUptoEdgeAndMerge);
+            Assert.Equal((int)EndCondition.MidPlane, (int)swEndConditions_e.swEndCondMidPlane);
+            Assert.Equal(EndCondition.MidPlane, Spiegelwerk.Core.Planning.SheetMetalRules.FromFlangeOffset((int)swFlangeOffsetTypes_e.swFlangeOffsetMidPlane));
+        }
+
+        [Fact]
         public void Type_constants_have_the_swconst_numbers()
         {
             SameConstants<swWzdGeneralHoleTypes_e>(typeof(HoleTypes), "swWzd");

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using SolidWorks.Interop.sldworks;
+using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Records;
 
 namespace Spiegelwerk.Build.Builders
@@ -37,6 +39,27 @@ namespace Spiegelwerk.Build.Builders
         public IReadOnlyList<string> Parts { get; }
     }
 
+    /// <summary>
+    /// A feature SOLIDWORKS made together with the step's feature (the SheetMetal of a base
+    /// flange): it belongs to the step – rebuild errors, removal, own faces – and gets the name
+    /// and dimension names of its original, but it is no group member.
+    /// </summary>
+    internal sealed class Companion
+    {
+        public Companion(Feature feature, string originalName, List<NamedDimension> dimensions)
+        {
+            Feature = feature;
+            OriginalName = originalName;
+            Dimensions = dimensions;
+        }
+
+        public Feature Feature { get; }
+        public string OriginalName { get; }
+
+        /// <summary>The original's own dimensions (thickness, radius) for copied equations.</summary>
+        public List<NamedDimension> Dimensions { get; }
+    }
+
     internal sealed class BuildResult
     {
         private BuildResult(Feature? feature, ReportStatus status, string message)
@@ -52,8 +75,17 @@ namespace Spiegelwerk.Build.Builders
         /// <summary>The features of a mirror feature's second half, in tree order; null for a single feature.</summary>
         public IReadOnlyList<Feature>? Group { get; private set; }
 
-        /// <summary>Every feature this step made: the group, or the single feature (none if it failed).</summary>
-        public IReadOnlyList<Feature> AllFeatures => Group ?? (Feature == null ? Array.Empty<Feature>() : new[] { Feature });
+        /// <summary>Every feature this step made: the group, or the single feature with its companions (none if it failed).</summary>
+        public IReadOnlyList<Feature> AllFeatures => Group ?? (Feature == null ? Array.Empty<Feature>() : new[] { Feature }.Concat(Companions.Select(c => c.Feature)).ToList());
+
+        /// <summary>Features made together with <see cref="Feature"/> (K22).</summary>
+        public List<Companion> Companions { get; } = new List<Companion>();
+
+        /// <summary>Report details that are information only – they do not make the step a warning.</summary>
+        public List<string> Info { get; } = new List<string>();
+
+        /// <summary>The builder's own check, for a feature the verifier does not measure (the flat state of a flat pattern).</summary>
+        public string? Verification { get; set; }
 
         /// <summary>Report entries of the steps of a second half, named under the mirror feature; they follow its own entry.</summary>
         public List<ReportEntry> ChildEntries { get; } = new List<ReportEntry>();
@@ -203,6 +235,18 @@ namespace Spiegelwerk.Build.Builders
         public static bool CircularPattern(ModelDoc2 doc, Feature f, Action<CircularPatternFeatureData> change)
         {
             var d = (CircularPatternFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool BaseFlange(ModelDoc2 doc, Feature f, Action<BaseFlangeFeatureData> change)
+        {
+            var d = (BaseFlangeFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool FlatPattern(ModelDoc2 doc, Feature f, Action<FlatPatternFeatureData> change)
+        {
+            var d = (FlatPatternFeatureData)(object)f.GetDefinition();
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 

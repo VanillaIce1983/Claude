@@ -7,11 +7,12 @@ namespace Spiegelwerk.Core.Planning
     /// <summary>A solid body of the original and the features that made or changed it.</summary>
     public sealed class BodyHistory
     {
-        public BodyHistory(string name, IEnumerable<string> features, bool selected)
+        public BodyHistory(string name, IEnumerable<string> features, bool selected, bool isSheetMetal = false)
         {
             Name = name;
             Features = features.ToList();
             Selected = selected;
+            IsSheetMetal = isSheetMetal;
         }
 
         public string Name { get; }
@@ -21,6 +22,9 @@ namespace Spiegelwerk.Core.Planning
 
         /// <summary>Selected by the user, or a seed body of a selected body pattern.</summary>
         public bool Selected { get; }
+
+        /// <summary>A sheet-metal body (IBody2.IsSheetMetal) in the final state.</summary>
+        public bool IsSheetMetal { get; }
     }
 
     /// <summary>

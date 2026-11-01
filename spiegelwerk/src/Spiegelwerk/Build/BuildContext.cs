@@ -46,6 +46,26 @@ namespace Spiegelwerk.Build
     }
 
     /// <summary>
+    /// The copy of a sheet-metal body as its base flange made it (K11): its SheetMetal and flat
+    /// pattern, and σ of the base flange's sketch. σ of the sheet (the bend direction reference)
+    /// stays unknown until a live test settles the convention (B39).
+    /// </summary>
+    internal sealed class SheetMetalBody
+    {
+        public SheetMetalBody(Feature? sheetMetal, Feature? flatPattern, int sigmaBase)
+        {
+            SheetMetal = sheetMetal;
+            FlatPattern = flatPattern;
+            SigmaBase = sigmaBase;
+        }
+
+        public Feature? SheetMetal { get; }
+        public Feature? FlatPattern { get; }
+        public int SigmaBase { get; }
+        public int? SigmaSheet { get; set; }
+    }
+
+    /// <summary>
     /// State shared by all builders during one job – or, as a child context
     /// (<see cref="Nested"/>), during the second half of a mirror feature: the same document,
     /// another reflection, records named after the first-half copies in the target.
@@ -153,6 +173,9 @@ namespace Spiegelwerk.Build
         /// <summary>Original feature name → new feature.</summary>
         public Dictionary<string, Feature> Created { get; } = new Dictionary<string, Feature>(StringComparer.Ordinal);
 
+        /// <summary>Original base flange → the sheet-metal body its copy made (SheetMetal, flat pattern, σ).</summary>
+        public Dictionary<string, SheetMetalBody> SheetMetalBodies { get; } = new Dictionary<string, SheetMetalBody>(StringComparer.Ordinal);
+
         /// <summary>
         /// Original name of a mirror feature → the features of its second half, in tree order,
         /// and whether each changes the solid: its counterpart is not one feature but these.
@@ -248,6 +271,7 @@ namespace Spiegelwerk.Build
             _targetNames.Remove(originalName);
             Created.Remove(originalName);
             Groups.Remove(originalName);
+            SheetMetalBodies.Remove(originalName);
             Topology.Invalidate();
         }
 
@@ -270,9 +294,16 @@ namespace Spiegelwerk.Build
                 .Distinct().ToList();
             foreach (string key in keys) ForgetSketch(key);
             foreach (string name in names) Shared.Built.Remove(name);
+            // A sheet-metal body whose flange or companions go is gone with them.
+            foreach (string key in SheetMetalBodies.Where(kv => Gone(kv.Key, kv.Value, names)).Select(kv => kv.Key).ToList()) SheetMetalBodies.Remove(key);
             Planes.Forget(names);
             Topology.Invalidate();
         }
+
+        private bool Gone(string owner, SheetMetalBody body, ICollection<string> names) =>
+            !Created.ContainsKey(owner) ||
+            (body.SheetMetal != null && names.Contains(body.SheetMetal.Name)) ||
+            (body.FlatPattern != null && names.Contains(body.FlatPattern.Name));
 
         /// <summary>Helper features (planes, anchor sketches) also count as "ours".</summary>
         public void RegisterHelper(Feature f)

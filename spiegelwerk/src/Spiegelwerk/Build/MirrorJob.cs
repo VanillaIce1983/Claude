@@ -82,9 +82,6 @@ namespace Spiegelwerk.Build
         {
             var report = new MirrorReport();
             ModelDoc2 source = req.Source;
-            MirrorOptions opt = req.Options;
-            // Body pointers do not survive the rollbacks of capture and measurement; names do.
-            var selectedBodyNames = new HashSet<string>(req.Bodies.Select(b => b.Name), StringComparer.Ordinal);
 
             // ---- 1. capture
             // In an open sketch the rollback for the measurement fails, and the first new sketch would close it instead of opening one.
@@ -92,6 +89,27 @@ namespace Spiegelwerk.Build
                 throw new InvalidOperationException("Es ist noch eine Skizze zur Bearbeitung geöffnet. Bitte die Skizze schließen und erneut spiegeln.");
             if (SwDoc.TopLevelFeatures(source).Any(f => f.IsRolledBack()))
                 throw new InvalidOperationException("Die Rückrollleiste steht nicht am Ende des Feature-Baums. Bitte ans Ende setzen und erneut spiegeln.");
+
+            // Sheet metal: folded for the whole run, put back however it ends (A1 §3).
+            SheetMetalSession? session = SheetMetalSession.For(source);
+            if (session?.Fold() is string notFolded) throw new InvalidOperationException(notFolded);
+            try
+            {
+                return Run(req, progress, report, session);
+            }
+            finally
+            {
+                if (session != null) report.General.AddRange(session.Restore());
+            }
+        }
+
+        private MirrorJobResult Run(MirrorRequest req, RunProgress progress, MirrorReport report, SheetMetalSession? session)
+        {
+            ModelDoc2 source = req.Source;
+            MirrorOptions opt = req.Options;
+            // Body pointers do not survive the rollbacks of capture and measurement; names do.
+            var selectedBodyNames = new HashSet<string>(req.Bodies.Select(b => b.Name), StringComparer.Ordinal);
+            SheetMetalTree sheetMetal = session == null ? SheetMetalTree.Empty : SwSheetMetal.Tree(source);
 
             var skipped = new List<(Feature feature, string reason)>();
             // The coordinate space of sketch region edges, once known for certain, holds for source and target alike.
@@ -103,7 +121,7 @@ namespace Spiegelwerk.Build
             // Capture and measurement roll the original back and forth; tree and graphics need not follow every step.
             using (new UpdateFreeze(source))
             {
-                features = FeatureCollector.Collect(source, _math, req.Features, req.Bodies, skipped, out seedBodies, out bodyScope);
+                features = FeatureCollector.Collect(source, _math, req.Features, req.Bodies, skipped, out seedBodies, out bodyScope, sheetMetal);
                 foreach (var (feature, reason) in skipped)
                     report.Entries.Add(new ReportEntry(feature.Name, feature.GetTypeName2(), ReportStatus.Skipped, reason));
                 if (features.Count == 0)
@@ -112,12 +130,14 @@ namespace Spiegelwerk.Build
                     report.Aborted = true;
                     return new MirrorJobResult(report, null);
                 }
-                // Refusal step 1 (blech-plan §1.5). Accepted owners come with the sheet-metal tree,
-                // the fallback switch with the fallback; until then neither exempts anything.
-                if (features.FirstOrDefault(f => UnsupportedFeatures.RefusesBeforeCapture(f.GetTypeName2(), partOfAcceptedOwner: false, fallbackOn: false)) is Feature carrier)
-                    throw new InvalidOperationException(UnsupportedFeatures.RunRefusal(carrier.Name, carrier.GetTypeName2()));
+                // Refusal step 1 (blech-plan §1.5): by type, a part of an accepted owner (the SheetMetal of
+                // a collected base flange) exempt; until S1b also sheet metal in the same part. The
+                // fallback switch comes with the fallback (S7a).
+                string? refusal = UnsupportedFeatures.RefusalBeforeCapture(features.Select(f => (f.Name, f.GetTypeName2())).ToList(), sheetMetal.Owners,
+                    opt.Target == MirrorTarget.SamePart, fallbackOn: false);
+                if (refusal != null) throw new InvalidOperationException(refusal);
                 progress.Start(features.Count, opt.VerifySteps);
-                var capture = new FeatureCapture(source, _math, regionSpaces);
+                var capture = new FeatureCapture(source, _math, regionSpaces, sheetMetal: sheetMetal, wasFlattened: session == null ? null : (Func<string, bool>)session.WasFlattened);
                 List<FeatureRecord>? captured = capture.CaptureAll(features, f => progress.Show(RunSteps.Capture, f.Name), progress.CancelAfterStep);
                 if (captured == null) return CancelledBeforeBuild(report, RunSteps.Capture);
                 records = captured;
@@ -126,6 +146,13 @@ namespace Spiegelwerk.Build
                 NoteUnrequestedSeedBodies(records, bodyScope, req.Features);
                 MarkOtherBodies(records, bodyScope);
                 for (int i = 0; i < records.Count; i++) CaptureDimensions(features[i], records[i]);
+                // Refusal step 2 (blech-plan §1.5): a sheet-metal body whose carrier is not rebuilt – before anything is measured or made.
+                if (session != null)
+                {
+                    var types = new Dictionary<string, string>(StringComparer.Ordinal);
+                    List<BodyHistory> histories = SwDoc.BodyHistories(source, SwDoc.FeaturesInCreationOrder(source), types);
+                    if (SheetMetalPlanner.Refusal(histories, records, types, sheetMetal) is string carrier) throw new InvalidOperationException(carrier);
+                }
                 // With selected bodies, a feature may also change a body that is gone at the end; only the rolled-back state shows it.
                 MassCapture.ForeignRule? foreign = req.Bodies.Count > 0 || seedBodies
                     ? new MassCapture.ForeignRule(SwDoc.FeaturesInCreationOrder(source).Select(f => f.Name), features.Concat(skipped.Select(s => s.feature)).Select(f => f.Name))
@@ -149,6 +176,11 @@ namespace Spiegelwerk.Build
             bool separateBody = opt.Target == MirrorTarget.SamePart && (req.Features.Count == 0 || req.Bodies.Count > 0 || seedBodies);
             var ctx = new BuildContext(_sw, target, _math, new Reflection(req.MirrorPlane), opt, report, separateBody) { RegionSpaces = regionSpaces };
             ctx.Shared.Progress = progress;
+            if (session != null)
+            {
+                ctx.Shared.Session = session;
+                ctx.Shared.Guard = new SheetMetalGuard(target);
+            }
             foreach (PartOfFeatureRecord part in records.OfType<PartOfFeatureRecord>()) ctx.PartOwners[part.Name] = part.Owner;
             foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) ctx.PointSketches.Add(pattern.SketchName);
             report.General.Add($"Spiegelebene: {ReportText.Plane(req.MirrorPlane)}");
@@ -188,6 +220,10 @@ namespace Spiegelwerk.Build
                     }
                 }
                 progress.Show(RunSteps.Finish);
+                // The copies' flat patterns get the state of their originals (flattened or folded).
+                if (session != null)
+                    report.General.AddRange(session.ApplyTo(target, records.OfType<FlatPatternRecord>()
+                        .Where(fp => ctx.Created.ContainsKey(fp.Name)).Select(fp => (fp.Name, ctx.Created[fp.Name]))));
                 if (regionSpaces.ReportLine() is string spaceLine) report.General.Add(spaceLine);
                 target.EditRebuild3();
                 bool atEnd = SwDoc.RollToEnd(target);

@@ -63,18 +63,26 @@ namespace Spiegelwerk.Core.Planning
     {
         private static SheetMetalType NotYet(SheetMetalRole role) => new SheetMetalType(role, SheetMetalState.NotYet);
 
-        // S0: every entry NotYet – the run refuses exactly what it refused before.
+        private static SheetMetalType Rebuilt(SheetMetalRole role) => new SheetMetalType(role, SheetMetalState.Rebuilt);
+
+        /// <summary>A corner trim the user inserted under a flat pattern (A3 P3): non-solid, no fallback.</summary>
+        public const string CornerTrimReason = "Ecke trimmen (abgewickelt): Freistellungsart und -größe sind über die API nicht lesbar – bitte im Ziel von Hand anlegen.";
+
+        // S0: every entry NotYet. S1a: base flange, flat pattern and the template folders are
+        // decided, a user corner trim is not rebuilt; everything else is still refused.
         private static readonly Dictionary<string, SheetMetalType> Table = new Dictionary<string, SheetMetalType>(StringComparer.Ordinal)
         {
-            ["TemplateSheetMetal"] = NotYet(SheetMetalRole.System),
-            ["TemplateFlatPattern"] = NotYet(SheetMetalRole.System),
+            // Never collected; the new part gets its own with the first base flange.
+            ["TemplateSheetMetal"] = Rebuilt(SheetMetalRole.System),
+            ["TemplateFlatPattern"] = Rebuilt(SheetMetalRole.System),
 
             // Bend sub-features; HemBend and Miterbend join once their names are confirmed (B23).
             ["OneBend"] = NotYet(SheetMetalRole.Part),
             ["SketchBend"] = NotYet(SheetMetalRole.Part),
 
-            // A tab is an SMBaseFlange too, but a leaf; the SheetMetal feature is a carrier only without an accepted owner.
-            ["SMBaseFlange"] = NotYet(SheetMetalRole.Carrier),
+            // A tab is an SMBaseFlange too, but a leaf; the SheetMetal feature is a carrier only without an accepted owner
+            // (with one it is a part of its base flange and never reaches the state test): NotYet until the fallback.
+            ["SMBaseFlange"] = Rebuilt(SheetMetalRole.Carrier),
             ["SheetMetal"] = NotYet(SheetMetalRole.Carrier),
             ["FlattenBends"] = NotYet(SheetMetalRole.Carrier),
             ["ProcessBends"] = NotYet(SheetMetalRole.Carrier),
@@ -88,11 +96,12 @@ namespace Spiegelwerk.Core.Planning
             ["Hem"] = NotYet(SheetMetalRole.Leaf),
             ["Jog"] = NotYet(SheetMetalRole.Leaf),
             ["SM3dBend"] = NotYet(SheetMetalRole.Leaf),
-            ["FlatPattern"] = NotYet(SheetMetalRole.Leaf),
+            ["FlatPattern"] = Rebuilt(SheetMetalRole.Leaf),
             ["UnFold"] = NotYet(SheetMetalRole.Leaf),
             ["Fold"] = NotYet(SheetMetalRole.Leaf),
             ["BreakCorner"] = NotYet(SheetMetalRole.Leaf),
-            ["CornerTrim"] = NotYet(SheetMetalRole.Leaf),
+            // The flat pattern's own corner trim is a part of it; one the user inserted is not rebuilt.
+            ["CornerTrim"] = new SheetMetalType(SheetMetalRole.Leaf, SheetMetalState.Unsupported, CornerTrimReason, triggersFallback: false),
             ["CrossBreak"] = NotYet(SheetMetalRole.Leaf),
             // Closed corner: the name comes from the API help example "Get All Sheet Metal Feature Data" (ClosedCornerFeatureData), not from the GetTypeName2 table.
             ["CornerFeat"] = NotYet(SheetMetalRole.Leaf),

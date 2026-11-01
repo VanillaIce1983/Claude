@@ -21,6 +21,8 @@ namespace Spiegelwerk.Sw
             "MaterialFolder", "OriginProfileFeature", "MateReferenceGroupFolder", "EqnFolder",
             "InkMarkupFolder", "BlockFolder", "LiveSectionFolder", "FtrFolder", "MagneticGroundPlane",
             "CutListFolder", "SubWeldFolder", "Attribute", "DisplayStateFolder", "GridFeature",
+            // Sheet-metal and flat-pattern folders (the part's defaults): never collected, never deleted, never new.
+            "TemplateSheetMetal", "TemplateFlatPattern",
         };
 
         public static bool IsSystemFeature(Feature f) => SystemTypes.Contains(f.GetTypeName2());
@@ -61,16 +63,69 @@ namespace Spiegelwerk.Sw
         /// All features in dependency order (Core.Planning.CreationOrder): absorbed sketches
         /// before the feature that absorbed them, every feature after its parents – also a
         /// guide-curve sketch at the top level after the profile sketches a later loft absorbed.
+        /// Sheet metal (SheetMetalTree.ListsSubFeature): the flat patterns inside the flat-pattern
+        /// folder before the folder, and what lives under a flat pattern (its sketches, corner
+        /// trims) before it; the SheetMetal features in their folder are not listed.
         /// </summary>
         public static List<Feature> FeaturesInCreationOrder(ModelDoc2 doc)
         {
             List<Feature> top = TopLevelFeatures(doc).ToList();
-            // Only what the tree walk lists anyway (top level and absorbed sketches) is reordered, nothing is added.
-            var listed = new HashSet<string>(top.Select(f => f.Name).Concat(top.SelectMany(f => SubFeatures(f).Where(IsSketch)).Select(f => f.Name)),
-                StringComparer.Ordinal);
+            var absorbed = new Dictionary<string, List<Feature>>(StringComparer.Ordinal);
+            List<Feature> Absorbed(Feature f)
+            {
+                if (absorbed.TryGetValue(f.Name, out List<Feature> known)) return known;
+                string type = f.GetTypeName2();
+                List<Feature> subs = SubFeatures(f).ToList();
+                foreach (Feature c in SwSheetMetal.FolderContents(doc, f))
+                    if (subs.All(s => s.Name != c.Name)) subs.Add(c);
+                List<Feature> listedSubs = subs.Where(s => SheetMetalTree.ListsSubFeature(type, s.GetTypeName2())).ToList();
+                absorbed[f.Name] = listedSubs;
+                return listedSubs;
+            }
+            // Only what the tree walk lists anyway (top level and absorbed sub-features) is reordered, nothing is added.
+            var listed = new HashSet<string>(StringComparer.Ordinal);
+            void Note(Feature f)
+            {
+                if (!listed.Add(f.Name)) return;
+                foreach (Feature sub in Absorbed(f)) Note(sub);
+            }
+            foreach (Feature f in top) Note(f);
             IEnumerable<Feature> Parents(Feature f) =>
                 f.GetParents() is object[] parents ? parents.OfType<Feature>().Where(p => listed.Contains(p.Name)) : Enumerable.Empty<Feature>();
-            return CreationOrder.Sort(top, f => SubFeatures(f).Where(IsSketch), Parents, f => f.Name);
+            return CreationOrder.Sort(top, Absorbed, Parents, f => f.Name);
+        }
+
+        /// <summary>
+        /// Every solid body of the final state with the features that made or changed it
+        /// (IBody2.GetFeatures without sketches, reference geometry and folders), in creation order,
+        /// whether it is a sheet-metal body, and the types of those features – for refusal step 2.
+        /// </summary>
+        public static List<BodyHistory> BodyHistories(ModelDoc2 doc, IReadOnlyList<Feature> creationOrder, Dictionary<string, string> types)
+        {
+            var order = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int i = 0; i < creationOrder.Count; i++) order[creationOrder[i].Name] = i;
+            var result = new List<BodyHistory>();
+            foreach (Body2 b in SolidBodies(doc))
+            {
+                var features = new List<Feature>();
+                if (b.GetFeatures() is object[] fs)
+                    foreach (Feature f in fs.OfType<Feature>())
+                        if (!IsSketch(f) && !IsSystemFeature(f) && !(f.GetTypeName2() is "RefPlane" or "RefAxis" or "CoordSys") && features.All(x => x.Name != f.Name))
+                            features.Add(f);
+                foreach (Feature f in features) types[f.Name] = f.GetTypeName2();
+                List<string> names = features.Select(f => f.Name).OrderBy(n => order.TryGetValue(n, out int i) ? i : int.MaxValue).ToList();
+                bool sheet;
+                try
+                {
+                    sheet = b.IsSheetMetal();
+                }
+                catch (Exception)
+                {
+                    sheet = features.Any(f => f.GetTypeName2() == "SheetMetal");
+                }
+                result.Add(new BodyHistory(b.Name, names, false, sheet));
+            }
+            return result;
         }
 
         public static bool IsSketch(Feature f) => f.GetTypeName2() == "ProfileFeature" || f.GetTypeName2() == "3DProfileFeature";
