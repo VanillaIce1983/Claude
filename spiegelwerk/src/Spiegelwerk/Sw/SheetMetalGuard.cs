@@ -16,14 +16,22 @@ namespace Spiegelwerk.Sw
     /// SheetMetal of the target, afterwards it compares; a difference is written back, and if
     /// that does not restore them, the run stops. The body the step's own feature belongs to (the
     /// one a tab joins) changes by design and is left out of the body comparison.
+    ///
+    /// In the same part (S1b) the defaults and SheetMetals are the original's: the snapshot is
+    /// taken from the first copied flange on, a step without one is not built
+    /// (<see cref="SheetMetalRules.GuardExpectationOf"/>), and the earlier bodies – the original
+    /// among them – are compared after every step, not only after a change of the values.
     /// </summary>
     internal sealed class SheetMetalGuard
     {
         private readonly ModelDoc2 _doc;
+        private readonly bool _samePart;
 
-        public SheetMetalGuard(ModelDoc2 doc)
+        /// <param name="samePart">The copy is built into the original part.</param>
+        public SheetMetalGuard(ModelDoc2 doc, bool samePart)
         {
             _doc = doc;
+            _samePart = samePart;
         }
 
         /// <summary>The values before a step, and the masses and features of the bodies there were.</summary>
@@ -65,28 +73,48 @@ namespace Spiegelwerk.Sw
         /// <summary>
         /// Compares with the state before the step. A difference is written back; <paramref name="notes"/>
         /// says so. Returns the reason to stop the run if the values or the earlier bodies are not
-        /// as they were afterwards, else null.
+        /// as they were afterwards, else null. The bodies are compared after a change of the values,
+        /// and in the same part always (<see cref="SheetMetalRules.GuardComparesBodies"/>).
         /// </summary>
         /// <param name="own">The step's feature if it stays (null after a failure or removal): the
         /// body it belongs to – the one a tab joined, maybe renamed after it – is not compared.</param>
         public string? Check(State before, List<string> notes, Feature? own)
         {
             List<string> changed = Differences(before);
-            if (changed.Count == 0) return null;
+            if (!SheetMetalRules.GuardComparesBodies(_samePart, changed.Count > 0)) return null;
 
-            if (before.Template != null && SwSheetMetal.Template(_doc) is Feature t)
-                SwSheetMetal.Apply(_doc, t, before.Template, false, Array.Empty<int>());
-            foreach (var kv in before.SheetMetals)
-                if (SwDoc.FeatureByName(_doc, kv.Key) is Feature sm)
-                    SwSheetMetal.Apply(_doc, sm, kv.Value, true, SheetMetalRules.BodyOverrides(kv.Value));
-            _doc.EditRebuild3();
+            List<string> still = new List<string>();
+            if (changed.Count > 0)
+            {
+                if (before.Template != null && SwSheetMetal.Template(_doc) is Feature t)
+                    SwSheetMetal.Apply(_doc, t, before.Template, false, Array.Empty<int>());
+                foreach (var kv in before.SheetMetals)
+                    if (SwDoc.FeatureByName(_doc, kv.Key) is Feature sm)
+                        SwSheetMetal.Apply(_doc, sm, kv.Value, true, SheetMetalRules.RestoreGroups(kv.Value, TryRead(sm)));
+                _doc.EditRebuild3();
+                still = Differences(before);
+            }
 
-            List<string> still = Differences(before);
+            List<string> moved = MovedBodies(before, own);
+            if (still.Count == 0 && moved.Count == 0)
+            {
+                if (changed.Count > 0) notes.Add(SheetMetalRules.GuardRestored(changed));
+                return null;
+            }
+            return SheetMetalRules.GuardAbort(_samePart, changed, still, moved);
+        }
+
+        /// <summary>
+        /// The earlier bodies that are not as they were: missing by name, or with another mass. The
+        /// bodies the step's feature belongs to are left out, by their features: a tab may rename
+        /// the body it joins.
+        /// </summary>
+        private List<string> MovedBodies(State before, Feature? own)
+        {
             MassState total = SwDoc.MassOf(_doc);
             var moved = new List<string>();
             List<Body2> all = SwDoc.SolidBodies(_doc);
             var now = all.ToDictionary(b => b.Name, b => SwDoc.MassOf(new[] { b }), StringComparer.Ordinal);
-            // The bodies the step's feature belongs to, by their features: a tab may rename the body it joins.
             string? ownName = own == null ? null : NameOf(own);
             List<HashSet<string>> ownBodies = ownName == null ? new List<HashSet<string>>()
                 : all.Select(FeatureNames).Where(fs => fs.Contains(ownName)).ToList();
@@ -97,17 +125,19 @@ namespace Spiegelwerk.Sw
                 if (!now.TryGetValue(kv.Key, out MassState mass) || !MassComparison.Compare(MassState.Empty, mass - kv.Value, total).Passes)
                     moved.Add(kv.Key);
             }
-            if (still.Count == 0 && moved.Count == 0)
+            return moved;
+        }
+
+        private SheetMetalParameters? TryRead(Feature sm)
+        {
+            try
             {
-                notes.Add($"Die Blech-Standardwerte hatten sich mit diesem Schritt geändert und wurden wiederhergestellt ({string.Join("; ", changed)}).");
+                return SwSheetMetal.ReadParameters(_doc, sm, true);
+            }
+            catch (Exception)
+            {
                 return null;
             }
-            string bodies = moved.Count > 0 ? $" Betroffen: {string.Join(", ", moved.Select(n => $"„{n}“"))}." : "";
-            if (still.Count == 0)
-                return $"Achtung: Die Blech-Standardwerte des Teils hatten sich mit diesem Schritt geändert ({string.Join("; ", changed)}) und wurden wiederhergestellt, " +
-                       $"frühere Körper sind danach aber nicht wie vorher.{bodies} Die bisher gespiegelten Blechkörper können sich geändert haben – bitte prüfen.";
-            return $"Achtung: Die Blech-Standardwerte des Teils wurden verändert und ließen sich nicht wiederherstellen ({string.Join("; ", still)}).{bodies} " +
-                   "Die bisher gespiegelten Blechkörper können sich geändert haben – bitte prüfen.";
         }
 
         /// <summary>The names of a body's features; empty if not readable.</summary>

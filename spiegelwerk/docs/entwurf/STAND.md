@@ -54,18 +54,35 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   des Originals auch in der Meldung eines abgelehnten Laufs. STOLPERSTEINE 187–191, Prüftabelle.
   Abweichend vom Plan: Zu B15 nennt der Plan nur Rücklesen und „nicht anwendbar“; die Überschreibungen des ersten
   Körpers warten jetzt auf den zweiten (`BodyOverrideModeOf`), und der Wächter lässt den Körper einer Lasche aus.
+- Blech S1b (Zweig `feat-blech`): Basislasche und Abwicklung im selben Teil, die Ablehnung im selben Teil aufgehoben.
+  Core: `SheetMetalRules.GuardExpectationOf` (Stand ab der ersten Kopie, ohne lesbaren Stand keine Basislasche),
+  `GuardComparesBodies`, `GuardAbort`/`GuardRestored` (Meldung nennt das Original), `RestoreGroups`, `SamePartOverrides`
+  und `BodyValues`, `BaseFlangeToggles` (keine „Dickenrichtung umgekehrt“ im selben Teil), `TabRefusal`, `DeleteRefusal`,
+  Texte zu den geteilten Standardwerten; `UnsupportedFeatures.RefusalBeforeCapture` ohne `samePart`; Tests
+  `SheetMetalSamePartTests`, Ablehnung. Add-In: `SheetMetalGuard` mit `samePart` (Körper samt Original immer verglichen,
+  Einkörper-Stand über die abweichenden Gruppen zurückgeschrieben), `StepRunner` (ohne Stand keine Basislasche),
+  `BaseFlangeBuilder` (Lasche ohne eigenen Körper abgelehnt, Masse des Originals nach jedem Versuch, Blech-Feature des
+  Originals für eine Lasche mit nur gewählten Features, eigene Werte der Kopie), `FlatPatternBuilder` (Flächen nur eigener
+  Körper), `SheetMetalSession.ApplyTo` einmal und auch nach einem unerwarteten Fehler, `MirrorJob` („Original löschen“
+  abgelehnt, geteilte Standardwerte und Gleichungen darauf im Bericht). STOLPERSTEINE 192–198, Prüftabelle.
+  Abweichend vom Plan: Der Wächter erwartet seit S1a in beiden Fällen den Stand vor dem Schritt; `GuardExpectationOf`
+  unterscheidet deshalb nicht „Standardwerte oder Körper“ im neuen Teil, sondern nur, ob ein Stand da sein muss (im
+  selben Teil) – der Test heißt entsprechend. Im selben Teil vergleicht der Wächter die Körper immer, nicht nur nach einer
+  Änderung der Werte, und `SamePartOverrides`/`RestoreGroups` kommen hinzu (Einkörper-Original, B14/B15 offen). Mit nur
+  gewählten Features darf eine Lasche am Körper des Originals anschließen (A1 §11 nennt nur den eigenen Körper; A2/A3 §8
+  erlauben Bezüge auf das Original). Scheitert B14 im Live-Test, kommt die Ablehnung im selben Teil zurück.
+  Nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 und S1a stehen und sind geprüft (Zweig `feat-blech`), als Nächstes S1b (selbes Teil); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 und S1a stehen und sind geprüft, S1b (selbes Teil) steht (Zweig `feat-blech`), als Nächstes seine Prüfung und S2 (Saum, Gehrungslasche, Biegungen); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S1b (selbes Teil: Wächter im Schnappschussmodus, Lasche mit Bereich, beide
-   Zustände wiederherstellen, „Original löschen“ abgelehnt) usw. nach `blech-plan.md`; jeder Schritt mit Core-Tests,
-   Prüfung und Gegenprüfung.
+1. Blech S1b prüfen und gegenprüfen, dann S2 (Saum, Gehrungslasche, Biegungen) usw. nach `blech-plan.md`; jeder
+   Schritt mit Core-Tests, Prüfung und Gegenprüfung.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.
 3. Doku, Version, Regressionsprüfung, Release (Tag nur nach Rückfrage).

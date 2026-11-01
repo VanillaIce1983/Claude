@@ -35,19 +35,16 @@ namespace Spiegelwerk.Core.Planning
             return $"Blech-Feature „{feature}“ ({type}): {Reason(type)} Es wurde nichts gespiegelt.";
         }
 
-        /// <summary>Sheet metal in the same part (until blech-plan S1b).</summary>
-        public static string SamePartRefusal(string feature) =>
-            $"Blech im selben Teil wird noch nicht unterstützt („{feature}“). Bitte in ein neues Teil spiegeln. Es wurde nichts gespiegelt.";
-
         /// <summary>
         /// Step 1 for the collected features in creation order: the first refused one
-        /// (<see cref="RefusesBeforeCapture"/>), then – until S1b – sheet metal in the same part.
-        /// A part (a SheetMetal, a flat pattern's sketch or own corner) counts as part of an
-        /// accepted owner if its owner is collected and not refused itself. Null: the run goes on.
+        /// (<see cref="RefusesBeforeCapture"/>). A part (a SheetMetal, a flat pattern's sketch or
+        /// own corner) counts as part of an accepted owner if its owner is collected and not
+        /// refused itself. Null: the run goes on. Since S1b the same part follows the same rule as
+        /// a new part (the guard keeps the part's shared values, blech-plan §3.3).
         /// </summary>
         /// <param name="owners">Part → owner (<see cref="SheetMetalTree.Owners"/>).</param>
         public static string? RefusalBeforeCapture(IReadOnlyList<(string name, string type)> collected,
-            IReadOnlyDictionary<string, (string owner, Records.PartOwnerKind kind)> owners, bool samePart, bool fallbackOn)
+            IReadOnlyDictionary<string, (string owner, Records.PartOwnerKind kind)> owners, bool fallbackOn)
         {
             var types = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var (name, type) in collected) types[name] = type;
@@ -57,10 +54,6 @@ namespace Spiegelwerk.Core.Planning
             foreach (var (name, type) in collected)
                 if (RefusesBeforeCapture(type, Accepted(name), fallbackOn))
                     return RunRefusal(name, type);
-            if (samePart)
-                foreach (var (name, type) in collected)
-                    if (IsSheetMetal(type))
-                        return SamePartRefusal(name);
             return null;
         }
 

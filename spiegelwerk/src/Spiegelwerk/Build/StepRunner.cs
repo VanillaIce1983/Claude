@@ -80,8 +80,17 @@ namespace Spiegelwerk.Build
             bool guardOriginal = ctx.SeparateBody && record.ChangesSolid;
             MassState originalBefore = guardOriginal ? SwDoc.MassOf(ctx.OriginalBodies()) : MassState.Empty;
             HashSet<string> featuresBefore = TopLevelNames(ctx.Doc);
-            // A step that may write the shared sheet-metal values runs under the guard (A1 P1).
+            // A step that may write the shared sheet-metal values runs under the guard (A1 P1); in the
+            // same part not at all without its snapshot – the values are the original's (S1b).
             SheetMetalGuard.State? guardBefore = record.TouchesSheetMetalDefaults ? ctx.Shared.Guard?.Take() : null;
+            if (record.TouchesSheetMetalDefaults && ctx.Shared.Guard != null &&
+                SheetMetalRules.GuardExpectationOf(ctx.SamePart, guardBefore != null) == GuardExpectation.NotBuilt)
+            {
+                ReportEntry notBuilt = ctx.Report.Add(record, ReportStatus.Failed, SheetMetalRules.GuardNotReadable);
+                notBuilt.Details.Add("Folgende Features, die sich auf dieses beziehen, können ebenfalls scheitern.");
+                if (record.BringsParts) WithdrawParts(ctx, record.Name);
+                return notBuilt;
+            }
             // The first sheet-metal body still has the defaults, its own values follow (B15); a base flange says so itself.
             bool bodyWaits = ctx.Shared.PendingBodyOverrides.Count > 0 && !(record is BaseFlangeRecord);
             BuildResult result;

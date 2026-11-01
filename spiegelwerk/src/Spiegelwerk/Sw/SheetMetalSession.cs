@@ -10,7 +10,8 @@ namespace Spiegelwerk.Sw
     /// after the flat pattern and exist only flattened; the mass of a flattened part is not the
     /// folded one. So before anything is collected every flat pattern that is flattened in the
     /// active configuration is folded (suppressed), and put back when the run ends – whatever
-    /// happens. The copies get the recorded state at the end of the build.
+    /// happens. The copies get the recorded state at the end of the build; in the same part
+    /// (S1b) both, the originals and their copies, end in the state the originals had.
     /// </summary>
     internal sealed class SheetMetalSession
     {
@@ -20,6 +21,7 @@ namespace Spiegelwerk.Sw
         private readonly Dictionary<string, bool> _flattened = new Dictionary<string, bool>(StringComparer.Ordinal);
 
         private bool _restored;
+        private bool _applied;
 
         private SheetMetalSession(ModelDoc2 doc)
         {
@@ -66,12 +68,16 @@ namespace Spiegelwerk.Sw
         }
 
         /// <summary>
-        /// The copies of the flat patterns get the state of their originals (flattened or folded).
-        /// Returns report lines for what could not be set.
+        /// The copies of the flat patterns get the state of their originals (flattened or folded):
+        /// at the end of the build, or – the build stopped on an unexpected error – where it stopped.
+        /// In the same part the originals follow with <see cref="Restore"/>, so both end as they
+        /// were. Returns report lines for what could not be set; runs once.
         /// </summary>
         public List<string> ApplyTo(ModelDoc2 target, IEnumerable<(string original, Feature copy)> copies)
         {
             var lines = new List<string>();
+            if (_applied) return lines;
+            _applied = true;
             foreach (var (original, copy) in copies)
             {
                 if (!WasFlattened(original)) continue;

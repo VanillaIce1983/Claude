@@ -6,6 +6,7 @@ using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
+using Spiegelwerk.Core.Verification;
 using Spiegelwerk.Sw;
 using static Spiegelwerk.Build.Builders.BuilderSupport;
 
@@ -43,8 +44,10 @@ namespace Spiegelwerk.Build.Builders
             ModelDoc2 doc = ctx.Doc;
             var notes = new List<string>();
 
-            // Same part: a tab only on the job's own bodies, the first mirrored body never merges.
-            string? refused = PlanSeparateBody(ctx, false, r.MergesIntoExisting, out bool scope, out bool _);
+            // Same part: a tab only on the job's own bodies (path C first, with scope), none yet: not built;
+            // the first mirrored body never merges (body count and the original's mass after every attempt).
+            string? refused = PlanSeparateBody(ctx, false, r.MergesIntoExisting, out bool scope, out bool _)
+                              ?? SheetMetalRules.TabRefusal(r.MergesIntoExisting, ctx.SeparateBody, ctx.SeparateBody ? ctx.OwnBodies().Count : 0);
             if (refused != null) return Fail(refused, notes);
 
             var (revDir, revThk) = SheetMetalRules.BaseFlangeFlags(r.ClosedProfile, r.ReverseDirection, r.ReverseThickness, sketch.Sigma, r.SymmetricThickness);
@@ -66,7 +69,11 @@ namespace Spiegelwerk.Build.Builders
             SheetMetalParameters? template = first || targetTemplate == null ? null : TryRead(doc, targetTemplate, false);
             Feature? tabSheetMetal = r.MergesIntoExisting ? TabSheetMetal(ctx, r) : null;
             SheetMetalParameters? targetBody = tabSheetMetal == null ? null : TryRead(doc, tabSheetMetal, true);
-            IReadOnlyList<int> overrides = SheetMetalRules.BodyOverrides(r.Body);
+            // Same part: the defaults are the original's and never written – the copy's SheetMetal also
+            // overrides what they do not give it (a single-body original whose values are not the defaults).
+            IReadOnlyList<int> overrides = ctx.SamePart && !r.MergesIntoExisting
+                ? SheetMetalRules.SamePartOverrides(r.Body, template, r.Defaults)
+                : SheetMetalRules.BodyOverrides(r.Body);
             BodyOverrideMode overrideMode = SheetMetalRules.BodyOverrideModeOf(first, r.MergesIntoExisting, overrides.Count, ctx.Shared.SingleSheetMetalBody);
             // What the first body makes the part's values: the original's defaults, or in a copy that stays single-body the body's own.
             SheetMetalParameters? partValues = overrideMode == BodyOverrideMode.PartValues ? SheetMetalRules.OwnValues(r.Defaults, r.Body!) : r.Defaults;
@@ -81,6 +88,8 @@ namespace Spiegelwerk.Build.Builders
 
             // ---- create: each path checked and cleaned up before the next
             int expectedDelta = SheetMetalRules.ExpectedBodyDelta(r.MergesIntoExisting);
+            // Separate body: an attempt that merged with the original (no Merge member on A and B) is no success.
+            MassState originalBefore = ctx.SeparateBody ? SwDoc.MassOf(ctx.OriginalBodies()) : MassState.Empty;
             var tried = new List<string>();
             // Why attempts failed: said only if none succeeds.
             var failures = new List<string>();
@@ -110,7 +119,13 @@ namespace Spiegelwerk.Build.Builders
                     }
                     List<Feature> now = SwSheetMetal.NewSince(doc, before.Names);
                     List<Feature> flanges = now.Where(x => x.GetTypeName2() == "SMBaseFlange").ToList();
-                    if (flanges.Count == 1 && SwDoc.SolidBodies(doc).Count - before.Bodies == expectedDelta)
+                    bool counted = flanges.Count == 1 && SwDoc.SolidBodies(doc).Count - before.Bodies == expectedDelta;
+                    if (counted && ctx.SeparateBody && !OriginalAsBefore(ctx, now, originalBefore))
+                    {
+                        counted = false;
+                        failures.Add($"Weg {attempt.Name}: hätte das Original verändert (verschmolzen); wieder entfernt.");
+                    }
+                    if (counted)
                     {
                         f = flanges[0];
                         made = now;
@@ -155,8 +170,9 @@ namespace Spiegelwerk.Build.Builders
             if (first && defaults != null && !gauge) notes.AddRange(WritePartValues(doc, sheetMetal, defaults));
             var info = new List<string>();
             if (overrideMode == BodyOverrideMode.PartValues) info.Add(SheetMetalRules.OwnValuesAsPartValues);
+            // The body's own values: the overridden groups from it, the rest – in the same part a group the defaults do not give it – as it has them.
             if (sheetMetal != null && overrideMode == BodyOverrideMode.Apply)
-                notes.AddRange(SwSheetMetal.Apply(doc, sheetMetal, r.Body!, true, overrides));
+                notes.AddRange(SwSheetMetal.Apply(doc, sheetMetal, SheetMetalRules.BodyValues(r.Defaults, r.Body!), true, overrides));
             if (sheetMetal != null && overrideMode == BodyOverrideMode.Deferred)
             {
                 // Set by StepRunner after the step that makes the second body, outside its check and guard.
@@ -592,10 +608,15 @@ namespace Spiegelwerk.Build.Builders
             UseMaterialParameters = p.UseMaterialParameters == null ? (bool?)null : false,
         };
 
-        /// <summary>The SheetMetal of the body a tab joins: the copy of the shared one, else the only one in the target.</summary>
+        /// <summary>
+        /// The SheetMetal of the body a tab joins: the copy of the shared one; in the same part with
+        /// selected features, where a tab may join the original's body, the original's itself; else
+        /// the only one in the target.
+        /// </summary>
         private static Feature? TabSheetMetal(BuildContext ctx, BaseFlangeRecord r)
         {
             Feature? sm = r.TabOfSheetMetal != null && ctx.Created.TryGetValue(r.TabOfSheetMetal, out Feature copy) ? copy : null;
+            if (sm == null && ctx.SamePart && !ctx.SeparateBody && r.TabOfSheetMetal != null) sm = SwDoc.FeatureByName(ctx.Doc, r.TabOfSheetMetal);
             if (sm == null)
             {
                 List<Feature> all = SwSheetMetal.OfType(ctx.Doc, "SheetMetal");
@@ -659,6 +680,21 @@ namespace Spiegelwerk.Build.Builders
             return SheetMetalCompare.Scalars(values).Select(x => $"Basislasche: {x}").ToList();
         }
 
+        /// <summary>
+        /// Separate body: the original's bodies after an attempt – every body that is not the job's
+        /// and holds none of the attempt's features – weigh what they weighed before. A flange that
+        /// merged with the original makes its body one of the attempt's, and the rest lighter.
+        /// </summary>
+        private static bool OriginalAsBefore(BuildContext ctx, List<Feature> made, MassState before)
+        {
+            var names = new HashSet<string>(made.Select(m => m.Name), StringComparer.Ordinal);
+            List<Body2> original = SwDoc.SolidBodies(ctx.Doc)
+                .Where(b => !ctx.IsOwnBody(b) && !((object)b.GetFeatures() is object[] fs && fs.OfType<Feature>().Any(f => names.Contains(f.Name))))
+                .ToList();
+            MassState after = SwDoc.MassOf(original);
+            return MassComparison.Compare(MassState.Empty, after - before, before).Passes;
+        }
+
         // ---- removal
 
         /// <summary>Everything the step made since the snapshot; what stays is said.</summary>
@@ -698,22 +734,11 @@ namespace Spiegelwerk.Build.Builders
         {
             ModelDoc2 doc = ctx.Doc;
             bool midPlane = sides.Any(s => s.End == EndCondition.MidPlane);
-            if (r.ClosedProfile)
-            {
-                result.Alternatives.Add(new Alternative("Blechdicke auf die andere Seite",
-                    () => FeatureEdit.BaseFlange(doc, f, d => d.ReverseDirection = !d.ReverseDirection)));
-                // In the same part it would write the shared defaults and has no effect on a closed profile anyway (A1 P1).
-                if (!ctx.SamePart && !r.SymmetricThickness)
-                    result.Alternatives.Add(new Alternative("Dickenrichtung umgekehrt",
-                        () => FeatureEdit.BaseFlange(doc, f, d => d.ReverseThickness = !d.ReverseThickness)));
-                return;
-            }
-            if (!midPlane)
-                result.Alternatives.Add(new Alternative("Richtung umgekehrt",
-                    () => FeatureEdit.BaseFlange(doc, f, d => d.ReverseDirection = !d.ReverseDirection)));
-            if (!r.SymmetricThickness)
-                result.Alternatives.Add(new Alternative("Materialseite der Kontur gewechselt",
-                    () => FeatureEdit.BaseFlange(doc, f, d => d.ReverseThickness = !d.ReverseThickness)));
+            // In the same part no thickness direction for a closed profile: no effect, and it would write the shared values (A1 P1).
+            foreach (var (toggle, label) in SheetMetalRules.BaseFlangeToggles(r.ClosedProfile, r.SymmetricThickness, midPlane, ctx.SamePart))
+                result.Alternatives.Add(new Alternative(label, toggle == BaseFlangeToggle.ReverseDirection
+                    ? () => FeatureEdit.BaseFlange(doc, f, d => d.ReverseDirection = !d.ReverseDirection)
+                    : (Func<bool>)(() => FeatureEdit.BaseFlange(doc, f, d => d.ReverseThickness = !d.ReverseThickness))));
         }
 
         private static string Describe(BaseFlangeRecord r, bool directionFlipped, bool sideFlipped)

@@ -160,10 +160,10 @@ namespace Spiegelwerk.Build
                     return new MirrorJobResult(report, null);
                 }
                 // Refusal step 1 (blech-plan §1.5): by type, a part of an accepted owner (the SheetMetal of
-                // a collected base flange) exempt; until S1b also sheet metal in the same part. The
-                // fallback switch comes with the fallback (S7a).
+                // a collected base flange) exempt; the same part alike since S1b. The fallback switch
+                // comes with the fallback (S7a).
                 string? refusal = UnsupportedFeatures.RefusalBeforeCapture(features.Select(f => (f.Name, f.GetTypeName2())).ToList(), sheetMetal.Owners,
-                    opt.Target == MirrorTarget.SamePart, fallbackOn: false);
+                    fallbackOn: false);
                 if (refusal != null) throw new InvalidOperationException(refusal);
                 progress.Start(features.Count, opt.VerifySteps);
                 var capture = new FeatureCapture(source, _math, regionSpaces, sheetMetal: sheetMetal, wasFlattened: session == null ? null : (Func<string, bool>)session.WasFlattened);
@@ -208,11 +208,15 @@ namespace Spiegelwerk.Build
             if (session != null)
             {
                 ctx.Shared.Session = session;
-                ctx.Shared.Guard = new SheetMetalGuard(target);
+                // Same part: the snapshot from the first flange on, the original among the bodies it compares (S1b).
+                ctx.Shared.Guard = new SheetMetalGuard(target, opt.Target == MirrorTarget.SamePart);
                 ctx.Shared.SingleSheetMetalBody = SheetMetalRules.StaysSingleBody(records);
             }
             foreach (PartOfFeatureRecord part in records.OfType<PartOfFeatureRecord>()) ctx.PartOwners[part.Name] = part.Owner;
             foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) ctx.PointSketches.Add(pattern.SketchName);
+            // The copies' flat patterns get the state of their originals (flattened or folded) – once, also after an unexpected error.
+            List<string> FlatStates() => session == null ? new List<string>()
+                : session.ApplyTo(target, records.OfType<FlatPatternRecord>().Where(fp => ctx.Created.ContainsKey(fp.Name)).Select(fp => (fp.Name, ctx.Created[fp.Name])));
             report.General.Add($"Spiegelebene: {ReportText.Plane(req.MirrorPlane)}");
             // New part: only the part's material is copied. Same part: a body of its own gets the part's material.
             if (opt.Target == MirrorTarget.NewPart ? opt.CopyMaterial : separateBody) NoteBodyMaterials(source, selectedBodyNames, req.Features.Count > 0 ? features : null, report);
@@ -252,10 +256,8 @@ namespace Spiegelwerk.Build
                 progress.Show(RunSteps.Finish);
                 // Own values of the first sheet-metal body that no second body brought (B15).
                 if (session != null) BaseFlangeBuilder.FinishPending(ctx);
-                // The copies' flat patterns get the state of their originals (flattened or folded).
-                if (session != null)
-                    report.General.AddRange(session.ApplyTo(target, records.OfType<FlatPatternRecord>()
-                        .Where(fp => ctx.Created.ContainsKey(fp.Name)).Select(fp => (fp.Name, ctx.Created[fp.Name]))));
+                // In the same part the originals follow when the session ends (Restore): both as they were.
+                report.General.AddRange(FlatStates());
                 if (regionSpaces.ReportLine() is string spaceLine) report.General.Add(spaceLine);
                 target.EditRebuild3();
                 bool atEnd = SwDoc.RollToEnd(target);
@@ -278,8 +280,13 @@ namespace Spiegelwerk.Build
                 }
                 else
                 {
-                    if (NoteEquationDrivenDimensions(source, ctx, report) && secondHalves) report.General.Add(MirrorFeatureRules.EquationsNote);
-                    if (opt.DeleteOriginal && !atEnd) report.General.Add("Original nicht gelöscht: Die Rückrollleiste steht nicht am Ende.");
+                    bool sheetMetalBuilt = session != null && records.Any(r => r is BaseFlangeRecord && ctx.Created.ContainsKey(r.Name));
+                    // Original and copy share the part's sheet-metal defaults: said once, with the equations on them.
+                    if (sheetMetalBuilt) report.General.Add(SheetMetalRules.SharedDefaultsNote);
+                    if (NoteEquationDrivenDimensions(source, ctx, report, sheetMetalBuilt) && secondHalves) report.General.Add(MirrorFeatureRules.EquationsNote);
+                    // A1 P8: the defaults hang on the first sheet-metal body; deleting it could change the copy.
+                    if (opt.DeleteOriginal && SheetMetalRules.DeleteRefusal(records) is string notDeleted) report.General.Add(notDeleted);
+                    else if (opt.DeleteOriginal && !atEnd) report.General.Add("Original nicht gelöscht: Die Rückrollleiste steht nicht am Ende.");
                     // Esc with the last step: everything is built, but the user wanted to stop – deleting cannot be undone.
                     else if (opt.DeleteOriginal && progress.EscAtEnd) report.General.Add("Original nicht gelöscht: Der Lauf wurde mit Esc abgebrochen.");
                     else if (opt.DeleteOriginal) DeleteOriginals(source, features, bodyScope, report);
@@ -290,6 +297,14 @@ namespace Spiegelwerk.Build
                 // Unexpected API failure: keep what was built and the report, so the user sees where it stopped.
                 report.Aborted = true;
                 report.General.Add($"Abbruch wegen eines unerwarteten Fehlers: {ex.Message}");
+                try
+                {
+                    report.General.AddRange(FlatStates());
+                }
+                catch (Exception)
+                {
+                    // The copies stay folded; the original is put back by the session anyway.
+                }
             }
             return new MirrorJobResult(report, target);
         }
@@ -516,19 +531,29 @@ namespace Spiegelwerk.Build
         /// <summary>
         /// Same part: equations stay with the original. Where they drive a mirrored dimension,
         /// the copy has a fixed value – a later change of a global variable moves only the
-        /// original half. Only a note: never stops the run.
+        /// original half; that includes the sheet thickness of a SheetMetal registered with its
+        /// base flange. Equations on the part's sheet-metal defaults are the exception: the copy
+        /// shares those defaults and follows them (<paramref name="sheetMetalBuilt"/>). Only a
+        /// note: never stops the run.
         /// </summary>
         /// <returns>Whether equations drive mirrored dimensions.</returns>
-        private static bool NoteEquationDrivenDimensions(ModelDoc2 doc, BuildContext ctx, MirrorReport report)
+        private static bool NoteEquationDrivenDimensions(ModelDoc2 doc, BuildContext ctx, MirrorReport report, bool sheetMetalBuilt)
         {
             try
             {
                 EquationMgr eq = doc.GetEquationMgr();
+                string? template = sheetMetalBuilt ? SwSheetMetal.Template(doc)?.Name : null;
                 var driven = new List<string>();
+                var shared = new List<string>();
                 for (int i = 0; i < eq.GetCount(); i++)
-                    if (!eq.get_Disabled(i) && !eq.get_Suppression(i) && EquationText.Driven(eq.get_Equation(i)) is string name &&
-                        EquationText.Dimension(name) is (string, string owner) && ctx.Created.ContainsKey(owner))
-                        driven.Add(name);
+                {
+                    if (eq.get_Disabled(i) || eq.get_Suppression(i) || !(EquationText.Driven(eq.get_Equation(i)) is string name) ||
+                        !(EquationText.Dimension(name) is (string, string owner)))
+                        continue;
+                    if (ctx.Created.ContainsKey(owner)) driven.Add(name);
+                    else if (template != null && owner == template) shared.Add(name);
+                }
+                if (shared.Count > 0) report.General.Add(SheetMetalRules.SharedDefaultsEquations(shared));
                 if (driven.Count == 0) return false;
                 string more = driven.Count > 5 ? $" und {driven.Count - 5} weitere" : "";
                 report.General.Add($"Gleichungen werden im selben Teil nicht übertragen: Im Original treiben sie {Quoted(driven.Take(5))}{more}, " +

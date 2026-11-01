@@ -9,7 +9,8 @@ namespace Spiegelwerk.Core.Tests
     /// <summary>
     /// Refusal (blech-plan §1.5): before capture by type, after capture by position in the body.
     /// S0 was inert; S1a opens base flange, flat pattern and the template folders, decides the user
-    /// corner trim as not rebuilt and refuses every other sheet-metal type as before.
+    /// corner trim as not rebuilt and refuses every other sheet-metal type as before; S1b opens the
+    /// same types in the same part.
     /// </summary>
     public class SheetMetalRefusalTests
     {
@@ -62,7 +63,7 @@ namespace Spiegelwerk.Core.Tests
             // Without an accepted owner (convert, lofted bend, swept flange …) it is refused, with the fallback off and – not yet decided – on.
             Assert.True(UnsupportedFeatures.RefusesBeforeCapture("SheetMetal", partOfAcceptedOwner: false, fallbackOn: false));
             var owners = new Dictionary<string, (string, PartOwnerKind)>();
-            string? text = UnsupportedFeatures.RefusalBeforeCapture(new[] { ("Sheet-Metal1", "SheetMetal") }, owners, samePart: false, fallbackOn: false);
+            string? text = UnsupportedFeatures.RefusalBeforeCapture(new[] { ("Sheet-Metal1", "SheetMetal") }, owners, fallbackOn: false);
             Assert.Equal("Blech-Feature „Sheet-Metal1“ (SheetMetal) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.", text);
         }
 
@@ -71,24 +72,28 @@ namespace Spiegelwerk.Core.Tests
         {
             var owners = new Dictionary<string, (string, PartOwnerKind)> { ["Sheet-Metal1"] = ("Base-Flange1", PartOwnerKind.SheetMetal) };
             var collected = new List<(string, string)> { ("Sheet-Metal1", "SheetMetal"), ("Sketch1", "ProfileFeature"), ("Base-Flange1", "SMBaseFlange"), ("Flat-Pattern1", "FlatPattern") };
-            Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(collected, owners, samePart: false, fallbackOn: false));
+            Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(collected, owners, fallbackOn: false));
             // Its base flange not collected: the SheetMetal stands alone and is refused.
-            Assert.NotNull(UnsupportedFeatures.RefusalBeforeCapture(collected.Where(c => c.Item1 != "Base-Flange1").ToList(), owners, false, false));
+            Assert.NotNull(UnsupportedFeatures.RefusalBeforeCapture(collected.Where(c => c.Item1 != "Base-Flange1").ToList(), owners, false));
             // An edge flange later in the part still refuses the run.
             collected.Add(("Edge-Flange1", "EdgeFlange"));
             Assert.Equal("Blech-Feature „Edge-Flange1“ (EdgeFlange) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.",
-                UnsupportedFeatures.RefusalBeforeCapture(collected, owners, false, false));
+                UnsupportedFeatures.RefusalBeforeCapture(collected, owners, false));
         }
 
         [Fact]
-        public void Same_part_with_sheet_metal_is_refused_until_S1b()
+        public void Same_part_follows_the_new_part_rules_since_S1b()
         {
+            // S1b lifts the same-part refusal: base flange, SheetMetal and flat pattern go on, everything not decided still refuses.
             var owners = new Dictionary<string, (string, PartOwnerKind)> { ["Sheet-Metal1"] = ("Base-Flange1", PartOwnerKind.SheetMetal) };
-            var collected = new List<(string, string)> { ("Sheet-Metal1", "SheetMetal"), ("Base-Flange1", "SMBaseFlange") };
-            Assert.Equal("Blech im selben Teil wird noch nicht unterstützt („Sheet-Metal1“). Bitte in ein neues Teil spiegeln. Es wurde nichts gespiegelt.",
-                UnsupportedFeatures.RefusalBeforeCapture(collected, owners, samePart: true, fallbackOn: false));
-            // Without sheet metal the same part goes on.
-            Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(new[] { ("Boss-Extrude1", "Extrusion") }, owners, true, false));
+            var collected = new List<(string, string)> { ("Sheet-Metal1", "SheetMetal"), ("Sketch1", "ProfileFeature"), ("Base-Flange1", "SMBaseFlange"), ("Flat-Pattern1", "FlatPattern") };
+            Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(collected, owners, fallbackOn: false));
+            collected.Add(("Hem1", "Hem"));
+            Assert.Equal("Blech-Feature „Hem1“ (Hem) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.",
+                UnsupportedFeatures.RefusalBeforeCapture(collected, owners, fallbackOn: false));
+            // The table is that of S1a: S1b opens the same types, now in the same part too.
+            Assert.Equal(SheetMetalState.Rebuilt, SheetMetalTypes.Of("SMBaseFlange")!.State);
+            Assert.Equal(SheetMetalState.NotYet, SheetMetalTypes.Of("SheetMetal")!.State);
         }
 
         [Fact]

@@ -36,6 +36,29 @@ namespace Spiegelwerk.Core.Planning
         Deferred,
     }
 
+    /// <summary>What the guard of the shared sheet-metal values compares a step with (blech-plan §1.4, S1b).</summary>
+    public enum GuardExpectation
+    {
+        /// <summary>Nothing to protect yet: a new part before its first base flange, which makes the defaults.</summary>
+        None,
+
+        /// <summary>The state before the step: the defaults, every SheetMetal, the earlier bodies.</summary>
+        Snapshot,
+
+        /// <summary>The same part without a readable snapshot: the step is not built – the original's values would be unguarded.</summary>
+        NotBuilt,
+    }
+
+    /// <summary>A variant of a base flange for the step check.</summary>
+    public enum BaseFlangeToggle
+    {
+        /// <summary>ReverseDirection: the plate side of a closed profile, the depth of an open one.</summary>
+        ReverseDirection,
+
+        /// <summary>ReverseThickness: the material side of an open contour (no effect on a closed profile).</summary>
+        ReverseThickness,
+    }
+
     /// <summary>What a base flange is created with: thickness, radius, the allowance object and the relief.</summary>
     public sealed class FlangeCreation
     {
@@ -236,6 +259,170 @@ namespace Spiegelwerk.Core.Planning
             if (body.OverrideAutoRelief) result.Add(2);
             return result;
         }
+
+        // ---- same part (blech-plan S1b, A1 §11)
+
+        /// <summary>
+        /// What the guard compares a step that may write the shared values with. The state before
+        /// the step whenever there is one – in the same part from the first copied flange on (the
+        /// original's defaults and SheetMetals are there), in a new part from the second (the first
+        /// makes the defaults; S1a: there too the snapshot, not the original's defaults, so a first
+        /// body that did not take them fully does not stop every later step). In the same part a
+        /// step without a readable snapshot is not built: the original's values would be unguarded.
+        /// </summary>
+        /// <param name="samePart">The copy is built into the original part.</param>
+        /// <param name="snapshotTaken">The guard could read the defaults, the SheetMetals and the bodies before the step.</param>
+        public static GuardExpectation GuardExpectationOf(bool samePart, bool snapshotTaken) =>
+            snapshotTaken ? GuardExpectation.Snapshot
+            : samePart ? GuardExpectation.NotBuilt
+            : GuardExpectation.None;
+
+        /// <summary>
+        /// Whether the guard compares the earlier bodies even if the shared values are unchanged.
+        /// In the same part they include the original: a step must leave it as it was whatever the
+        /// cause (a flag of the shared values the guard does not read, a merge with it). In a new
+        /// part only after a change of the values – nothing else of one step reaches another body.
+        /// </summary>
+        public static bool GuardComparesBodies(bool samePart, bool valuesChanged) => samePart || valuesChanged;
+
+        /// <summary>The step's shared values had changed and were written back successfully.</summary>
+        public static string GuardRestored(IEnumerable<string> changed) =>
+            $"Die Blech-Standardwerte hatten sich mit diesem Schritt geändert und wurden wiederhergestellt ({string.Join("; ", changed)}).";
+
+        /// <summary>
+        /// Why the guard stops the run, or null: the shared values could not be restored
+        /// (<paramref name="still"/>), or earlier bodies are not as they were (<paramref name="moved"/>).
+        /// In the same part the original may be among them: undo is the way back.
+        /// </summary>
+        /// <param name="changed">What differed after the step, before writing back.</param>
+        public static string? GuardAbort(bool samePart, IReadOnlyCollection<string> changed, IReadOnlyCollection<string> still, IReadOnlyCollection<string> moved)
+        {
+            if (still.Count == 0 && moved.Count == 0) return null;
+            string bodies = moved.Count > 0 ? $" Betroffen: {string.Join(", ", moved.Select(n => $"„{n}“"))}." : "";
+            string tail = samePart
+                ? " Das Original kann betroffen sein – bitte mit Rückgängig prüfen."
+                : " Die bisher gespiegelten Blechkörper können sich geändert haben – bitte prüfen.";
+            if (still.Count > 0)
+                return $"Achtung: Die Blech-Standardwerte des Teils wurden verändert und ließen sich nicht wiederherstellen ({string.Join("; ", still)}).{bodies}{tail}";
+            if (changed.Count == 0)
+                return $"Achtung: Mit diesem Schritt haben sich frühere Körper verändert, obwohl die Blech-Standardwerte gleich geblieben sind.{bodies}{tail}";
+            return $"Achtung: Die Blech-Standardwerte des Teils hatten sich mit diesem Schritt geändert ({string.Join("; ", changed)}) und wurden wiederhergestellt, " +
+                   $"frühere Körper sind danach aber nicht wie vorher.{bodies}{tail}";
+        }
+
+        /// <summary>The same part, a step that may write the shared values, no snapshot: not built.</summary>
+        public const string GuardNotReadable = "Im selben Teil nicht angelegt: Die Blech-Standardwerte und Blech-Features des Teils ließen sich vorher nicht lesen; " +
+                                               "ohne sie lässt sich nicht prüfen, ob das Original unverändert bleibt.";
+
+        /// <summary>
+        /// The override groups to write back on a SheetMetal the guard restores. Those the snapshot
+        /// had set; if its flags were not readable then (single-body or pre-2013 part) but are now –
+        /// the same part became multibody with the copy –, every group whose values differ: in a
+        /// single-body part a body's values are its own, in a multibody part only the overridden ones.
+        /// </summary>
+        /// <param name="before">The SheetMetal before the step.</param>
+        /// <param name="now">The same SheetMetal now; null if not readable.</param>
+        public static IReadOnlyList<int> RestoreGroups(SheetMetalParameters before, SheetMetalParameters? now)
+        {
+            if (before.OverrideReadCode == 0) return BodyOverrides(before);
+            if (now == null || now.OverrideReadCode != 0) return new List<int>();
+            return DifferingGroups(before, now);
+        }
+
+        /// <summary>
+        /// What the original body has: with readable override flags its overridden groups and the
+        /// defaults for the rest (<see cref="OwnValues"/>); without them (a single-body or pre-2013
+        /// part) its SheetMetal's values – there they are the body's own.
+        /// </summary>
+        public static SheetMetalParameters BodyValues(SheetMetalParameters? defaults, SheetMetalParameters body) =>
+            body.OverrideReadCode == 0 ? OwnValues(defaults, body) : body;
+
+        /// <summary>
+        /// The override groups of the copy's SheetMetal in the same part, where the part's defaults
+        /// are the original's and never written: those the original body set
+        /// (<see cref="BodyOverrides"/>) and every other group in which the defaults the copy is
+        /// created with differ from what the original body has (<see cref="BodyValues"/>) – a
+        /// single-body original (no readable flags) whose values are not the part's defaults.
+        /// </summary>
+        /// <param name="body">The original body's SheetMetal.</param>
+        /// <param name="defaultsNow">The part's defaults when the copy is built (the target's TemplateSheetMetal); null if none.</param>
+        /// <param name="originalDefaults">The defaults captured with the original; null before 2013.</param>
+        public static IReadOnlyList<int> SamePartOverrides(SheetMetalParameters? body, SheetMetalParameters? defaultsNow, SheetMetalParameters? originalDefaults)
+        {
+            var groups = new List<int>(BodyOverrides(body));
+            if (body == null || defaultsNow == null) return groups;
+            foreach (int g in DifferingGroups(BodyValues(originalDefaults, body), defaultsNow))
+                if (!groups.Contains(g))
+                    groups.Add(g);
+            groups.Sort();
+            return groups;
+        }
+
+        /// <summary>The override groups whose values differ: 0 thickness or radius, 1 allowance, 2 relief.</summary>
+        private static List<int> DifferingGroups(SheetMetalParameters a, SheetMetalParameters b)
+        {
+            var groups = new List<int>();
+            if (SheetMetalCompare.Scalars(new[]
+                {
+                    ("Blechdicke", a.Thickness, b.Thickness, ScalarKind.Length),
+                    ("Biegeradius", a.BendRadius, b.BendRadius, ScalarKind.Length),
+                }).Count > 0)
+                groups.Add(0);
+            if (SheetMetalCompare.Allowance(a.BendAllowance, b.BendAllowance).Differences.Count > 0) groups.Add(1);
+            if (SheetMetalCompare.Relief(a.Relief, b.Relief).Differences.Count > 0) groups.Add(2);
+            return groups;
+        }
+
+        /// <summary>
+        /// The variants a base flange offers the step check. The plate side of a closed profile and
+        /// the depth of an open one (not with mid-plane); the material side of an open contour
+        /// (not with symmetric thickness, also in the same part – under the guard). The thickness
+        /// direction of a closed profile has no effect and would write the shared values: never in
+        /// the same part (A1 P1), elsewhere only without symmetric thickness.
+        /// </summary>
+        public static IReadOnlyList<(BaseFlangeToggle toggle, string label)> BaseFlangeToggles(bool closedProfile, bool symmetricThickness, bool midPlane, bool samePart)
+        {
+            var result = new List<(BaseFlangeToggle, string)>();
+            if (closedProfile)
+            {
+                result.Add((BaseFlangeToggle.ReverseDirection, "Blechdicke auf die andere Seite"));
+                if (!samePart && !symmetricThickness) result.Add((BaseFlangeToggle.ReverseThickness, "Dickenrichtung umgekehrt"));
+                return result;
+            }
+            if (!midPlane) result.Add((BaseFlangeToggle.ReverseDirection, "Richtung umgekehrt"));
+            if (!symmetricThickness) result.Add((BaseFlangeToggle.ReverseThickness, "Materialseite der Kontur gewechselt"));
+            return result;
+        }
+
+        /// <summary>
+        /// A tab in separate-body mode joins the job's own bodies only (scope, path C first); with
+        /// none yet it would join the original – not built. Null: it may be built.
+        /// </summary>
+        public static string? TabRefusal(bool tab, bool separateBody, int ownBodies) =>
+            tab && separateBody && ownBodies == 0
+                ? "Es gibt noch keinen gespiegelten Blechkörper, an den die Lasche anschließen könnte; das Original bleibt unberührt."
+                : null;
+
+        /// <summary>
+        /// „Original löschen“ after a run with sheet metal (A1 P8, K27): the part's shared values
+        /// hang on its first sheet-metal body, the copy uses them – deleting the original could
+        /// change it, and nothing measures that yet (blech-plan S10). Null: no sheet metal in the
+        /// run. A record that failed keeps the original anyway; this reason is said first.
+        /// </summary>
+        public static string? DeleteRefusal(IEnumerable<FeatureRecord> records) =>
+            records.Any(r => SheetMetalTypes.IsSheetMetal(r.TypeName)) ? DeleteRefused : null;
+
+        /// <summary>The report line of <see cref="DeleteRefusal"/>.</summary>
+        public const string DeleteRefused = "Original nicht gelöscht: Die Blech-Standardwerte des Teils hängen am ersten Blechkörper; die Kopie könnte sich mit dem Löschen ändern.";
+
+        /// <summary>Same part with sheet metal: the copy is not wholly independent of the original.</summary>
+        public const string SharedDefaultsNote = "Blech im selben Teil: Original und Kopie teilen die Blech-Standardwerte des Teils (Ordner „Blech“). " +
+                                                 "Eine Änderung dort wirkt auf beide, soweit ein Körper sie nicht über sein Blech-Feature überschreibt.";
+
+        /// <summary>Same part: equations on the shared values drive the copy too.</summary>
+        public static string SharedDefaultsEquations(IReadOnlyCollection<string> driven) =>
+            $"Gleichungen auf den Blech-Standardwerten ({string.Join(", ", driven.Select(d => $"„{d}“"))}) wirken im selben Teil auch auf die gespiegelten Blechkörper, " +
+            "soweit deren Blech-Features sie nicht überschreiben.";
 
         /// <summary>The first body of a copy that stays single-body: its own values became the part's.</summary>
         public const string OwnValuesAsPartValues = "Eigene Blechparameter des Körpers als Werte des Teils übernommen: Die Kopie hat nur diesen Blechkörper.";

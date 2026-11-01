@@ -38,6 +38,12 @@ namespace Spiegelwerk.Build.Builders
             object? fixedEntity = null;
             if (r.FixedFace?.Kind == GeometryRefKind.Face) fixedEntity = Safe(ctx.Topology.FindFace(r.FixedFace.Face!.Mirror(ctx.Mirror), notes));
             else if (r.FixedFace?.Kind == GeometryRefKind.Edge) fixedEntity = Safe(ctx.Topology.FindEdge(r.FixedFace.Edge!.Mirror(ctx.Mirror), notes));
+            // Same part: the finder falls back on the original where the copy has nothing – a flat pattern of the copy never takes its faces.
+            if (fixedEntity != null && !OnOwnBody(ctx, fixedEntity))
+            {
+                fixedEntity = null;
+                notes.Add("Feste Fläche der Abwicklung nur am Original gefunden; sie wird nicht verwendet.");
+            }
 
             Feature? fp = ctx.SheetMetalBodies.TryGetValue(r.Owner, out SheetMetalBody body) ? body.FlatPattern : null;
             fp ??= FlatPatternOfBody(fixedEntity);
@@ -47,7 +53,7 @@ namespace Spiegelwerk.Build.Builders
             var excluded = new List<object>();
             foreach (FaceSignature excludedFace in r.ExcludedFaces)
             {
-                if (Safe(ctx.Topology.FindFace(excludedFace.Mirror(ctx.Mirror), notes)) is object found) excluded.Add(found);
+                if (Safe(ctx.Topology.FindFace(excludedFace.Mirror(ctx.Mirror), notes)) is object found && OnOwnBody(ctx, found)) excluded.Add(found);
                 else notes.Add("Eine ausgeschlossene Fläche der Abwicklung wurde im Ziel nicht gefunden.");
             }
 
@@ -65,6 +71,19 @@ namespace Spiegelwerk.Build.Builders
             if (r.Flattened) result.Info.Add(SheetMetalRules.FlatConfigurationNote);
             if (r.OwnerFromTree) result.Info.Add(SheetMetalTree.OwnerFromTreeNote);
             return result;
+        }
+
+        /// <summary>Outside the same part any entity; in it only one on a body of the job (not the original's).</summary>
+        private static bool OnOwnBody(BuildContext ctx, object entity)
+        {
+            if (!ctx.SamePart) return true;
+            Body2? body = entity switch
+            {
+                Face2 face => (Body2)(object)face.GetBody(),
+                Edge edge => (Body2)(object)edge.GetBody(),
+                _ => null,
+            };
+            return body != null && ctx.IsOwnBody(body);
         }
 
         /// <summary>The flat pattern among the features of the body that holds the fixed face.</summary>
