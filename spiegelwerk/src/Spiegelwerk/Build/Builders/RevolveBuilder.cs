@@ -13,15 +13,13 @@ namespace Spiegelwerk.Build.Builders
     /// Revolve and Revolve-Cut (also thin). A mirror turns the sense of rotation around, and
     /// how SOLIDWORKS picks the default side of a revolve is not documented; the first guess
     /// follows the sketch normal like an extrude, the verifier corrects it if needed.
+    ///
+    /// The axis is selected with mark 16 (newer official examples), then 4 (the reference);
+    /// selected contours and sketch regions go the ways of ProfileRules.Ways like those of an
+    /// extrude, never with mark 4 together with an axis at 4 (ProfileSupport).
     /// </summary>
     internal sealed class RevolveBuilder : IFeatureBuilder
     {
-        /// <summary>
-        /// Selection mark for the axis: the reference documents 4, newer official examples use 16.
-        /// Both are tried.
-        /// </summary>
-        private static readonly int[] AxisMarks = { 16, 4 };
-
         public bool Handles(FeatureRecord record) => record is RevolveRecord;
 
         public BuildResult Build(FeatureRecord record, BuildContext ctx)
@@ -36,6 +34,8 @@ namespace Spiegelwerk.Build.Builders
             // first, so a refused revolve leaves no helper axis behind.
             string? refused = PlanSeparateBody(ctx, r.IsCut, r.Merge, out bool scope, out bool createMerge);
             if (refused != null) return Fail(refused, notes);
+            refused = ProfileSupport.Plan(ctx, sketch, r, notes);
+            if (refused != null) return Fail(refused, notes);
 
             object? axis = Find(ctx, r.Axis, notes);
             if (axis == null)
@@ -43,40 +43,38 @@ namespace Spiegelwerk.Build.Builders
 
             (bool singleDir, EndCondition dir1, double a1, EndCondition dir2, double a2) = r.Layout();
             bool reverse = DirectionRules.ReverseFlag(r.Reverse, sketch.Sigma);
-            List<object>? contours = MapContours(r.Contours, sketch, notes);
 
             ModelDoc2 doc = ctx.Doc;
-            Feature? f = Create(ctx, r, sketch, contours, axis, singleDir, reverse, dir1, a1, dir2, a2, createMerge);
-            bool contoursPending = false;
-            if (f == null && contours != null)
-            {
-                f = Create(ctx, r, sketch, null, axis, singleDir, reverse, dir1, a1, dir2, a2, createMerge);
-                contoursPending = f != null;
-            }
+            bool wanted = ProfileSupport.Wanted(r);
+            ProfileOutcome made = ProfileSupport.Create(ctx, sketch, r, true, wanted, (way, profile) =>
+                Create(ctx, r, sketch, way, profile, axis, singleDir, reverse, dir1, a1, dir2, a2, createMerge));
+            Feature? f = made.Feature;
             if (f == null) return Fail("SOLIDWORKS hat das Feature nicht erzeugt.", notes);
+            string? profileRefused = ProfileSupport.Finish(ctx, made, wanted, notes);
+            if (profileRefused != null)
+            {
+                Delete(ctx, f);
+                return Fail(profileRefused, notes);
+            }
 
-            if (scope || contoursPending)
+            if (scope)
             {
                 bool ok = FeatureEdit.Revolve(doc, f, d =>
                 {
-                    if (contoursPending) d.Contours = contours!.ToArray();
-                    if (scope)
-                    {
-                        if (!r.IsCut) d.Merge = true;
-                        d.FeatureScope = true;
-                        d.AutoSelect = false;
-                        d.FeatureScopeBodies = OwnBodiesBeforeFeature(ctx);
-                    }
+                    if (!r.IsCut) d.Merge = true;
+                    d.FeatureScope = true;
+                    d.AutoSelect = false;
+                    d.FeatureScopeBodies = OwnBodiesBeforeFeature(ctx);
                 });
                 if (!ok)
                 {
                     Delete(ctx, f);
-                    return Fail("Konturauswahl oder Feature-Bereich ließen sich nicht setzen; das Feature wurde wieder entfernt.", notes);
+                    return Fail("Der Feature-Bereich ließ sich nicht setzen; das Feature wurde wieder entfernt.", notes);
                 }
             }
 
             ctx.Register(r.Name, f);
-            var result = BuildResult.Ok(f, (r.IsCut ? "Rotationsschnitt" : "Rotation") + $", {a1 * 180 / Math.PI:0.##}°");
+            var result = BuildResult.Ok(f, (r.IsCut ? "Rotationsschnitt" : "Rotation") + $", {a1 * 180 / Math.PI:0.##}°" + ProfileSupport.Describe(made));
             result.Notes.AddRange(notes);
             if (notes.Count > 0) result.Status = ReportStatus.Warning;
             if (r.DirectionMatters)
@@ -95,25 +93,24 @@ namespace Spiegelwerk.Build.Builders
             return result;
         }
 
-        private static Feature? Create(BuildContext ctx, RevolveRecord r, SketchMap sketch, List<object>? contours, object axis,
+        /// <summary>
+        /// Creates the revolve with the selection of one profile way (<see cref="ProfileSupport.Select"/>)
+        /// and the axis with the way's mark. Null if a selection failed or SOLIDWORKS made nothing.
+        /// </summary>
+        private static Feature? Create(BuildContext ctx, RevolveRecord r, SketchMap sketch, ProfileWay way, Profile? profile, object axis,
             bool singleDir, bool reverse, EndCondition dir1, double a1, EndCondition dir2, double a2, bool merge)
         {
             ModelDoc2 doc = ctx.Doc;
-            foreach (int mark in AxisMarks)
+            using (way.ContourSelection && profile != null ? new ContourSelectionScope(doc) : null)
             {
+                Feature? f = null;
+                if (ProfileSupport.Select(ctx, sketch, profile, way) && SwSelect.Select(doc, axis, way.AxisMark, true))
+                    f = doc.FeatureManager.FeatureRevolve2(singleDir, true, r.IsThin, r.IsCut, reverse, false,
+                        (int)dir1, (int)dir2, a1, a2, false, false, 0, 0,
+                        r.ThinType, r.Thickness1, r.Thickness2, merge, false, true);
                 SwSelect.Clear(doc);
-                if (contours != null)
-                    for (int i = 0; i < contours.Count; i++) SwSelect.Select(doc, contours[i], 0, i > 0);
-                else
-                    SwSelect.Select(doc, sketch.Feature, 0, false);
-                SwSelect.Select(doc, axis, mark, true);
-                Feature? f = doc.FeatureManager.FeatureRevolve2(singleDir, true, r.IsThin, r.IsCut, reverse, false,
-                    (int)dir1, (int)dir2, a1, a2, false, false, 0, 0,
-                    r.ThinType, r.Thickness1, r.Thickness2, merge, false, true);
-                SwSelect.Clear(doc);
-                if (f != null) return f;
+                return f;
             }
-            return null;
         }
     }
 }

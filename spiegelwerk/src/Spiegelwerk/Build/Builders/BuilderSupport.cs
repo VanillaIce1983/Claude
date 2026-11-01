@@ -23,28 +23,6 @@ namespace Spiegelwerk.Build.Builders
         public static object? Safe(object? o) =>
             (o is Face2 || o is Edge || o is Vertex) && o is Entity e ? e.GetSafeEntity() ?? (object)e : o;
 
-        /// <summary>Selected contours of the original → contours of the new sketch with the same segments.</summary>
-        public static List<object>? MapContours(List<List<string>> contours, SketchMap sketch, List<string> notes)
-        {
-            if (contours.Count == 0) return null;
-            var available = ((object[])(object)sketch.Sketch.GetSketchContours() ?? Array.Empty<object>()).OfType<SketchContour>()
-                .Select(c => (contour: c, ids: new HashSet<string>(((object[])(object)c.GetSketchSegments()).OfType<SketchSegment>().Select(SwDoc.IdOf))))
-                .ToList();
-            var result = new List<object>();
-            foreach (List<string> wanted in contours)
-            {
-                var newIds = new HashSet<string>(wanted.Where(sketch.Segments.ContainsKey).Select(id => SwDoc.IdOf(sketch.Segments[id])));
-                var match = available.FirstOrDefault(a => a.ids.SetEquals(newIds));
-                if (match.contour == null)
-                {
-                    notes.Add("Eine ausgewählte Kontur wurde in der neuen Skizze nicht gefunden; es wird die ganze Skizze verwendet.");
-                    return null;
-                }
-                result.Add(match.contour);
-            }
-            return result;
-        }
-
         /// <summary>
         /// Removes a feature that could not be completed. Its sketch stays for the next feature,
         /// unless <paramref name="withAbsorbed"/> – a hole's sketches belong to the hole alone.
