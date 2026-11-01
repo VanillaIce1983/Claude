@@ -58,16 +58,21 @@ Während des Laufs zeigt die Statusleiste von SOLIDWORKS einen Fortschrittsbalke
 
 ## Bauen und installieren
 
-Voraussetzungen: Windows, SOLIDWORKS 2019 oder neuer, .NET Framework 4.8, Visual Studio 2022 oder .NET SDK 8.
+**Installieren:** `Spiegelwerk-<Version>-x64.msi` (GitHub-Release oder Artefakt des CI-Laufs, mit `SHA256SUMS.txt`) ausführen. Das MSI installiert für den ganzen Rechner nach `Programme\Spiegelwerk` und trägt das Add-In für jede SOLIDWORKS-Installation ab 2019 ein, Desktop wie 3DEXPERIENCE SOLIDWORKS (beide lesen `HKLM\SOFTWARE\SolidWorks\Addins`); für das installierende Konto ist „Beim Start“ angekreuzt. Voraussetzung ist .NET Framework 4.8; SOLIDWORKS muss noch nicht installiert sein. Nach einem Neustart von SOLIDWORKS steht Spiegelwerk unter *Extras › Zusatzanwendungen*. Entfernen über *Apps* in den Windows-Einstellungen; „Reparieren“ schreibt die Einträge neu, etwa nach einer Neuinstallation von 3DEXPERIENCE.
+
+**Bauen:** Windows, .NET SDK 8 oder neuer (oder Visual Studio 2022). Die Interop-Typen der SOLIDWORKS-API 2019 kommen aus den öffentlichen NuGet-Paketen und werden in `Spiegelwerk.dll` eingebettet; die DLL verweist auf keine Interop-Assembly und läuft so in jeder Version ab 2019. Eine lokale API statt der Pakete: `-p:SwInteropFromNuGet=false -p:SolidWorksApiDir=...`.
 
 ```bat
 cd spiegelwerk
+rem Add-In
 dotnet build src\Spiegelwerk\Spiegelwerk.csproj -c Release
-rem als Administrator:
+rem MSI (WiX 5, baut das Add-In mit), Ergebnis unter installer\bin\
+dotnet build installer\Spiegelwerk.Installer.wixproj -c Release
+rem Entwicklung: den Build-Ordner direkt registrieren (als Administrator), entfernen mit scripts\uninstall.cmd
 scripts\install.cmd
 ```
 
-Die Interop-Assemblys werden aus `C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist` referenziert; ein anderer Installationsort: `-p:SolidWorksApiDir=...`. `install.cmd` registriert die DLL mit dem 64-Bit-RegAsm (`/codebase`); dabei trägt das Add-In sich unter `HKLM\SOFTWARE\SolidWorks\Addins` ein. Nach einem Neustart steht es unter *Extras › Zusatzanwendungen*. Entfernen: `scripts\uninstall.cmd`.
+Die CI baut das MSI, installiert es, erzeugt das Add-In ohne SOLIDWORKS über COM und deinstalliert es wieder. Ein Tag `spiegelwerk-v<Version>` passend zu `Directory.Build.props` veröffentlicht es als Release.
 
 Tests der Spiegelmathematik laufen auf jedem System:
 
@@ -98,4 +103,4 @@ spiegelwerk/
 
 ## Stand
 
-Version 0.10 (Füll- und Variablenmuster; 0.9: Tabellenmuster, Koordinatensysteme; 0.8: Kurven- und Skizzenmuster; 0.7: erweiterte Bohrung; 0.6: Flächen- und vollständige Verrundung; 0.5: variable Verrundung; 0.4: Wandung, Formschräge; 0.3: Bohrungsassistent; 0.2: Austragung, Ausformung, Muster, Achsen, Flächenprüfung). Die Kernlogik ist durch Tests abgesichert; das Add-In übersetzt fehlerfrei gegen die API von SOLIDWORKS 2019 und 2024 (CI) und ist durch ein Code-Review gegangen, dessen bestätigte Befunde behoben sind. In einer laufenden SOLIDWORKS-Sitzung ist es noch nicht erprobt. Die Stellen, an denen sich die API je nach Version anders verhalten kann, misst Spiegelwerk nach, statt sich auf eine Annahme zu verlassen; sie sind in den [Stolpersteinen](docs/STOLPERSTEINE.md#was-beim-ersten-test-in-solidworks-zu-prüfen-ist) aufgeführt.
+Version 0.11 (Installer für Desktop und 3DEXPERIENCE, eingebettete Interop-Typen, Korrekturen aus einer Gesamtprüfung; 0.10: Füll- und Variablenmuster; 0.9: Tabellenmuster, Koordinatensysteme; 0.8: Kurven- und Skizzenmuster; 0.7: erweiterte Bohrung; 0.6: Flächen- und vollständige Verrundung; 0.5: variable Verrundung; 0.4: Wandung, Formschräge; 0.3: Bohrungsassistent; 0.2: Austragung, Ausformung, Muster, Achsen, Flächenprüfung). Die Kernlogik ist durch Tests abgesichert (auch unter .NET Framework 4.8); das Add-In übersetzt fehlerfrei gegen die API von SOLIDWORKS 2019 und 2024, das MSI wird in der CI installiert und wieder entfernt. Gesamtprüfung und Nachprüfung der Korrekturen sind durch, ihre bestätigten Befunde behoben. In einer laufenden SOLIDWORKS-Sitzung ist es noch nicht erprobt. Die Stellen, an denen sich die API je nach Version anders verhalten kann, misst Spiegelwerk nach, statt sich auf eine Annahme zu verlassen; sie sind in den [Stolpersteinen](docs/STOLPERSTEINE.md#was-beim-ersten-test-in-solidworks-zu-prüfen-ist) aufgeführt.

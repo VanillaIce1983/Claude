@@ -79,7 +79,7 @@ Was bei der programmgesteuerten Neuerzeugung von Features in SOLIDWORKS schiefge
 ## Add-In und COM
 
 48. **x64 und RegAsm.** SOLIDWORKS ist ein 64-Bit-Prozess: mit `Framework64\…\RegAsm.exe /codebase` registrieren, `PlatformTarget` x64.
-49. **Interop-Assemblys** mit `EmbedInteropTypes = false` referenzieren und nicht mit ausliefern; zur Laufzeit gelten die der installierten Version.
+49. **Interop-Assemblys** werden nicht ausgeliefert, und ob sie im GAC liegen, hängt von Version und Variante ab (bei 3DEXPERIENCE oft nicht). → Die Interop-Typen sind eingebettet (`EmbedInteropTypes = true`, übersetzt gegen API 2019); `Spiegelwerk.dll` verweist auf keine Interop-Assembly. Eingebettet werden COM-Rückgaben vom Typ `object` zu `dynamic`; ohne Verweis auf `Microsoft.CSharp` ist jede solche Stelle ein Übersetzungsfehler und bekommt ein `(object)`, damit alles statisch gebunden bleibt. Neuere Mitglieder als 2019 nur spät gebunden (`SwLate`).
 50. **COM-Objekte freigeben.** Beim Entladen `Marshal.ReleaseComObject` für `SldWorks`/`CommandManager` und zweimal `GC.Collect`/`WaitForPendingFinalizers`, sonst bleibt SOLIDWORKS beim Beenden hängen.
 51. **Rückruf über Namen.** `AddCommandItem2` erhält Methodennamen als Text; die Methoden müssen öffentlich auf dem an `SetAddinCallbackInfo2` übergebenen Objekt liegen (`nameof` schützt vor Tippfehlern).
 52. **PropertyManager-Seite:** Auswahlen in `OnClose` lesen (danach sind sie weg), modellieren erst in `AfterClose`. OK-Schaltfläche erst freigeben, wenn eine Spiegelebene gewählt ist (`EnableButton`).
