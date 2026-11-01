@@ -75,9 +75,8 @@
                  Condition="NOT (SW27 OR SW28 OR SW29 OR SW30 OR SW31 OR SW32 OR SW33 OR SW34 OR SW35 OR SW36 OR SW37 OR SW38 OR SW39 OR SW40 OR SW3DXEXE OR SWDESKTOPEXE)"
                  Value="Kein SOLIDWORKS ab 2019 gefunden. Spiegelwerk ist trotzdem installiert und erscheint, sobald SOLIDWORKS (Desktop oder 3DEXPERIENCE) installiert ist." />
 
-    <!-- Apps list: no "Change" (nothing to choose), "Repair" restores the registry, e.g. after a
-         3DEXPERIENCE clean reinstall that deleted HKLM\SOFTWARE\SolidWorks. -->
-    <Property Id="ARPNOMODIFY" Value="1" />
+    <!-- Apps list: no "Change" (nothing to choose; WixUI_Minimal already sets ARPNOMODIFY), "Repair"
+         restores the registry, e.g. after a 3DEXPERIENCE clean reinstall that deleted HKLM\SOFTWARE\SolidWorks. -->
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Spiegelwerk" />
