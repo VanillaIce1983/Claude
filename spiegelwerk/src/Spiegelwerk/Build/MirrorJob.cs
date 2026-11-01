@@ -182,7 +182,7 @@ namespace Spiegelwerk.Build
                             report.Aborted = report.Cancelled = true;
                             report.General.Add(RunSteps.CancelledInBuild(records[i].Name, records.Count - i - 1));
                             // Parts already reported as built with an owner that now is not built.
-                            foreach (FeatureRecord owner in records.Skip(i + 1).Where(r => r.BringsParts)) StepRunner.WithdrawParts(ctx, owner.Name);
+                            foreach (string owner in RunSteps.OwnersNotBuiltAfter(records, i)) StepRunner.WithdrawParts(ctx, owner);
                             break;
                         }
                     }

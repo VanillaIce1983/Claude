@@ -220,7 +220,7 @@ namespace Spiegelwerk.Build.Builders
                     ctx.Shared.Cancelled = true;
                     notes.Add(MirrorFeatureRules.CancelledIn(logical, records.Count - i - 1));
                     // Parts already reported as built with an owner that now is not built.
-                    foreach (FeatureRecord owner in records.Skip(i + 1).Where(x => x.BringsParts)) StepRunner.WithdrawParts(child, owner.Name);
+                    foreach (string owner in RunSteps.OwnersNotBuiltAfter(records, i)) StepRunner.WithdrawParts(child, owner);
                     return true;
                 }
             }

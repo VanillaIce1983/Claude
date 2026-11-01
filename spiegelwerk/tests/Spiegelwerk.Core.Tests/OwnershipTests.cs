@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using System.Linq;
+using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Core.Sketch;
 using Xunit;
@@ -85,7 +85,7 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
-        public void The_withdraw_set_after_Esc_holds_every_owner()
+        public void Esc_withdraws_every_owner_after_the_last_step_built_but_not_that_step()
         {
             var records = new FeatureRecord[]
             {
@@ -95,7 +95,12 @@ namespace Spiegelwerk.Core.Tests
                 new EdgeFlangeStub(),
                 new ExtrudeRecord("Linear austragen1", "Extrusion", "Skizze1"),
             };
-            Assert.Equal(new[] { "Bohrung1", "Basis-Lasche1", "Kantenlasche1" }, records.Where(r => r.BringsParts).Select(r => r.Name));
+            Assert.Equal(new[] { "Bohrung1", "Basis-Lasche1", "Kantenlasche1" }, RunSteps.OwnersNotBuiltAfter(records, 0));
+            // Esc right after the hole: it was built, its parts stay.
+            Assert.Equal(new[] { "Basis-Lasche1", "Kantenlasche1" }, RunSteps.OwnersNotBuiltAfter(records, 1));
+            Assert.Equal(new[] { "Kantenlasche1" }, RunSteps.OwnersNotBuiltAfter(records, 2));
+            Assert.Empty(RunSteps.OwnersNotBuiltAfter(records, 3));
+            Assert.Empty(RunSteps.OwnersNotBuiltAfter(records, records.Length - 1));
         }
 
         [Theory]

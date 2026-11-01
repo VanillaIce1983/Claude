@@ -94,7 +94,7 @@ namespace Spiegelwerk.Core.Planning
             ["BreakCorner"] = NotYet(SheetMetalRole.Leaf),
             ["CornerTrim"] = NotYet(SheetMetalRole.Leaf),
             ["CrossBreak"] = NotYet(SheetMetalRole.Leaf),
-            // Closed corner: the name comes from live third-party code, not from the API help.
+            // Closed corner: the name comes from the API help example "Get All Sheet Metal Feature Data" (ClosedCornerFeatureData), not from the GetTypeName2 table.
             ["CornerFeat"] = NotYet(SheetMetalRole.Leaf),
             ["NormalCut"] = NotYet(SheetMetalRole.Leaf),
             ["Rip"] = NotYet(SheetMetalRole.Leaf),

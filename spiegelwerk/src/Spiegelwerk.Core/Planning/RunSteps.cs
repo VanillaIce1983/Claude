@@ -1,3 +1,7 @@
+using System.Collections.Generic;
+using System.Linq;
+using Spiegelwerk.Core.Records;
+
 namespace Spiegelwerk.Core.Planning
 {
     /// <summary>
@@ -56,5 +60,12 @@ namespace Spiegelwerk.Core.Planning
             string rest = left == 1 ? "1 weiteres Feature wurde" : $"{left} weitere Features wurden";
             return $"Mit Esc abgebrochen nach „{feature}“; {rest} nicht mehr aufgebaut.";
         }
+
+        /// <summary>
+        /// Esc after step <paramref name="lastBuilt"/>: the owners that follow it are not built, so the
+        /// parts already reported as built with them must be withdrawn. The step itself was built.
+        /// </summary>
+        public static IEnumerable<string> OwnersNotBuiltAfter(IReadOnlyList<FeatureRecord> records, int lastBuilt) =>
+            records.Skip(lastBuilt + 1).Where(r => r.BringsParts).Select(r => r.Name);
     }
 }
