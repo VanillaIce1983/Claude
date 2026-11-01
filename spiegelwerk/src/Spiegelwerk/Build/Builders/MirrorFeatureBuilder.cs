@@ -126,13 +126,11 @@ namespace Spiegelwerk.Build.Builders
             }
 
             ReportStatus status = members.Count == 0 ? ReportStatus.Failed : MirrorFeatureRules.Aggregate(steps, ctx.Options.StopOnError, problems);
-            int built = nested.Count(e => e.IsMirrored);
-            string message = MirrorFeatureRules.Message(m, built, nested.Count);
 
             if (status == ReportStatus.Failed && !members.Any(x => x.solid && IsMirrored(child, x.feature)))
             {
-                // No solid step came of it: nothing of the second half stays.
-                var failed = BuildResult.Failed($"{message} – kein Volumen-Feature der zweiten Hälfte entstanden.");
+                // No solid step came of it: nothing of the second half stays, and none of its steps counts as built.
+                var failed = BuildResult.Failed(MirrorFeatureRules.NotBuilt(m));
                 failed.Notes.AddRange(notes);
                 StepRunner.RemoveLeftovers(ctx, snapshot, failed);
                 foreach (ReportEntry e in nested.Where(e => e.IsMirrored))
@@ -145,6 +143,7 @@ namespace Spiegelwerk.Build.Builders
                 return failed;
             }
 
+            string message = MirrorFeatureRules.Message(m, nested.Count(e => e.IsMirrored), nested.Count);
             BuildResult result = BuildResult.OfGroup(members.Select(x => x.feature).ToList(), status, message);
             result.Notes.AddRange(notes);
             result.ChildEntries.AddRange(nested);

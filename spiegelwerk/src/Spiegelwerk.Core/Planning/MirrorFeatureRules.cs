@@ -142,6 +142,13 @@ namespace Spiegelwerk.Core.Planning
             }
         }
 
+        /// <summary>
+        /// „verschmelzen“ of „Körper spiegeln“ exists only with a planar face as the mirror plane.
+        /// With a reference plane the stored flag keeps its default (true) while SOLIDWORKS leaves
+        /// the bodies apart: it counts only with a face.
+        /// </summary>
+        public static bool MergeApplies(bool merge, bool planeIsFace) => merge && planeIsFace;
+
         /// <summary>Merge flag of a boss-type record (extrude, revolve, sweep, loft); null for others.</summary>
         public static bool? MergeOf(FeatureRecord r) => r switch
         {
@@ -243,19 +250,29 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>
         /// „Körper spiegeln“ reached only through a body it made (bodies selected, the mirror
         /// feature itself not): its seed bodies come along as copies of their own although the
-        /// user did not select them. Their names, for the report.
+        /// user did not select them. Judged as the body scope judges them, in the final state: a
+        /// body outside the selection (<see cref="BodyScope.UnselectedBodies"/>) that is made of
+        /// all the features of a seed body is what became of it. Names are not compared – the
+        /// seed body's name is the one at the mirror feature, and a later feature renames a body
+        /// (with „verschmelzen“ the seed body itself becomes the merged one). Final names, for
+        /// the report.
         /// </summary>
-        /// <param name="selectedBodies">Bodies the user selected.</param>
+        /// <param name="unselectedBodies">Bodies outside the selection → the rebuilt features they are made of (BodyScope).</param>
         /// <param name="chosen">The user selected the mirror feature itself: its seed bodies are wanted.</param>
-        public static List<string> UnrequestedSeedBodies(MirrorFeatureRecord m, ICollection<string> selectedBodies, bool chosen)
+        public static List<string> UnrequestedSeedBodies(MirrorFeatureRecord m, IReadOnlyDictionary<string, List<string>> unselectedBodies, bool chosen)
         {
-            if (chosen || selectedBodies.Count == 0 || m.Kind != MirrorSeedKind.Bodies) return new List<string>();
-            return m.SeedBodies.Select(b => b.Name).Where(n => !selectedBodies.Contains(n)).Distinct().ToList();
+            if (chosen || m.Kind != MirrorSeedKind.Bodies) return new List<string>();
+            return unselectedBodies
+                .Where(kv => m.SeedBodies.Any(s => s.Features.Count > 0 && s.Features.All(kv.Value.Contains)))
+                .Select(kv => kv.Key).ToList();
         }
 
-        /// <summary>Report note on seed bodies nobody selected (<see cref="UnrequestedSeedBodies"/>).</summary>
+        /// <summary>
+        /// Report note on seed bodies nobody selected (<see cref="UnrequestedSeedBodies"/>). Whether
+        /// the original may be deleted is left to the body scope, which reports it itself.
+        /// </summary>
         public static string UnrequestedNote(IEnumerable<string> bodies) =>
-            $"Nicht gewählt, aber als Saat mitgespiegelt: {Quoted(bodies)}. Die Kopie bekommt auch diese Körper; das Original wird deshalb nicht gelöscht.";
+            $"Nicht gewählt, aber als Saat mitgespiegelt: {Quoted(bodies)}. Die Kopie bekommt auch diese Körper.";
 
         /// <summary>
         /// Message of the mirror feature's entry: what it repeats and how many steps of its
@@ -263,13 +280,19 @@ namespace Spiegelwerk.Core.Planning
         /// </summary>
         /// <param name="built">Steps of the second half with a counterpart in the target.</param>
         /// <param name="steps">Steps of the second half, sketches included.</param>
-        public static string Message(MirrorFeatureRecord m, int built, int steps)
-        {
-            string what = m.Kind == MirrorSeedKind.Bodies
-                ? $"Körper spiegeln ({(m.SeedBodies.Count == 1 ? "1 Körper" : $"{m.SeedBodies.Count} Körper")}{(m.Merge ? ", verschmolzen" : "")})"
-                : "Features spiegeln";
-            return $"{what}: zweite Hälfte als eigene Features nachgebaut, {built} von {steps} Schritten";
-        }
+        public static string Message(MirrorFeatureRecord m, int built, int steps) =>
+            $"{What(m)}: zweite Hälfte als eigene Features nachgebaut, {built} von {steps} Schritten";
+
+        /// <summary>
+        /// Message of a mirror feature none of whose second-half steps changed the solid: what
+        /// was built of it is removed again, so nothing of the second half is counted.
+        /// </summary>
+        public static string NotBuilt(MirrorFeatureRecord m) =>
+            $"{What(m)}: zweite Hälfte nicht nachgebaut – kein Volumen-Feature entstanden.";
+
+        private static string What(MirrorFeatureRecord m) => m.Kind == MirrorSeedKind.Bodies
+            ? $"Körper spiegeln ({(m.SeedBodies.Count == 1 ? "1 Körper" : $"{m.SeedBodies.Count} Körper")}{(m.Merge ? ", verschmolzen" : "")})"
+            : "Features spiegeln";
 
         /// <summary>A seed of the mirror feature has no counterpart in the target: its second half cannot be made.</summary>
         public const string MissingSeed = "In der ersten Hälfte nicht gespiegelt – die zweite Hälfte dazu entsteht nicht.";

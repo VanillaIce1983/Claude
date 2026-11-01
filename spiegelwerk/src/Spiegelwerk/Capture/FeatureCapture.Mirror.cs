@@ -71,22 +71,24 @@ namespace Spiegelwerk.Capture
                 throw new NotSupportedException("Feature-Definition konnte nicht gelesen werden (AccessSelections).");
             try
             {
-                if (d.KnitSurface)
-                    throw new NotSupportedException("„Flächen zusammenfügen“ beim Körperspiegeln (Flächenkörper) wird nicht nachgebaut.");
+                // KnitSurface is not read: it applies to surface bodies only, which the body type
+                // check below refuses; on a solid mirror its stored value means nothing.
                 object planeObject = (object)d.Face;
                 Plane3 plane = MirrorPlane(planeObject)
                                ?? Reflection.TryFromAffine(_math.ToAffine(d.GetTransform()), 1e-7)?.Plane
                                ?? throw new NotSupportedException("Spiegelebene von „Körper spiegeln“ nicht lesbar.");
+                bool planeIsFace = planeObject is Face2;
                 var r = new MirrorFeatureRecord(f.Name, type, MirrorSeedKind.Bodies, plane)
                 {
-                    PlaneIsFace = planeObject is Face2,
-                    Merge = d.Merge,
+                    PlaneIsFace = planeIsFace,
+                    Merge = MirrorFeatureRules.MergeApplies(d.Merge, planeIsFace),
                     PropagateVisualProperty = d.PropagateVisualProperty,
                 };
                 if ((object)d.PatternBodyArray is object[] bodies)
                     foreach (Body2 b in bodies.OfType<Body2>())
                     {
-                        // IBody2.GetType hides object.GetType: called on the interface.
+                        // IBody2.GetType hides object.GetType: called on the interface. Surface bodies
+                        // (also with „Flächen zusammenfügen“) are refused here.
                         if (((IBody2)b).GetType() != (int)swBodyType_e.swSolidBody)
                             throw new NotSupportedException("Nur Volumenkörper werden gespiegelt, keine Flächenkörper.");
                         // CenterOfMassX, Y, Z, Volume, ...
@@ -163,6 +165,9 @@ namespace Spiegelwerk.Capture
         /// whole set of faces of its feature – one face of a cut that made three holes, a face of
         /// the base extrude, would be rebuilt as more than was mirrored. Read in the state at the
         /// mirror feature (selection access), where both sets of faces give the same fingerprints.
+        /// A face owned by several features counts for the oldest one (IFace2.GetFeature), on
+        /// both sides of the comparison: IFeature.GetFaces also lists faces a feature shares with
+        /// older ones, and those belong to the older one.
         /// </summary>
         internal static FaceOwners FaceOwnersOf(object[] faces)
         {
@@ -184,7 +189,7 @@ namespace Spiegelwerk.Capture
             foreach (var (owner, selected) in groups)
             {
                 List<FaceSignature> all = (object)owner.GetFaces() is object[] own
-                    ? own.OfType<Face2>().Select(TopologyCapture.Face).ToList()
+                    ? own.OfType<Face2>().Where(x => ((object)x.GetFeature() as Feature)?.Name == owner.Name).Select(TopologyCapture.Face).ToList()
                     : new List<FaceSignature>();
                 if (MirrorFeatureRules.SameFaces(all, selected)) result.Complete.Add(owner);
                 else result.Incomplete.Add(owner.Name);

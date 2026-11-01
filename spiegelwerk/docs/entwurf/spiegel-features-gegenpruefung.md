@@ -240,7 +240,7 @@ public sealed class MirrorFeatureRecord : FeatureRecord   // ChangesSolid = true
   - `((IBody2)b).GetType() != (int)swBodyType_e.swSolidBody` → `NotSupported`.
   - Mass as in `ReadSeeds`.
   - Seeds from `b.GetFeatures()`, filtered to body-shaping features like `ScopeOf`.
-- `Merge = ms.Merge`. `KnitSurface` true → `NotSupported`.
+- `Merge = ms.Merge` only with a planar face as mirror plane (`MirrorFeatureRules.MergeApplies`); with a reference plane the stored flag keeps its default. `KnitSurface` is not read: it applies to surface bodies only, which the body-type check refuses.
 - After all records are captured, a post-pass applies the nested rule from P4.
 
 **`UnsupportedReason`**

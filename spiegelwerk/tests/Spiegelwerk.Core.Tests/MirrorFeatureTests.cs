@@ -416,25 +416,70 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Merging_a_body_mirror_needs_a_face_as_mirror_plane()
+        {
+            Assert.True(MirrorFeatureRules.MergeApplies(true, true));
+            // A reference plane: the flag keeps its default, SOLIDWORKS leaves the bodies apart.
+            Assert.False(MirrorFeatureRules.MergeApplies(true, false));
+            Assert.False(MirrorFeatureRules.MergeApplies(false, true));
+            Assert.False(MirrorFeatureRules.MergeApplies(false, false));
+        }
+
+        [Fact]
         public void Seed_bodies_nobody_selected_are_named()
         {
             MirrorFeatureRecord m = Bodies("Spiegeln1", false,
                 new MirrorSeedBody("Aufsatz1", Box(new Vec3(0.01, 0, 0), 1e-6), new[] { "Aufsatz1" }),
                 new MirrorSeedBody("Aufsatz2", Box(new Vec3(0.03, 0, 0), 1e-6), new[] { "Aufsatz2" }));
+            BodyScope Scope(params (string name, string[] features, bool selected)[] bodies) => BodyScope.Of(
+                bodies.Select(b => new BodyHistory(b.name, b.features, b.selected)),
+                new[] { "Aufsatz1", "Aufsatz2", "Spiegeln1", "Verrundung1" }, new string[0]);
+
             // Only the mirrored body selected: both seed bodies come along unasked.
-            Assert.Equal(new[] { "Aufsatz1", "Aufsatz2" }, MirrorFeatureRules.UnrequestedSeedBodies(m, new[] { "Spiegeln1[1]" }, false));
+            BodyScope onlyMirrored = Scope(("Aufsatz1", new[] { "Aufsatz1" }, false), ("Aufsatz2", new[] { "Aufsatz2" }, false),
+                ("Spiegeln1[1]", new[] { "Spiegeln1" }, true));
+            Assert.Equal(new[] { "Aufsatz1", "Aufsatz2" }, MirrorFeatureRules.UnrequestedSeedBodies(m, onlyMirrored.UnselectedBodies, false));
             // One of them selected too.
-            Assert.Equal(new[] { "Aufsatz2" }, MirrorFeatureRules.UnrequestedSeedBodies(m, new[] { "Spiegeln1[1]", "Aufsatz1" }, false));
-            // The mirror feature itself chosen, the whole part, or features only: nothing unasked.
-            Assert.Empty(MirrorFeatureRules.UnrequestedSeedBodies(m, new[] { "Spiegeln1[1]" }, true));
-            Assert.Empty(MirrorFeatureRules.UnrequestedSeedBodies(m, new string[0], false));
+            BodyScope oneMore = Scope(("Aufsatz1", new[] { "Aufsatz1" }, true), ("Aufsatz2", new[] { "Aufsatz2" }, false),
+                ("Spiegeln1[1]", new[] { "Spiegeln1" }, true));
+            Assert.Equal(new[] { "Aufsatz2" }, MirrorFeatureRules.UnrequestedSeedBodies(m, oneMore.UnselectedBodies, false));
+            // The mirror feature itself chosen, the whole part, or features only (BodyScope.None): nothing unasked.
+            Assert.Empty(MirrorFeatureRules.UnrequestedSeedBodies(m, onlyMirrored.UnselectedBodies, true));
+            Assert.Empty(MirrorFeatureRules.UnrequestedSeedBodies(m, BodyScope.None.UnselectedBodies, false));
             // A feature mirror has no seed bodies.
             var features = new MirrorFeatureRecord("Spiegeln2", "MirrorPattern", MirrorSeedKind.Features, Plane3.RightYZ);
-            Assert.Empty(MirrorFeatureRules.UnrequestedSeedBodies(features, new[] { "Körper1" }, false));
+            Assert.Empty(MirrorFeatureRules.UnrequestedSeedBodies(features, onlyMirrored.UnselectedBodies, false));
+
+            // A later fillet renamed the seed body: it is named as it is called at the end.
+            BodyScope renamed = Scope(("Verrundung1", new[] { "Aufsatz1", "Verrundung1" }, false), ("Aufsatz2", new[] { "Aufsatz2" }, true),
+                ("Spiegeln1[1]", new[] { "Spiegeln1" }, true));
+            Assert.Equal(new[] { "Verrundung1" }, MirrorFeatureRules.UnrequestedSeedBodies(m, renamed.UnselectedBodies, false));
+            // Selected under its new name: nothing unasked, although its name at the mirror feature was another.
+            BodyScope renamedSelected = Scope(("Verrundung1", new[] { "Aufsatz1", "Verrundung1" }, true), ("Aufsatz2", new[] { "Aufsatz2" }, true),
+                ("Spiegeln1[1]", new[] { "Spiegeln1" }, true));
+            Assert.Empty(MirrorFeatureRules.UnrequestedSeedBodies(m, renamedSelected.UnselectedBodies, false));
+
+            // „verschmelzen“: the seed body became the merged body, which takes the mirror feature's name; selected, nothing unasked.
+            MirrorFeatureRecord merged = Bodies("Spiegeln1", true, new MirrorSeedBody("Aufsatz1", Box(new Vec3(0.01, 0, 0), 1e-6), new[] { "Aufsatz1" }));
+            BodyScope mergedSelected = Scope(("Spiegeln1", new[] { "Aufsatz1", "Spiegeln1" }, true));
+            Assert.Empty(MirrorFeatureRules.UnrequestedSeedBodies(merged, mergedSelected.UnselectedBodies, false));
+
+            // A body outside the selection that a seed feature only cut as well is no seed body.
+            MirrorFeatureRecord cutSeed = Bodies("Spiegeln1", false,
+                new MirrorSeedBody("Schnitt1", Box(new Vec3(0.01, 0, 0), 1e-6), new[] { "Aufsatz1", "Schnitt1" }));
+            BodyScope cutOther = BodyScope.Of(
+                new[]
+                {
+                    new BodyHistory("Schnitt1", new[] { "Aufsatz1", "Schnitt1" }, true),
+                    new BodyHistory("Aufsatz2", new[] { "Aufsatz2", "Schnitt1" }, false),
+                    new BodyHistory("Spiegeln1[1]", new[] { "Spiegeln1" }, true),
+                },
+                new[] { "Aufsatz1", "Schnitt1", "Spiegeln1" }, new string[0]);
+            Assert.Equal(new[] { "Aufsatz2" }, cutOther.UnselectedBodies.Keys);
+            Assert.Empty(MirrorFeatureRules.UnrequestedSeedBodies(cutSeed, cutOther.UnselectedBodies, false));
 
             string note = MirrorFeatureRules.UnrequestedNote(new[] { "Aufsatz1" });
-            Assert.Contains("„Aufsatz1“", note);
-            Assert.Contains("nicht gelöscht", note);
+            Assert.Equal("Nicht gewählt, aber als Saat mitgespiegelt: „Aufsatz1“. Die Kopie bekommt auch diese Körper.", note);
         }
 
         [Fact]
@@ -445,6 +490,10 @@ namespace Spiegelwerk.Core.Tests
             MirrorFeatureRecord bodies = Bodies("Spiegeln2", true, new MirrorSeedBody("Aufsatz1", Box(Vec3.Zero, 1e-6), new[] { "Aufsatz1" }));
             Assert.Equal("Körper spiegeln (1 Körper, verschmolzen): zweite Hälfte als eigene Features nachgebaut, 2 von 2 Schritten",
                 MirrorFeatureRules.Message(bodies, 2, 2));
+            // No solid step came of it: what was built is removed again, nothing is counted as built.
+            Assert.Equal("Features spiegeln: zweite Hälfte nicht nachgebaut – kein Volumen-Feature entstanden.", MirrorFeatureRules.NotBuilt(features));
+            Assert.Equal("Körper spiegeln (1 Körper, verschmolzen): zweite Hälfte nicht nachgebaut – kein Volumen-Feature entstanden.",
+                MirrorFeatureRules.NotBuilt(bodies));
             Assert.Equal("Mit Esc abgebrochen nach „Skizze1“; 2 weitere Schritte der zweiten Hälfte wurden nicht mehr aufgebaut.",
                 MirrorFeatureRules.CancelledIn("Skizze1", 2));
             Assert.Equal("Mit Esc abgebrochen nach „Skizze1“.", MirrorFeatureRules.CancelledIn("Skizze1", 0));

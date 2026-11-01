@@ -118,7 +118,7 @@ namespace Spiegelwerk.Build
                 records = captured;
                 // A body mirror of a body an earlier one made: that one's seeds are not rebuilt twice.
                 MirrorFeatureRules.FlattenSeeds(records);
-                NoteUnrequestedSeedBodies(records, selectedBodyNames, req.Features);
+                NoteUnrequestedSeedBodies(records, bodyScope, req.Features);
                 MarkOtherBodies(records, bodyScope);
                 for (int i = 0; i < records.Count; i++) CaptureDimensions(features[i], records[i]);
                 // With selected bodies, a feature may also change a body that is gone at the end; only the rolled-back state shows it.
@@ -240,16 +240,16 @@ namespace Spiegelwerk.Build
 
         /// <summary>
         /// „Körper spiegeln“ reached only through a body it made: its seed bodies come along
-        /// unselected. The record says so; the body scope already keeps the original from
-        /// being deleted.
+        /// unselected. The record says so, judged by the body scope – the same judgement that
+        /// keeps the original from being deleted (<see cref="DeleteOriginals"/> says so itself).
         /// </summary>
-        private static void NoteUnrequestedSeedBodies(List<FeatureRecord> records, HashSet<string> selectedBodies, List<Feature> chosen)
+        private static void NoteUnrequestedSeedBodies(List<FeatureRecord> records, BodyScope scope, List<Feature> chosen)
         {
             var chosenNames = new HashSet<string>(chosen.Select(f => f.Name), StringComparer.Ordinal);
             foreach (MirrorFeatureRecord m in records.OfType<MirrorFeatureRecord>())
             {
                 m.UnrequestedSeedBodies.Clear();
-                m.UnrequestedSeedBodies.AddRange(MirrorFeatureRules.UnrequestedSeedBodies(m, selectedBodies, chosenNames.Contains(m.Name)));
+                m.UnrequestedSeedBodies.AddRange(MirrorFeatureRules.UnrequestedSeedBodies(m, scope.UnselectedBodies, chosenNames.Contains(m.Name)));
             }
         }
 

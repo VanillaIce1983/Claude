@@ -162,6 +162,12 @@ namespace Spiegelwerk.Build
         /// <summary>Features whose bodies count as this context's own.</summary>
         private readonly HashSet<string> _ownNames;
 
+        /// <summary>
+        /// Original name → the name its feature got in the target. Unregistering goes by this
+        /// name: the feature itself may already be deleted, and its Name is not read again.
+        /// </summary>
+        private readonly Dictionary<string, string> _targetNames = new Dictionary<string, string>(StringComparer.Ordinal);
+
         /// <summary>The features that make this context's own bodies (the job's, or those of a „Körper spiegeln“).</summary>
         public HashSet<string> OwnNames => _ownNames;
 
@@ -185,6 +191,7 @@ namespace Spiegelwerk.Build
             _ownNames.Add(name);
             Shared.JobNames.Add(name);
             Created[originalName] = created;
+            _targetNames[originalName] = name;
             Shared.Built[name] = new BuiltFeature(LogicalFor(originalName));
             Topology.Invalidate();
             return name;
@@ -224,10 +231,14 @@ namespace Spiegelwerk.Build
         /// <summary>Whether the counterpart <paramref name="f"/> changes the solid (as its record said).</summary>
         public bool ChangesSolid(Feature f) => Shared.Built.TryGetValue(f.Name, out BuiltFeature b) && b.ChangesSolid;
 
-        /// <summary>A registered feature that was removed again: later features must not use it.</summary>
+        /// <summary>
+        /// A registered feature that was removed again: later features must not use it. Callers
+        /// may delete it first, so the feature itself is not touched here.
+        /// </summary>
         public void Unregister(string originalName)
         {
-            if (Created.TryGetValue(originalName, out Feature f)) Shared.Built.Remove(f.Name);
+            if (_targetNames.TryGetValue(originalName, out string target)) Shared.Built.Remove(target);
+            _targetNames.Remove(originalName);
             Created.Remove(originalName);
             Groups.Remove(originalName);
             Topology.Invalidate();
