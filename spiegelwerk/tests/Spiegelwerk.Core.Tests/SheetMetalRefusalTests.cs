@@ -148,9 +148,12 @@ namespace Spiegelwerk.Core.Tests
                 new FlatPatternRecord("Flat-Pattern1", "FlatPattern", "Base-Flange1"),
             };
             Assert.Null(SheetMetalPlanner.Refusal(new[] { body }, records, types, tree));
-            // A base flange that could not be read is the first feature of its body.
+            // A base flange that could not be read: CaptureAll turns its SheetMetal into an unsupported
+            // record as well, which comes first in the body – the flange's own reason is what counts.
+            records[0] = new UnsupportedRecord("Sheet-Metal1", "SheetMetal", ((PartOfFeatureRecord)records[0]).LeftOut, false);
             records[1] = new UnsupportedRecord("Base-Flange1", "SMBaseFlange", "Blech-Feature nicht lesbar (x).", true);
-            Assert.StartsWith("„Base-Flange1“ trägt den Blechkörper „Körper1“", SheetMetalPlanner.Refusal(new[] { body }, records, types, tree));
+            Assert.Equal("„Base-Flange1“ trägt den Blechkörper „Körper1“ und wird nicht nachgebaut (Blech-Feature nicht lesbar (x)). Es wurde nichts gespiegelt.",
+                SheetMetalPlanner.Refusal(new[] { body }, records, types, tree));
         }
 
         [Fact]

@@ -74,6 +74,73 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Flat_pattern_owner_from_its_body_is_not_marked_as_from_the_tree()
+        {
+            SheetMetalTree tree = SingleBody(out _);
+            Assert.False(tree.OwnerFromTree("Flat-Pattern1"));
+        }
+
+        [Fact]
+        public void Flat_pattern_without_body_features_in_a_single_body_part_belongs_to_the_only_base_flange()
+        {
+            // B9: folded, the flat pattern may be missing from GetFeatures of its body; no parents known either.
+            var top = new[]
+            {
+                F("Sheet-Metal1", "SheetMetal"),
+                F("Base-Flange1", "SMBaseFlange", new[] { "Sheet-Metal1", "Sketch1" }, F("Sketch1", "ProfileFeature")),
+                F("Base-Flange2", "SMBaseFlange", new[] { "Sheet-Metal1", "Sketch2" }, F("Sketch2", "ProfileFeature")),
+                F("Flat-Pattern1", "FlatPattern", null, F("Bend-Lines1", "ProfileFeature")),
+            };
+            SheetMetalTree tree = SheetMetalTree.Of(top, new Dictionary<string, FlatPatternFacts> { ["Flat-Pattern1"] = new FlatPatternFacts() });
+            Assert.Equal("Base-Flange1", tree.FlatPatternOwners["Flat-Pattern1"]);
+            Assert.True(tree.OwnerFromTree("Flat-Pattern1"));
+            Assert.Contains("Flat-Pattern1", tree.Closure(new[] { "Base-Flange1" }));
+            Assert.StartsWith("Basislasche der Abwicklung aus dem Feature-Baum bestimmt", SheetMetalTree.OwnerFromTreeNote);
+        }
+
+        [Fact]
+        public void Flat_pattern_without_body_features_follows_its_parents()
+        {
+            // Two bodies: the parents lead to the body – directly, over its SheetMetal, or over a tab to the SheetMetal it shares.
+            var smFolder = F("Sheet-Metal", "TemplateSheetMetal", null, F("Sheet-Metal1", "SheetMetal"), F("Sheet-Metal2", "SheetMetal"));
+            var fpFolder = F("Flat-Pattern", "TemplateFlatPattern", null,
+                F("Flat-Pattern1", "FlatPattern", new[] { "Base-Flange3" }),
+                F("Flat-Pattern2", "FlatPattern", new[] { "Sheet-Metal2" }));
+            var top = new[]
+            {
+                smFolder,
+                F("Base-Flange1", "SMBaseFlange", new[] { "Sheet-Metal1" }),
+                F("Base-Flange2", "SMBaseFlange", new[] { "Sheet-Metal2" }),
+                F("Base-Flange3", "SMBaseFlange", new[] { "Sheet-Metal1" }),
+                fpFolder,
+            };
+            SheetMetalTree tree = SheetMetalTree.Of(top);
+            Assert.Equal("Base-Flange1", tree.FlatPatternOwners["Flat-Pattern1"]);
+            Assert.Equal("Base-Flange2", tree.FlatPatternOwners["Flat-Pattern2"]);
+            Assert.True(tree.OwnerFromTree("Flat-Pattern2"));
+            Assert.Contains("Flat-Pattern2", tree.Closure(new[] { "Base-Flange2" }));
+            Assert.DoesNotContain("Flat-Pattern2", tree.Closure(new[] { "Base-Flange1" }));
+        }
+
+        [Fact]
+        public void Flat_patterns_without_body_features_or_parents_get_no_guessed_owner()
+        {
+            var smFolder = F("Sheet-Metal", "TemplateSheetMetal", null, F("Sheet-Metal1", "SheetMetal"), F("Sheet-Metal2", "SheetMetal"));
+            var fpFolder = F("Flat-Pattern", "TemplateFlatPattern", null, F("Flat-Pattern1", "FlatPattern"), F("Flat-Pattern2", "FlatPattern"));
+            var top = new[]
+            {
+                smFolder,
+                F("Base-Flange1", "SMBaseFlange", new[] { "Sheet-Metal1" }),
+                F("Base-Flange2", "SMBaseFlange", new[] { "Sheet-Metal2" }),
+                fpFolder,
+            };
+            SheetMetalTree tree = SheetMetalTree.Of(top);
+            Assert.Empty(tree.FlatPatternOwners);
+            Assert.False(tree.OwnerFromTree("Flat-Pattern1"));
+            Assert.DoesNotContain("Flat-Pattern1", tree.Closure(new[] { "Base-Flange1" }));
+        }
+
+        [Fact]
         public void User_corner_trim_is_unsupported_and_flat_patterns_own_corner_trim_is_part_of_it()
         {
             SheetMetalTree tree = SingleBody(out _);

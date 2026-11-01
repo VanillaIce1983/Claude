@@ -240,7 +240,7 @@ namespace Spiegelwerk.Capture
         private FlatPatternRecord CaptureFlatPattern(Feature f, string type, FlatPatternFeatureData d)
         {
             string owner = _sheetMetal.FlatPatternOwners.TryGetValue(f.Name, out string known) ? known : "";
-            var r = new FlatPatternRecord(f.Name, type, owner) { Flattened = _wasFlattened?.Invoke(f.Name) ?? false };
+            var r = new FlatPatternRecord(f.Name, type, owner) { Flattened = _wasFlattened?.Invoke(f.Name) ?? false, OwnerFromTree = _sheetMetal.OwnerFromTree(f.Name) };
             if (d.AccessSelections(_doc, null))
             {
                 ReadFlatPattern(d, r);

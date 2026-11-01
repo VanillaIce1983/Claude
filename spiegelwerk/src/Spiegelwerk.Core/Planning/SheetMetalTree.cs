@@ -51,7 +51,10 @@ namespace Spiegelwerk.Core.Planning
     ///    without one it is a carrier of its own (a converted, lofted or swept body);
     ///  - the sketches under a flat pattern and its own corner trim and break corners belong to the
     ///    flat pattern; a corner trim the user inserted under it is not rebuilt;
-    ///  - a flat pattern belongs to the first base flange of its body;
+    ///  - a flat pattern belongs to the first base flange of its body; if its body does not name
+    ///    it (B9: the run reads the tree folded, the flat pattern suppressed), to the base flange
+    ///    its parents lead to, or in a part with one flat pattern and one SheetMetal to that
+    ///    SheetMetal's base flange;
     ///  - features after a flat pattern exist only in the flattened state.
     /// Template folders are system features: never collected, their flat patterns listed before them.
     /// </summary>
@@ -59,6 +62,7 @@ namespace Spiegelwerk.Core.Planning
     {
         private readonly Dictionary<string, (string owner, PartOwnerKind kind)> _owners = new Dictionary<string, (string, PartOwnerKind)>(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _flatPatternOwners = new Dictionary<string, string>(StringComparer.Ordinal);
+        private readonly HashSet<string> _ownerFromTree = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> _userCornerTrims = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> _afterFlatPattern = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> _flatPatternParts = new HashSet<string>(StringComparer.Ordinal);
@@ -109,6 +113,11 @@ namespace Spiegelwerk.Core.Planning
                 // The first base flange of its body (by tree order: GetFeatures says nothing about order).
                 string? owner = facts.BodyFeatures.Where(n => tree._types.TryGetValue(n, out string t) && t == "SMBaseFlange")
                     .OrderBy(n => tree._order[n]).FirstOrDefault();
+                if (owner == null)
+                {
+                    owner = tree.OwnerByTree(fp, all);
+                    if (owner != null) tree._ownerFromTree.Add(fp.Name);
+                }
                 if (owner != null) tree._flatPatternOwners[fp.Name] = owner;
             }
 
@@ -121,6 +130,42 @@ namespace Spiegelwerk.Core.Planning
         }
 
         private static bool IsSketchType(string type) => type == "ProfileFeature" || type == "3DProfileFeature";
+
+        /// <summary>
+        /// The owner of a flat pattern whose body names no base flange (B9 unconfirmed: a folded,
+        /// suppressed flat pattern may be missing from GetFeatures of its body): the base flange its
+        /// parents lead to; else, with one flat pattern and one SheetMetal in the part, the base
+        /// flange of that SheetMetal. Null if neither says.
+        /// </summary>
+        private string? OwnerByTree(TreeFeature fp, List<TreeFeature> all)
+        {
+            foreach (string p in fp.Parents.Where(_types.ContainsKey).OrderBy(p => _order[p]))
+                if (BaseFlangeOf(p, all) is string owner)
+                    return owner;
+            List<TreeFeature> sheetMetals = all.Where(f => f.Type == "SheetMetal").ToList();
+            if (all.Count(f => f.Type == "FlatPattern") == 1 && sheetMetals.Count == 1 &&
+                _owners.TryGetValue(sheetMetals[0].Name, out var only) && only.kind == PartOwnerKind.SheetMetal)
+                return only.owner;
+            return null;
+        }
+
+        /// <summary>
+        /// The base flange that made the body of a feature, by name: a SheetMetal → its owner; a base
+        /// flange → the owner of its SheetMetal (a tab shares the one of its body), itself without
+        /// one. Anything else: null.
+        /// </summary>
+        private string? BaseFlangeOf(string name, List<TreeFeature> all)
+        {
+            string type = _types[name];
+            if (type == "SheetMetal")
+                return _owners.TryGetValue(name, out var sm) && sm.kind == PartOwnerKind.SheetMetal ? sm.owner : null;
+            if (type != "SMBaseFlange") return null;
+            TreeFeature flange = all.First(f => f.Name == name);
+            foreach (string p in flange.Parents.Where(p => _types.TryGetValue(p, out string t) && t == "SheetMetal"))
+                if (_owners.TryGetValue(p, out var owned) && owned.kind == PartOwnerKind.SheetMetal)
+                    return owned.owner;
+            return name;
+        }
 
         /// <summary>Template folders (<see cref="SheetMetalRole.System"/>): never collected, never deleted, never new.</summary>
         public static bool IsSystemType(string type) => SheetMetalTypes.Of(type)?.Role == SheetMetalRole.System;
@@ -141,6 +186,9 @@ namespace Spiegelwerk.Core.Planning
 
         /// <summary>Flat pattern → the base flange of its body.</summary>
         public IReadOnlyDictionary<string, string> FlatPatternOwners => _flatPatternOwners;
+
+        /// <summary>The flat pattern's owner comes from the tree, not from its body (see <see cref="OwnerFromTreeNote"/>).</summary>
+        public bool OwnerFromTree(string flatPattern) => _ownerFromTree.Contains(flatPattern);
 
         /// <summary>Corner trims the user inserted under a flat pattern: not rebuilt (their relief is not readable).</summary>
         public bool IsUserCornerTrim(string name) => _userCornerTrims.Contains(name);
@@ -198,6 +246,9 @@ namespace Spiegelwerk.Core.Planning
             owner.Length == 0
                 ? "Abwicklung entsteht nur mit ihrer Basislasche; diese ließ sich nicht bestimmen."
                 : $"Abwicklung entsteht nur mit ihrer Basislasche „{owner}“, die nicht gespiegelt wird.";
+
+        /// <summary>Detail of a flat pattern whose owner its body did not name.</summary>
+        public const string OwnerFromTreeNote = "Basislasche der Abwicklung aus dem Feature-Baum bestimmt (über ihren Körper nicht lesbar).";
 
         /// <summary>Report text of a top-level feature after a flat pattern, suppressed while the part is folded.</summary>
         public const string OnlyFlattened = "Nur in der Abwicklung vorhanden – nicht gespiegelt.";

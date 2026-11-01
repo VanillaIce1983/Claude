@@ -199,6 +199,59 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void First_bodys_overrides_wait_for_a_second_body_or_become_the_part_values()
+        {
+            // B15: SetOverrideDefaultParameter2 does not apply while the copy is single-body.
+            Assert.Equal(BodyOverrideMode.Deferred, SheetMetalRules.BodyOverrideModeOf(first: true, tab: false, overrides: 1, staysSingleBody: false));
+            Assert.Equal(BodyOverrideMode.PartValues, SheetMetalRules.BodyOverrideModeOf(first: true, tab: false, overrides: 2, staysSingleBody: true));
+            // Later bodies: the copy is multibody once they exist.
+            Assert.Equal(BodyOverrideMode.Apply, SheetMetalRules.BodyOverrideModeOf(first: false, tab: false, overrides: 1, staysSingleBody: false));
+            // Nothing of its own, or a tab sharing the SheetMetal of its body.
+            Assert.Equal(BodyOverrideMode.None, SheetMetalRules.BodyOverrideModeOf(first: true, tab: false, overrides: 0, staysSingleBody: false));
+            Assert.Equal(BodyOverrideMode.None, SheetMetalRules.BodyOverrideModeOf(first: false, tab: true, overrides: 1, staysSingleBody: false));
+        }
+
+        [Fact]
+        public void Own_values_take_the_overridden_groups_from_the_body_and_the_rest_from_the_defaults()
+        {
+            var defaults = new SheetMetalParameters
+            {
+                Thickness = 0.002, BendRadius = 0.001,
+                BendAllowance = new BendAllowanceData { Kind = BendAllowanceKind.KFactor, KFactor = 0.5 },
+                Relief = new ReliefData { Kind = ReliefKind.Rectangular, Ratio = 0.5 },
+            };
+            var body = new SheetMetalParameters
+            {
+                Thickness = 0.003, BendRadius = 0.004,
+                BendAllowance = new BendAllowanceData { Kind = BendAllowanceKind.KFactor, KFactor = 0.44 },
+                Relief = new ReliefData { Kind = ReliefKind.Obround, Ratio = 0.7 },
+                OverrideBendParameters = true, OverrideReadCode = 0,
+            };
+            SheetMetalParameters own = SheetMetalRules.OwnValues(defaults, body);
+            Assert.Equal(0.003, own.Thickness);
+            Assert.Equal(0.004, own.BendRadius);
+            Assert.Equal(0.5, own.BendAllowance.KFactor);
+            Assert.Equal(ReliefKind.Rectangular, own.Relief.Kind);
+            body.OverrideBendAllowance = body.OverrideAutoRelief = true;
+            own = SheetMetalRules.OwnValues(defaults, body);
+            Assert.Equal(0.44, own.BendAllowance.KFactor);
+            Assert.Equal(ReliefKind.Obround, own.Relief.Kind);
+            // Before 2013 (no defaults): everything is the body's.
+            Assert.Equal(0.003, SheetMetalRules.OwnValues(null, body).Thickness);
+        }
+
+        [Fact]
+        public void Copy_stays_single_body_with_one_base_flange_of_its_own()
+        {
+            var one = new BaseFlangeRecord("Base-Flange1", "SMBaseFlange", "Sketch1");
+            var tab = new BaseFlangeRecord("Base-Flange2", "SMBaseFlange", "Sketch2") { MergesIntoExisting = true };
+            var two = new BaseFlangeRecord("Base-Flange3", "SMBaseFlange", "Sketch3");
+            Assert.True(SheetMetalRules.StaysSingleBody(new FeatureRecord[] { one, tab, new ExtrudeRecord("Cut-Extrude1", "Cut", "Sketch4") { IsCut = true } }));
+            Assert.False(SheetMetalRules.StaysSingleBody(new FeatureRecord[] { one, tab, two }));
+            Assert.True(SheetMetalRules.StaysSingleBody(Array.Empty<FeatureRecord>()));
+        }
+
+        [Fact]
         public void Flat_pattern_fixed_face_is_a_face_or_an_edge()
         {
             var fp = new FlatPatternRecord("Flat-Pattern1", "FlatPattern", "Base-Flange1");

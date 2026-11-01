@@ -315,6 +315,9 @@ namespace Spiegelwerk.Core.Records
         /// <summary>The base flange that made the body.</summary>
         public string Owner { get; }
 
+        /// <summary>The owner came from the tree, not from the body (<see cref="Planning.SheetMetalTree.OwnerFromTree"/>).</summary>
+        public bool OwnerFromTree { get; set; }
+
         private GeometryRef? _fixedFace;
 
         /// <summary>FixedFace2: a face, or an edge for a cylindrical part – never an axis or a plane.</summary>

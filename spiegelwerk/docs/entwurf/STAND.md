@@ -46,16 +46,24 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   Ordner stehen als „nachgebaut“ in der Tabelle (nie gesammelt); nur das Blech-Feature ist Begleiter, die Abwicklung hat
   ihren eigenen Datensatz und Builder; Flächenproben auf Biegungen (`SampleSubFeatures`) erst mit S2. Normal Cut bleibt
   bei S6. Nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+- Blech S1a geprüft und gegengeprüft, Befunde behoben: Basislasche aus den aufgelösten Seiten angelegt (ersetzte
+  Endbedingung mit ihrer Tiefe), gewählte Körper nach dem Falten über ihren Namen neu gesucht, Besitzer der Abwicklung
+  über den Körper der festen Fläche (wie A1 §6) und – Rückfall zu B9 – aus dem Baum, Wächter ohne den Körper, den eine
+  Lasche erweitert, Ablehnung nennt eine nicht lesbare Basislasche mit ihrem Grund, eigene Werte des ersten Körpers
+  nach dem zweiten Blechkörper (oder als Werte des Teils, wenn die Kopie ein Einkörperteil bleibt), Wiederherstellen
+  des Originals auch in der Meldung eines abgelehnten Laufs. STOLPERSTEINE 187–191, Prüftabelle.
+  Abweichend vom Plan: Zu B15 nennt der Plan nur Rücklesen und „nicht anwendbar“; die Überschreibungen des ersten
+  Körpers warten jetzt auf den zweiten (`BodyOverrideModeOf`), und der Wächter lässt den Körper einer Lasche aus.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 und S1a stehen (Zweig `feat-blech`), als Nächstes Prüfung von S1a, dann S1b (selbes Teil); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 und S1a stehen und sind geprüft (Zweig `feat-blech`), als Nächstes S1b (selbes Teil); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S1a prüfen und gegenprüfen, dann S1b (selbes Teil: Wächter im Schnappschussmodus, Lasche mit Bereich, beide
+1. Blech S1b (selbes Teil: Wächter im Schnappschussmodus, Lasche mit Bereich, beide
    Zustände wiederherstellen, „Original löschen“ abgelehnt) usw. nach `blech-plan.md`; jeder Schritt mit Core-Tests,
    Prüfung und Gegenprüfung.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“

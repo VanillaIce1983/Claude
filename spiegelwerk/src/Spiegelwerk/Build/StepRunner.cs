@@ -130,13 +130,15 @@ namespace Spiegelwerk.Build
                 verification = "";
             }
             // After the check and its variants, and after a removal: the shared sheet-metal values must be as before.
-            if (guardBefore != null && ctx.Shared.Guard!.Check(guardBefore, result.Notes) is string abort)
+            if (guardBefore != null && ctx.Shared.Guard!.Check(guardBefore, result.Notes, result.Success ? result.Feature : null) is string abort)
             {
                 if (result.Success) result = RemoveAgain(ctx, record, result, featuresBefore, mark, abort);
                 else result.Notes.Add(abort);
                 ctx.Shared.AbortReason = abort;
                 verification = "";
             }
+            // The first body's own sheet-metal values once the copy has a second body: after the check and the guard (B15).
+            if (result.Success && record is BaseFlangeRecord && ctx.Shared.AbortReason == null) BaseFlangeBuilder.ApplyPending(ctx, result);
             // Only now: a variant tried above may have replaced dimensions.
             if (result.Success && record.OwnDimensions.Count > 0) RestoreDimensionNames(ctx, result.Feature!, record.Name, record.OwnDimensions, result.Notes);
             if (result.Success)

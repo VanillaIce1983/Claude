@@ -20,7 +20,9 @@ namespace Spiegelwerk.Build.Builders
     /// (<see cref="SheetMetalRules.BaseFlangeFlags"/>). Values: the first body makes the defaults
     /// from the original's, every later one is created with what the target has and gets its own
     /// values through the overrides of its SheetMetal – so creating it does not rewrite the
-    /// defaults the earlier bodies use (the guard checks that).
+    /// defaults the earlier bodies use (the guard checks that). The first body's own overrides
+    /// need a multibody part: they follow with the second body, or become the part's values in a
+    /// copy that stays single-body (<see cref="SheetMetalRules.BodyOverrideModeOf"/>).
     ///
     /// Creation: the data object, v1, v2 (<see cref="SheetMetalRules.CreationPathOrder"/>), each
     /// attempt checked – exactly one new base flange, the body count as expected (a tab joins its
@@ -63,7 +65,11 @@ namespace Spiegelwerk.Build.Builders
             bool first = targetTemplate == null && SwSheetMetal.OfType(doc, "SheetMetal").Count == 0;
             SheetMetalParameters? template = first || targetTemplate == null ? null : TryRead(doc, targetTemplate, false);
             SheetMetalParameters? targetBody = r.MergesIntoExisting ? TabTarget(ctx, r) : null;
-            FlangeCreation values = SheetMetalRules.CreationValues(first, r.MergesIntoExisting, r.Defaults, r.Body, template, targetBody,
+            IReadOnlyList<int> overrides = SheetMetalRules.BodyOverrides(r.Body);
+            BodyOverrideMode overrideMode = SheetMetalRules.BodyOverrideModeOf(first, r.MergesIntoExisting, overrides.Count, ctx.Shared.SingleSheetMetalBody);
+            // What the first body makes the part's values: the original's defaults, or in a copy that stays single-body the body's own.
+            SheetMetalParameters? partValues = overrideMode == BodyOverrideMode.PartValues ? SheetMetalRules.OwnValues(r.Defaults, r.Body!) : r.Defaults;
+            FlangeCreation values = SheetMetalRules.CreationValues(first, r.MergesIntoExisting, partValues, r.Body, template, targetBody,
                 r.OwnBendAllowance, r.OwnRelief, r.Thickness, r.BendRadius);
             if (r.UsesMaterialParameters) notes.Add(SheetMetalRules.MaterialNote);
             bool gauge = first && r.Gauge != null && File.Exists(r.Gauge.TablePath);
@@ -89,7 +95,7 @@ namespace Spiegelwerk.Build.Builders
                     bool withAllowance = false;
                     try
                     {
-                        withAllowance = Create(ctx, sketch, r, attempt, values, revDir, revThk, scope);
+                        withAllowance = Create(ctx, sketch, r, attempt, values, revDir, revThk, scope, sides);
                     }
                     catch (Exception ex)
                     {
@@ -144,17 +150,18 @@ namespace Spiegelwerk.Build.Builders
             }
 
             // ---- parameters: the first body makes the defaults, a body's own values go on its SheetMetal
-            SheetMetalParameters? defaults = r.Defaults ?? r.Body;
-            if (first && defaults != null && !gauge)
-            {
-                // Without the gauge table (not found): fixed values, the table is not expected back.
-                SheetMetalParameters want = WithoutGauge(defaults);
-                if (SwSheetMetal.Template(doc) is Feature t) notes.AddRange(SwSheetMetal.Apply(doc, t, want, false, Array.Empty<int>()));
-                else if (sheetMetal != null) notes.AddRange(SwSheetMetal.Apply(doc, sheetMetal, want, false, Array.Empty<int>()));
-            }
-            IReadOnlyList<int> overrides = SheetMetalRules.BodyOverrides(r.Body);
-            if (sheetMetal != null && !r.MergesIntoExisting && overrides.Count > 0)
+            SheetMetalParameters? defaults = partValues ?? r.Body;
+            if (first && defaults != null && !gauge) notes.AddRange(WritePartValues(doc, sheetMetal, defaults));
+            var info = new List<string>();
+            if (overrideMode == BodyOverrideMode.PartValues) info.Add(SheetMetalRules.OwnValuesAsPartValues);
+            if (sheetMetal != null && overrideMode == BodyOverrideMode.Apply)
                 notes.AddRange(SwSheetMetal.Apply(doc, sheetMetal, r.Body!, true, overrides));
+            if (sheetMetal != null && overrideMode == BodyOverrideMode.Deferred)
+            {
+                // Set by StepRunner after the step that makes the second body, outside its check and guard.
+                ctx.Shared.PendingBodyOverrides.Add(new PendingBodyOverrides(r.Name, sheetMetal, r.Body!, overrides, SheetMetalRules.OwnValues(r.Defaults, r.Body!), gauge));
+                info.Add(SheetMetalRules.OwnValuesDeferred);
+            }
             // Newer versions: the flange's own thickness and radius over the defaults, only once the override took.
             if (!first && r.OverrideDefaults == true) notes.AddRange(OverrideOnFlange(doc, f, r));
 
@@ -167,6 +174,7 @@ namespace Spiegelwerk.Build.Builders
 
             BuildResult result = Ok(f, Describe(r, revDir != r.ReverseDirection, revThk != r.ReverseThickness), notes);
             result.Info.Add($"Angelegt über {SheetMetalRules.PathName(used)}.");
+            result.Info.AddRange(info);
             if (sheetMetal != null && r.SheetMetalName.Length > 0)
                 result.Companions.Add(new Companion(sheetMetal, r.SheetMetalName, r.CompanionDimensions));
             result.RemoveHelpers = () => RemoveCompanions(ctx, flatPattern, sheetMetal);
@@ -325,14 +333,20 @@ namespace Spiegelwerk.Build.Builders
                     yield return new Attempt(path, $"{name} ({dir} Richtung{(dir == 1 ? "" : "en")}, {(offsetCodes ? "Laschenversatz" : "Endbedingung")})", dir, offsetCodes);
         }
 
-        /// <summary>Creates by one attempt; true if the call took the allowance and relief at creation.</summary>
-        private static bool Create(BuildContext ctx, SketchMap sketch, BaseFlangeRecord r, Attempt attempt, FlangeCreation v, bool revDir, bool revThk, bool scope)
+        /// <summary>
+        /// Creates by one attempt; true if the call took the allowance and relief at creation.
+        /// The sides are the resolved ones: a blind equivalent is created with its real depth,
+        /// a side with a reference blind with the placeholder (the edit sets it).
+        /// </summary>
+        private static bool Create(BuildContext ctx, SketchMap sketch, BaseFlangeRecord r, Attempt attempt, FlangeCreation v, bool revDir, bool revThk, bool scope,
+            List<SideTarget> sides)
         {
             ModelDoc2 doc = ctx.Doc;
             FeatureManager fm = doc.FeatureManager;
             if (!Select(ctx, sketch, scope && attempt.Path == BaseFlangePath.V2)) return false;
-            SideTarget? s1 = r.ClosedProfile ? null : Side(r, 1);
-            SideTarget? s2 = r.ClosedProfile || r.OffsetDirections != 2 ? null : Side(r, 2);
+            // Empty for a closed profile; side 2 only with two directions.
+            SideTarget? s1 = sides.FirstOrDefault(s => s.Which == 1);
+            SideTarget? s2 = sides.FirstOrDefault(s => s.Which == 2);
             int Code(SideTarget? s) => s == null ? 0
                 : attempt.FlangeOffsetCodes ? SheetMetalRules.ToFlangeOffset(s.CreateEnd) ?? 1 : (int)s.CreateEnd;
             double d1 = s1?.CreateDistance ?? PlaceholderDepth, d2 = s2?.CreateDistance ?? 0;
@@ -377,13 +391,6 @@ namespace Spiegelwerk.Build.Builders
             }
         }
 
-        /// <summary>The side as created by this attempt (references come in the edit).</summary>
-        private static SideTarget Side(BaseFlangeRecord r, int which)
-        {
-            FlangeSide src = which == 1 ? r.Side1 : r.Side2;
-            return new SideTarget(which, src, src.End, src.Distance, null);
-        }
-
         /// <summary>The profile sketch on mark 0 (API examples), with a scope the job's own bodies on mark 8 (help of v2).</summary>
         private static bool Select(BuildContext ctx, SketchMap sketch, bool scope)
         {
@@ -397,6 +404,79 @@ namespace Spiegelwerk.Build.Builders
         }
 
         // ---- values
+
+        /// <summary>The part's values, written by the first body: into the defaults, before 2013 into its SheetMetal.</summary>
+        private static List<string> WritePartValues(ModelDoc2 doc, Feature? sheetMetal, SheetMetalParameters values)
+        {
+            // Without the gauge table (not found): fixed values, the table is not expected back.
+            SheetMetalParameters want = WithoutGauge(values);
+            if (SwSheetMetal.Template(doc) is Feature t) return SwSheetMetal.Apply(doc, t, want, false, Array.Empty<int>());
+            return sheetMetal != null ? SwSheetMetal.Apply(doc, sheetMetal, want, false, Array.Empty<int>()) : new List<string>();
+        }
+
+        /// <summary>
+        /// After a step that leaves the copy with a second sheet-metal body: the first body's own
+        /// values (<see cref="BuildShared.PendingBodyOverrides"/>) on its SheetMetal, read back. Runs
+        /// after the step's check and guard – inside them the check would count body 1's change and
+        /// the guard would undo it –, so the next guard snapshot holds them.
+        /// </summary>
+        public static void ApplyPending(BuildContext ctx, BuildResult result)
+        {
+            List<PendingBodyOverrides> pending = ctx.Shared.PendingBodyOverrides;
+            if (pending.Count == 0 || SwSheetMetal.OfType(ctx.Doc, "SheetMetal").Count < 2) return;
+            foreach (PendingBodyOverrides p in pending)
+            {
+                if (!(Live(ctx.Doc, p.SheetMetal) is Feature sm)) continue;
+                List<string> lines = SwSheetMetal.Apply(ctx.Doc, sm, p.Body, true, p.Groups);
+                if (lines.Count == 0) result.Info.Add(SheetMetalRules.OwnValuesSet(sm.Name, p.Flange));
+                result.Notes.AddRange(lines);
+                if (lines.Count > 0 && result.Status == ReportStatus.Ok) result.Status = ReportStatus.Warning;
+            }
+            pending.Clear();
+            ctx.Doc.EditRebuild3();
+            ctx.Topology.Invalidate();
+        }
+
+        /// <summary>
+        /// At the end of the build: own values still waiting (the copy got no second sheet-metal
+        /// body) become the part's values – in a single-body part the body's values are the part's.
+        /// The lines go to the first body's report entry.
+        /// </summary>
+        public static void FinishPending(BuildContext ctx)
+        {
+            List<PendingBodyOverrides> pending = ctx.Shared.PendingBodyOverrides;
+            if (pending.Count == 0) return;
+            bool multibody = SwSheetMetal.OfType(ctx.Doc, "SheetMetal").Count > 1;
+            foreach (PendingBodyOverrides p in pending)
+            {
+                if (!(Live(ctx.Doc, p.SheetMetal) is Feature sm)) continue;
+                ReportEntry? entry = ctx.Report.Entries.LastOrDefault(e => e.Feature == p.Flange);
+                List<string> lines;
+                if (multibody) lines = SwSheetMetal.Apply(ctx.Doc, sm, p.Body, true, p.Groups);
+                else if (!p.Gauge) lines = WritePartValues(ctx.Doc, sm, p.OwnValues);
+                else lines = new List<string> { "Eigene Blechparameter des Körpers nicht gesetzt: Das Teil hat nur diesen Blechkörper, und seine Werte kommen aus der Blechstärkentabelle." };
+                if (entry == null) continue;
+                if (lines.Count == 0) entry.Details.Add(multibody ? SheetMetalRules.OwnValuesSet(sm.Name, p.Flange) : SheetMetalRules.OwnValuesAtEnd);
+                entry.Details.AddRange(lines);
+                if (lines.Count > 0 && entry.Status == ReportStatus.Ok) entry.Status = ReportStatus.Warning;
+            }
+            pending.Clear();
+            ctx.Doc.EditRebuild3();
+        }
+
+        /// <summary>The feature if it is still in the document.</summary>
+        private static Feature? Live(ModelDoc2 doc, Feature f)
+        {
+            try
+            {
+                return SwDoc.FeatureByName(doc, f.Name);
+            }
+            catch (Exception)
+            {
+                // Deleted with its flange.
+                return null;
+            }
+        }
 
         private static SheetMetalParameters? TryRead(ModelDoc2 doc, Feature f, bool bodyLevel)
         {

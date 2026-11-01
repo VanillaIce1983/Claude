@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Spiegelwerk.Core.Records;
 
 namespace Spiegelwerk.Core.Planning
@@ -14,6 +15,25 @@ namespace Spiegelwerk.Core.Planning
 
         /// <summary>C: InsertSheetMetalBaseFlange2 (19 parameters) with merge and feature scope.</summary>
         V2,
+    }
+
+    /// <summary>
+    /// How a new body's own values – the override groups of its SheetMetal – reach the copy (B15:
+    /// the override flags exist only in a multibody part).
+    /// </summary>
+    public enum BodyOverrideMode
+    {
+        /// <summary>Nothing to override, or a tab (it shares the SheetMetal of its body).</summary>
+        None,
+
+        /// <summary>The copy already has a sheet-metal body: the overrides go on the new SheetMetal at once.</summary>
+        Apply,
+
+        /// <summary>The first body of a copy that stays single-body: its own values are the part's values.</summary>
+        PartValues,
+
+        /// <summary>The first body of a copy that gets more: created with the defaults, its overrides follow with the second sheet-metal body.</summary>
+        Deferred,
     }
 
     /// <summary>What a base flange is created with: thickness, radius, the allowance object and the relief.</summary>
@@ -123,6 +143,53 @@ namespace Spiegelwerk.Core.Planning
                 ownRelief == null, ownRelief ?? source?.Relief ?? new ReliefData());
         }
 
+        /// <summary>
+        /// How the body's own values reach the copy (<see cref="BodyOverrideMode"/>). The first body
+        /// is created while the copy is single-body, where SetOverrideDefaultParameter2 does not
+        /// apply: if the run builds no other sheet-metal body, its own values become the part's;
+        /// otherwise they wait for the second body.
+        /// </summary>
+        /// <param name="first">The target has neither defaults nor a SheetMetal yet.</param>
+        /// <param name="tab">The flange joins an existing body.</param>
+        /// <param name="overrides">Number of override groups the original body set (<see cref="BodyOverrides"/>).</param>
+        /// <param name="staysSingleBody">The run builds no other base flange with a body of its own.</param>
+        public static BodyOverrideMode BodyOverrideModeOf(bool first, bool tab, int overrides, bool staysSingleBody) =>
+            tab || overrides == 0 ? BodyOverrideMode.None
+            : !first ? BodyOverrideMode.Apply
+            : staysSingleBody ? BodyOverrideMode.PartValues
+            : BodyOverrideMode.Deferred;
+
+        /// <summary>
+        /// What a body actually has: the groups it overrides (<see cref="BodyOverrides"/>) from its
+        /// own SheetMetal, everything else from the part's defaults (before 2013: all its own). In a
+        /// copy that stays single-body these are the part's values.
+        /// </summary>
+        public static SheetMetalParameters OwnValues(SheetMetalParameters? defaults, SheetMetalParameters body)
+        {
+            IReadOnlyList<int> groups = BodyOverrides(body);
+            SheetMetalParameters basis = defaults ?? body;
+            return new SheetMetalParameters
+            {
+                Thickness = groups.Contains(0) ? body.Thickness : basis.Thickness,
+                BendRadius = groups.Contains(0) ? body.BendRadius : basis.BendRadius,
+                BendAllowance = groups.Contains(1) ? body.BendAllowance : basis.BendAllowance,
+                Relief = groups.Contains(2) ? body.Relief : basis.Relief,
+                UseGaugeTable = basis.UseGaugeTable,
+                GaugeTableFile = basis.GaugeTableFile,
+                UseMaterialParameters = basis.UseMaterialParameters,
+            };
+        }
+
+        /// <summary>Base flanges of the run that make a body of their own: at most one means the copy stays single-body.</summary>
+        public static bool StaysSingleBody(IEnumerable<FeatureRecord> records)
+        {
+            int bodies = 0;
+            foreach (FeatureRecord r in records)
+                if (r is BaseFlangeRecord b && !b.MergesIntoExisting)
+                    bodies++;
+            return bodies <= 1;
+        }
+
         /// <summary>Solid bodies a base flange adds: one, or none for a tab that joins its body.</summary>
         public static int ExpectedBodyDelta(bool tab) => tab ? 0 : 1;
 
@@ -156,6 +223,19 @@ namespace Spiegelwerk.Core.Planning
             if (body.OverrideAutoRelief) result.Add(2);
             return result;
         }
+
+        /// <summary>The first body of a copy that stays single-body: its own values became the part's.</summary>
+        public const string OwnValuesAsPartValues = "Eigene Blechparameter des Körpers als Werte des Teils übernommen: Die Kopie hat nur diesen Blechkörper.";
+
+        /// <summary>The first body's overrides wait for the second sheet-metal body.</summary>
+        public const string OwnValuesDeferred = "Eigene Blechparameter des Körpers folgen mit dem zweiten Blechkörper (im Einkörperteil nicht anwendbar); die Prüfung dieses Schritts sieht den Körper noch mit den Standardwerten.";
+
+        /// <summary>The first body's overrides, set after the step that made the second sheet-metal body.</summary>
+        public static string OwnValuesSet(string sheetMetal, string flange) =>
+            $"Eigene Blechparameter von „{sheetMetal}“ (Körper von „{flange}“) gesetzt, nun da das Teil einen zweiten Blechkörper hat.";
+
+        /// <summary>The copy got no second sheet-metal body: the first body's own values became the part's at the end.</summary>
+        public const string OwnValuesAtEnd = "Kein zweiter Blechkörper entstanden: Eigene Blechparameter des Körpers am Ende als Werte des Teils gesetzt.";
 
         /// <summary>The copy gets fixed values where the original takes them from its material.</summary>
         public const string MaterialNote = "Blechparameter des Werkstoffs als feste Werte übernommen.";

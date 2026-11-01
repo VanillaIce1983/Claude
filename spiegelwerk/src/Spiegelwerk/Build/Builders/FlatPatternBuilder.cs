@@ -63,6 +63,7 @@ namespace Spiegelwerk.Build.Builders
             result.Verification = check;
             result.Info.Add(SheetMetalRules.GrainNote);
             if (r.Flattened) result.Info.Add(SheetMetalRules.FlatConfigurationNote);
+            if (r.OwnerFromTree) result.Info.Add(SheetMetalTree.OwnerFromTreeNote);
             return result;
         }
 

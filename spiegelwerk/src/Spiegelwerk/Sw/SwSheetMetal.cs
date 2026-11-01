@@ -114,14 +114,21 @@ namespace Spiegelwerk.Sw
             return SheetMetalTree.Of(top, facts);
         }
 
-        /// <summary>Own corner trim and break corners (the flat pattern's options) and the features of its body; what is not readable stays empty.</summary>
+        /// <summary>
+        /// Own corner trim and break corners (the flat pattern's options) and the features of its
+        /// body; what is not readable stays empty. The body is the one of its fixed face (A1 §6: it
+        /// exists folded) and any body whose features name the flat pattern – which a folded,
+        /// suppressed flat pattern may not be (B9).
+        /// </summary>
         private static FlatPatternFacts Facts(ModelDoc2 doc, Feature flatPattern)
         {
             string? trim = null, breakCorner = null;
             var body = new List<string>();
+            FlatPatternFeatureData? d = null;
             try
             {
-                if ((object)flatPattern.GetDefinition() is FlatPatternFeatureData d)
+                d = (object)flatPattern.GetDefinition() as FlatPatternFeatureData;
+                if (d != null)
                 {
                     Feature? t = null, b = null;
                     if (d.GetAddCornerTrim(out t) && t != null) trim = t.Name;
@@ -132,6 +139,7 @@ namespace Spiegelwerk.Sw
             {
                 // Without the options its corner features count as the user's – not rebuilt, never wrongly owned.
             }
+            if (d != null) body.AddRange(FixedFaceBodyFeatures(doc, d));
             try
             {
                 foreach (Body2 b in SwDoc.SolidBodies(doc))
@@ -140,9 +148,40 @@ namespace Spiegelwerk.Sw
             }
             catch (Exception)
             {
-                // Its owner is then not known; the capture says so.
+                // Its owner then comes from the tree, or is not known; the capture says so.
             }
-            return new FlatPatternFacts(trim, breakCorner, body);
+            return new FlatPatternFacts(trim, breakCorner, body.Distinct(StringComparer.Ordinal));
+        }
+
+        /// <summary>
+        /// The features of the body that holds the flat pattern's fixed face (a face, or an edge of a
+        /// cylindrical part), read under its selection access – the body belongs to that state, so
+        /// it is read before the access is released. Empty if any of it is not readable.
+        /// </summary>
+        private static List<string> FixedFaceBodyFeatures(ModelDoc2 doc, FlatPatternFeatureData d)
+        {
+            var names = new List<string>();
+            bool access = false;
+            try
+            {
+                access = d.AccessSelections(doc, null);
+                Body2? body = (object)d.FixedFace2 switch
+                {
+                    Face2 face => (object)face.GetBody() as Body2,
+                    Edge edge => (object)edge.GetBody() as Body2,
+                    _ => null,
+                };
+                if (body != null && (object)body.GetFeatures() is object[] fs) names.AddRange(fs.OfType<Feature>().Select(f => f.Name));
+            }
+            catch (Exception)
+            {
+                // The other sources decide.
+            }
+            finally
+            {
+                if (access) d.ReleaseSelectionAccess();
+            }
+            return names;
         }
 
         // ---- what a step made

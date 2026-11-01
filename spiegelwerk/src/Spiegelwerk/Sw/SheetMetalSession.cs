@@ -31,7 +31,7 @@ namespace Spiegelwerk.Sw
 
         /// <summary>
         /// Folds every flattened flat pattern. Returns why the run cannot go on (the state is put
-        /// back first), or null.
+        /// back first; what could not be put back is said too), or null.
         /// </summary>
         public string? Fold()
         {
@@ -40,8 +40,9 @@ namespace Spiegelwerk.Sw
             foreach (Feature fp in flatPatterns.Where(f => _flattened[f.Name]))
             {
                 if (SwSheetMetal.SetSuppressed(_doc, fp, true)) continue;
-                Restore();
-                return $"Die Abwicklung „{fp.Name}“ ließ sich für den Lauf nicht zurückfalten. Es wurde nichts gespiegelt.";
+                List<string> lost = Restore();
+                lost.Insert(0, $"Die Abwicklung „{fp.Name}“ ließ sich für den Lauf nicht zurückfalten. Es wurde nichts gespiegelt.");
+                return string.Join(" ", lost);
             }
             return null;
         }

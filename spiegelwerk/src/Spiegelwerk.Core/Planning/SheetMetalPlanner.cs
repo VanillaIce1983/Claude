@@ -36,7 +36,13 @@ namespace Spiegelwerk.Core.Planning
                 if (inRun.Count == 0) continue;
                 foreach (string n in inRun)
                     if (byName[n] is UnsupportedRecord u && SheetMetalTypes.Of(u.TypeName)?.Role == SheetMetalRole.Carrier)
+                    {
+                        // The SheetMetal of a base flange the run could not read: the flange and its own reason count.
+                        if (tree.Owners.TryGetValue(n, out var own) && own.kind == PartOwnerKind.SheetMetal &&
+                            byName.TryGetValue(own.owner, out FeatureRecord ownerRecord) && ownerRecord is UnsupportedRecord unread)
+                            return Text(own.owner, body.Name, unread.Reason);
                         return Text(n, body.Name, u.Reason);
+                    }
 
                 string? first = body.Features.FirstOrDefault(n => MakesBody(TypeOf(n)));
                 if (first == null || !byName.TryGetValue(first, out FeatureRecord firstRecord)) continue;

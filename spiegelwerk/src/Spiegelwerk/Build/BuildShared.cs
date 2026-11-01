@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using SolidWorks.Interop.sldworks;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
 
@@ -46,5 +47,45 @@ namespace Spiegelwerk.Build
 
         /// <summary>The folded state of the original for the run; null without sheet metal.</summary>
         public SheetMetalSession? Session { get; set; }
+
+        /// <summary>The run builds at most one base flange with a body of its own: the copy stays single-body.</summary>
+        public bool SingleSheetMetalBody { get; set; }
+
+        /// <summary>Own values of the first body, waiting for the second sheet-metal body (B15).</summary>
+        public List<PendingBodyOverrides> PendingBodyOverrides { get; } = new List<PendingBodyOverrides>();
+    }
+
+    /// <summary>
+    /// The override groups of the copy's first sheet-metal body: SetOverrideDefaultParameter2 does
+    /// not apply while the copy is single-body, so they are set once a second body exists.
+    /// </summary>
+    internal sealed class PendingBodyOverrides
+    {
+        public PendingBodyOverrides(string flange, Feature sheetMetal, SheetMetalParameters body, IReadOnlyList<int> groups, SheetMetalParameters ownValues, bool gauge)
+        {
+            Flange = flange;
+            SheetMetal = sheetMetal;
+            Body = body;
+            Groups = groups;
+            OwnValues = ownValues;
+            Gauge = gauge;
+        }
+
+        /// <summary>Original name of the base flange.</summary>
+        public string Flange { get; }
+
+        /// <summary>Its SheetMetal in the target.</summary>
+        public Feature SheetMetal { get; }
+
+        /// <summary>The original body's values.</summary>
+        public SheetMetalParameters Body { get; }
+
+        public IReadOnlyList<int> Groups { get; }
+
+        /// <summary>What the body has in all (<see cref="Core.Planning.SheetMetalRules.OwnValues"/>): the part's values if no second body comes.</summary>
+        public SheetMetalParameters OwnValues { get; }
+
+        /// <summary>The first body set the gauge table: its values are not written as fixed ones.</summary>
+        public bool Gauge { get; }
     }
 }
