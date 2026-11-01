@@ -109,5 +109,14 @@ namespace Spiegelwerk.Core.Tests
         {
             Assert.Equal("Spiegel-Feature über Blech-Features wird noch nicht nachgebaut.", UnsupportedFeatures.MirrorOverSheetMetal);
         }
+
+        [Fact]
+        public void Unsupported_records_trigger_the_fallback_as_their_type_says()
+        {
+            // S0: every listed type triggers; a type the table does not know triggers too (K17).
+            Assert.All(SheetMetalTypes.Names, type => Assert.True(SheetMetalTypes.TriggersFallback(type), type));
+            Assert.True(SheetMetalTypes.TriggersFallback("WeldedCornerUnknown"));
+            Assert.False(new SheetMetalType(SheetMetalRole.Leaf, SheetMetalState.Unsupported, triggersFallback: false).TriggersFallback);
+        }
     }
 }

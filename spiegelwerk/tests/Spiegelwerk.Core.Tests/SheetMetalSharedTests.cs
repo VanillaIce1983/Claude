@@ -1,6 +1,8 @@
 using System;
 using System.Globalization;
 using System.Linq;
+using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Xunit;
@@ -79,6 +81,51 @@ namespace Spiegelwerk.Core.Tests
             // Override flags do not apply (single body): not compared.
             got.OverrideReadCode = 2;
             Assert.Equal(2, SheetMetalCompare.Parameters(want, got, Comma).Differences.Count);
+        }
+
+        [Fact]
+        public void Parameter_differences_name_radius_kind_and_gauge_table()
+        {
+            SheetMetalParameters want = Plate(), got = Plate();
+            want.UseGaugeTable = got.UseGaugeTable = true;
+            want.GaugeTableFile = @"C:\Tabellen\Stahl.xlsx";
+            got.GaugeTableFile = @"C:\Tabellen\Alu.xlsx";
+            got.BendRadius = 0.0015;
+            got.BendAllowance = new BendAllowanceData { Kind = BendAllowanceKind.Deduction, BendDeduction = 0.0004 };
+
+            Deviations d = SheetMetalCompare.Parameters(want, got, Comma);
+            Assert.Equal(3, d.Differences.Count);
+            Assert.Contains("Biegeradius: erwartet 1 mm, gelesen 1,5 mm", d.Differences);
+            Assert.Contains("Biegezugabe: erwartet K 0,44, gelesen Biegeabzug 0,4 mm", d.Differences);
+            Assert.Contains(d.Differences, x => x.StartsWith("Blechstärkentabelle: erwartet", StringComparison.Ordinal));
+
+            // The same table found in another folder: a note, no difference.
+            got = Plate();
+            got.UseGaugeTable = true;
+            got.GaugeTableFile = @"D:\Neu\Stahl.xlsx";
+            d = SheetMetalCompare.Parameters(want, got, Comma);
+            Assert.True(d.None);
+            Assert.Single(d.Notes);
+        }
+
+        [Fact]
+        public void Fixed_reference_is_a_face_or_an_edge_only()
+        {
+            var p = new SheetMetalParameters();
+            var face = GeometryRef.ToFace(new FaceSignature(SurfaceKind.Plane, 1e-3, Vec3.Zero));
+            var edge = GeometryRef.ToEdge(new EdgeSignature(CurveKind.Line, Vec3.Zero, new Vec3(0.05, 0, 0), new Vec3(0.025, 0, 0), 0.05));
+            p.FixedReference = face;
+            Assert.Same(face, p.FixedReference);
+            // A straight edge stays an edge: it is never read as an axis.
+            p.FixedReference = edge;
+            Assert.Same(edge, p.FixedReference);
+            p.FixedReference = null;
+            Assert.Null(p.FixedReference);
+
+            Assert.Throws<ArgumentException>(() => p.FixedReference = GeometryRef.ToAxis(new Line3(Vec3.Zero, Vec3.UnitX), "Achse1"));
+            Assert.Throws<ArgumentException>(() => p.FixedReference = GeometryRef.Unknown("Silhouettenkante"));
+            foreach (GeometryRefKind kind in Enum.GetValues(typeof(GeometryRefKind)))
+                Assert.Equal(kind == GeometryRefKind.Face || kind == GeometryRefKind.Edge, SheetMetalParameters.IsFixedReferenceKind(kind));
         }
 
         [Fact]
@@ -217,6 +264,24 @@ namespace Spiegelwerk.Core.Tests
             Assert.Single(BendOverrides.Differences(parent, new[] { bend }));
             var unreadable = new BendValues { Name = "HemBend2", UseDefaultAllowance = false };
             Assert.Contains("nicht lesbar", BendOverrides.Differences(parent, new[] { unreadable }).Single().What);
+        }
+
+        [Fact]
+        public void Bend_order_differences_are_notes_only()
+        {
+            // The order is no override: a bend with its own place in the sequence loses nothing.
+            var parent = new BendValues { Name = "Kantenlasche1", Radius = 0.001 };
+            Assert.Empty(BendOverrides.Differences(parent, new[] { new BendValues { Name = "EdgeBend1", BendOrder = 3 } }));
+
+            var pairs = new[]
+            {
+                (new BendValues { Name = "EdgeBend1", BendOrder = 1 }, new BendValues { Name = "EdgeBend1", BendOrder = 1 }),
+                (new BendValues { Name = "EdgeBend2", BendOrder = 2 }, new BendValues { Name = "EdgeBend3", BendOrder = 3 }),
+                // Not read on one side: nothing to say.
+                (new BendValues { Name = "EdgeBend3", BendOrder = 3 }, new BendValues { Name = "EdgeBend2" }),
+            };
+            Assert.Equal(new[] { "Biegung „EdgeBend2“ steht in der Biegereihenfolge an Stelle 2, ihr Gegenstück „EdgeBend3“ an Stelle 3." },
+                BendOverrides.OrderNotes(pairs));
         }
     }
 }

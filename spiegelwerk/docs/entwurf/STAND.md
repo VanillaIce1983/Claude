@@ -25,10 +25,13 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   (`SheetMetalRecords`, `SheetMetalCompare`, `AllowanceRules`, `BendOverrides`), Typtabelle mit Rolle und Zustand
   (`SheetMetalTypes`, alle „noch nicht“) und `RefusesBeforeCapture`, ein Besitzmodell für Bohrungen und Blech
   (`OwnedSketches`, `BringsParts`, `PartOwnerKind`, `PositionedFeatureRecord`), ausnahmesicherer Blech-Verteiler beim
-  Erfassen (noch ohne Leser), Spiegel-Features über Blech als nicht unterstützt, `SwLate.Invoke`/`InvokeOut`.
+  Erfassen (noch ohne Leser; jeder nicht unterstützte Eintrag mit dem Ersatzweg-Flag seines Typs), Spiegel-Features
+  über Blech als nicht unterstützt, `SwLate.Invoke`/`InvokeOut`; Biegereihenfolge nur als Information
+  (`BendOverrides.OrderNotes`), feste Referenz eines Blechkörpers nur Fläche oder Kante.
   Abweichend vom Plan: STOLPERSTEINE 139 aus dem Plan ist nach dem Einfügen der beiden Zweige 151; die neuen Zeilen
-  stehen als 164–171 in einem eigenen Abschnitt. Die geschlossene Ecke (`CornerFeat`) steht schon in der Tabelle, die
-  Eckentlastung nicht (Name unbestätigt, §1.5).
+  stehen als 164–172 in einem eigenen Abschnitt. Die geschlossene Ecke (`CornerFeat`) steht schon in der Tabelle, die
+  Eckentlastung nicht (Name unbestätigt, §1.5). `RefusesRun` bleibt als Kurzform von `RefusesBeforeCapture` (ohne
+  angenommenen Besitzer, Ersatzweg aus) für die unveränderten `ReportTextTests`.
 
 ## In Arbeit
 

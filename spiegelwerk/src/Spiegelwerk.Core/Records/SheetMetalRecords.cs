@@ -118,11 +118,26 @@ namespace Spiegelwerk.Core.Records
         /// </summary>
         public int? OverrideReadCode { get; set; }
 
+        private GeometryRef? _fixedReference;
+
         /// <summary>
         /// ISheetMetalFeatureData.FixedReference of legacy or converted parts: only ever a face
-        /// or an edge – a straight edge stays an edge, it is no axis.
+        /// or an edge – a straight edge stays an edge, it is no axis (a reference read the
+        /// general way would turn it into one, and the copy would look for a reference axis).
         /// </summary>
-        public GeometryRef? FixedReference { get; set; }
+        public GeometryRef? FixedReference
+        {
+            get => _fixedReference;
+            set
+            {
+                if (value != null && !IsFixedReferenceKind(value.Kind))
+                    throw new System.ArgumentException($"Die feste Referenz eines Blechkörpers ist eine Fläche oder Kante, keine Referenz der Art {value.Kind}.");
+                _fixedReference = value;
+            }
+        }
+
+        /// <summary>A fixed reference of a sheet-metal body is a face or an edge, nothing else.</summary>
+        public static bool IsFixedReferenceKind(GeometryRefKind kind) => kind == GeometryRefKind.Face || kind == GeometryRefKind.Edge;
     }
 
     /// <summary>
@@ -147,6 +162,13 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>The bend's own relief; for an owner the relief its bends inherit, null if not known.</summary>
         public ReliefData? Relief { get; set; }
+
+        /// <summary>
+        /// IOneBendFeatureData.BendOrder: the bend's place in the bend sequence (bend table of a
+        /// drawing); null if not read. Not a value the owner hands down – compared only between
+        /// a bend and its counterpart in the copy, as information (<see cref="Planning.BendOverrides.OrderNotes"/>).
+        /// </summary>
+        public int? BendOrder { get; set; }
     }
 
     /// <summary>A bend sub-feature with values of its own that the copy does not get (a note, never a write).</summary>

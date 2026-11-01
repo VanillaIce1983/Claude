@@ -111,6 +111,13 @@ namespace Spiegelwerk.Core.Planning
         public static IEnumerable<string> Names => Table.Keys;
 
         /// <summary>
+        /// Does an unsupported record of this type hand its body to the fallback? As the table
+        /// says; true for any type it does not list – a generic record changes the solid and
+        /// triggers until its name is confirmed (blech-plan K17).
+        /// </summary>
+        public static bool TriggersFallback(string type) => Of(type)?.TriggersFallback ?? true;
+
+        /// <summary>
         /// Refused before capture: a sheet-metal type that is not part of an accepted owner,
         /// if no slice has decided it yet – or if it carries a body, is not rebuilt and the
         /// fallback is off. A sub-feature is never refused on its own when its owner is accepted.

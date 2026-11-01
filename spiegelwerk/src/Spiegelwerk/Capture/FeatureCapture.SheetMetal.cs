@@ -14,21 +14,37 @@ namespace Spiegelwerk.Capture
     {
         /// <summary>
         /// Captures a sheet-metal feature. Many fragile calls (late-bound reads, rollbacks, bend
-        /// sub-features) must not end the run: any exception other than NotSupportedException
-        /// becomes one, and with it an unsupported record of this feature alone.
+        /// sub-features) must not end the run: any exception becomes an unsupported record of
+        /// this feature alone – a NotSupportedException with its own text, any other as „Blech-
+        /// Feature nicht lesbar (…)“. Every unsupported record of a sheet-metal type takes the
+        /// type's fallback flag (<see cref="SheetMetalTypes.TriggersFallback"/>).
         /// </summary>
         private FeatureRecord CaptureSheetMetal(Feature f, string type)
         {
+            string reason;
             try
             {
                 // By type name first: some have no definition (a form tool before 2025).
                 FeatureRecord? record = SheetMetalByType(f, type) ?? SheetMetalByDefinition(f, type, (object?)f.GetDefinition());
-                return record ?? new UnsupportedRecord(f.Name, type, UnsupportedFeatures.Reason(type), ChangesSolid(type));
+                if (record == null) reason = UnsupportedFeatures.Reason(type);
+                else if (record is UnsupportedRecord own) return WithFallbackFlag(own, type);
+                else return record;
             }
-            catch (Exception ex) when (!(ex is NotSupportedException))
+            catch (NotSupportedException ex)
             {
-                throw new NotSupportedException($"Blech-Feature nicht lesbar ({ex.Message}).");
+                reason = ex.Message;
             }
+            catch (Exception ex)
+            {
+                reason = $"Blech-Feature nicht lesbar ({ex.Message}).";
+            }
+            return WithFallbackFlag(new UnsupportedRecord(f.Name, type, reason, ChangesSolid(type)), type);
+        }
+
+        private static UnsupportedRecord WithFallbackFlag(UnsupportedRecord record, string type)
+        {
+            if (!SheetMetalTypes.TriggersFallback(type)) record.TriggersFallback = false;
+            return record;
         }
 
         /// <summary>Readers by type name, for types whose definition may be null. None yet.</summary>

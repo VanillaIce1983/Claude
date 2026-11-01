@@ -40,5 +40,21 @@ namespace Spiegelwerk.Core.Planning
             }
             return result;
         }
+
+        /// <summary>
+        /// Bends whose place in the bend sequence differs from their counterpart's in the copy
+        /// (pairs from the bend matching, both read back). Information only, never a warning: the
+        /// sequence orders a drawing's bend table and does not change the part, SOLIDWORKS numbers
+        /// the copy's bends itself, and a bend's own order cannot be written either. A pair with
+        /// an unread order says nothing.
+        /// </summary>
+        public static List<string> OrderNotes(IEnumerable<(BendValues original, BendValues copy)> pairs)
+        {
+            var result = new List<string>();
+            foreach (var (original, copy) in pairs)
+                if (original.BendOrder is int was && copy.BendOrder is int now && was != now)
+                    result.Add($"Biegung „{original.Name}“ steht in der Biegereihenfolge an Stelle {was}, ihr Gegenstück „{copy.Name}“ an Stelle {now}.");
+            return result;
+        }
     }
 }
