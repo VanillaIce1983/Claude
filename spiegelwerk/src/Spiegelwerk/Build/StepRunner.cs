@@ -82,6 +82,8 @@ namespace Spiegelwerk.Build
             HashSet<string> featuresBefore = TopLevelNames(ctx.Doc);
             // A step that may write the shared sheet-metal values runs under the guard (A1 P1).
             SheetMetalGuard.State? guardBefore = record.TouchesSheetMetalDefaults ? ctx.Shared.Guard?.Take() : null;
+            // The first sheet-metal body still has the defaults, its own values follow (B15); a base flange says so itself.
+            bool bodyWaits = ctx.Shared.PendingBodyOverrides.Count > 0 && !(record is BaseFlangeRecord);
             BuildResult result;
             string verification = "";
             int mark = ctx.Planes.BeginStep(ctx.IsNested);
@@ -105,6 +107,8 @@ namespace Spiegelwerk.Build
             }
             // No feature came of it (refused or failed after resolving its references): helper planes and axes made for it go again.
             if (result.Feature == null) ctx.Planes.RemoveStepHelpers(mark);
+            // Said only if the check finds a deviation: it may come from the body's waiting values.
+            if (bodyWaits) result.MismatchHint ??= SheetMetalRules.OwnValuesPendingHint;
 
             try
             {

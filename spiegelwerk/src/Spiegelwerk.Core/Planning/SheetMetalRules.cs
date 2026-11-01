@@ -160,6 +160,19 @@ namespace Spiegelwerk.Core.Planning
             : BodyOverrideMode.Deferred;
 
         /// <summary>
+        /// Whether a flange's read-back expects the thickness and radius its body has now – the values
+        /// it was created with – instead of the original's (B15): while the first body still waits for
+        /// its own bend parameters (group 0), it and every tab on it have the defaults. A flange that
+        /// takes them from its gauge table or carries its own over the defaults
+        /// (OverrideDefaultSheetMetalParameters) keeps the original's.
+        /// </summary>
+        /// <param name="waitingGroups">The override groups its body still waits for; null if it waits for none.</param>
+        /// <param name="flangeOverridesDefaults">The original flange's OverrideDefaultSheetMetalParameters.</param>
+        /// <param name="gaugeTable">The copy's flange was given the gauge table.</param>
+        public static bool ReadsBackCurrentBendValues(IReadOnlyList<int>? waitingGroups, bool? flangeOverridesDefaults, bool gaugeTable) =>
+            waitingGroups != null && waitingGroups.Contains(0) && flangeOverridesDefaults != true && !gaugeTable;
+
+        /// <summary>
         /// What a body actually has: the groups it overrides (<see cref="BodyOverrides"/>) from its
         /// own SheetMetal, everything else from the part's defaults (before 2013: all its own). In a
         /// copy that stays single-body these are the part's values.
@@ -229,6 +242,9 @@ namespace Spiegelwerk.Core.Planning
 
         /// <summary>The first body's overrides wait for the second sheet-metal body.</summary>
         public const string OwnValuesDeferred = "Eigene Blechparameter des Körpers folgen mit dem zweiten Blechkörper (im Einkörperteil nicht anwendbar); die Prüfung dieses Schritts sieht den Körper noch mit den Standardwerten.";
+
+        /// <summary>A step checked while the first body's own values still wait: said only if its check finds a deviation.</summary>
+        public const string OwnValuesPendingHint = "Der erste Blechkörper hatte bei dieser Prüfung noch die Standardwerte; seine eigenen Blechparameter werden erst mit dem zweiten Blechkörper (oder am Ende) gesetzt – die Abweichung kann daher rühren.";
 
         /// <summary>The first body's overrides, set after the step that made the second sheet-metal body.</summary>
         public static string OwnValuesSet(string sheetMetal, string flange) =>

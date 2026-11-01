@@ -64,7 +64,8 @@ namespace Spiegelwerk.Build.Builders
             Feature? targetTemplate = SwSheetMetal.Template(doc);
             bool first = targetTemplate == null && SwSheetMetal.OfType(doc, "SheetMetal").Count == 0;
             SheetMetalParameters? template = first || targetTemplate == null ? null : TryRead(doc, targetTemplate, false);
-            SheetMetalParameters? targetBody = r.MergesIntoExisting ? TabTarget(ctx, r) : null;
+            Feature? tabSheetMetal = r.MergesIntoExisting ? TabSheetMetal(ctx, r) : null;
+            SheetMetalParameters? targetBody = tabSheetMetal == null ? null : TryRead(doc, tabSheetMetal, true);
             IReadOnlyList<int> overrides = SheetMetalRules.BodyOverrides(r.Body);
             BodyOverrideMode overrideMode = SheetMetalRules.BodyOverrideModeOf(first, r.MergesIntoExisting, overrides.Count, ctx.Shared.SingleSheetMetalBody);
             // What the first body makes the part's values: the original's defaults, or in a copy that stays single-body the body's own.
@@ -165,7 +166,12 @@ namespace Spiegelwerk.Build.Builders
             // Newer versions: the flange's own thickness and radius over the defaults, only once the override took.
             if (!first && r.OverrideDefaults == true) notes.AddRange(OverrideOnFlange(doc, f, r));
 
-            notes.AddRange(ReadBack(doc, f, r, revDir, revThk, sides));
+            // The first body still waits for its own values (B15): it, and a tab on it, has the defaults until
+            // then – read back against those, so no deviation is reported that the copy will not have.
+            IReadOnlyList<int>? waiting = WaitingGroups(ctx, r.MergesIntoExisting ? tabSheetMetal : sheetMetal);
+            if (r.MergesIntoExisting && waiting != null) info.Add(SheetMetalRules.OwnValuesDeferred);
+            bool current = SheetMetalRules.ReadsBackCurrentBendValues(waiting, r.OverrideDefaults, gauge);
+            notes.AddRange(ReadBack(doc, f, r, current ? values.Thickness : r.Thickness, current ? values.BendRadius : r.BendRadius, revDir, revThk, sides));
 
             // ---- registration: the flange, its SheetMetal (equations on the thickness), the body for the flat pattern
             ctx.Register(r.Name, f);
@@ -416,52 +422,139 @@ namespace Spiegelwerk.Build.Builders
 
         /// <summary>
         /// After a step that leaves the copy with a second sheet-metal body: the first body's own
-        /// values (<see cref="BuildShared.PendingBodyOverrides"/>) on its SheetMetal, read back. Runs
-        /// after the step's check and guard – inside them the check would count body 1's change and
-        /// the guard would undo it –, so the next guard snapshot holds them.
+        /// values (<see cref="BuildShared.PendingBodyOverrides"/>) on its SheetMetal, read back, under
+        /// the guard (<see cref="WriteGuarded"/>). Runs after the step's check and guard – inside them
+        /// the check would count body 1's change and the guard would undo it –, so the next guard
+        /// snapshot holds them. If the guard cannot restore what the write changed, the run stops.
         /// </summary>
         public static void ApplyPending(BuildContext ctx, BuildResult result)
         {
             List<PendingBodyOverrides> pending = ctx.Shared.PendingBodyOverrides;
             if (pending.Count == 0 || SwSheetMetal.OfType(ctx.Doc, "SheetMetal").Count < 2) return;
-            foreach (PendingBodyOverrides p in pending)
+            int had = result.Notes.Count;
+            var guardNotes = new List<string>();
+            List<(PendingBodyOverrides p, Feature sm, List<string> lines)> written = WriteGuarded(ctx, guardNotes, out string? abort);
+            foreach (var (p, sm, lines) in written)
             {
-                if (!(Live(ctx.Doc, p.SheetMetal) is Feature sm)) continue;
-                List<string> lines = SwSheetMetal.Apply(ctx.Doc, sm, p.Body, true, p.Groups);
                 if (lines.Count == 0) result.Info.Add(SheetMetalRules.OwnValuesSet(sm.Name, p.Flange));
                 result.Notes.AddRange(lines);
-                if (lines.Count > 0 && result.Status == ReportStatus.Ok) result.Status = ReportStatus.Warning;
             }
+            result.Notes.AddRange(guardNotes);
+            if (abort != null)
+            {
+                result.Notes.Add(abort);
+                ctx.Shared.AbortReason = abort;
+            }
+            if (result.Notes.Count > had && result.Status == ReportStatus.Ok) result.Status = ReportStatus.Warning;
             pending.Clear();
-            ctx.Doc.EditRebuild3();
             ctx.Topology.Invalidate();
         }
 
         /// <summary>
         /// At the end of the build: own values still waiting (the copy got no second sheet-metal
         /// body) become the part's values – in a single-body part the body's values are the part's.
-        /// The lines go to the first body's report entry.
+        /// Is the copy multibody after all (the step that made the second body stopped the run), they
+        /// go on the SheetMetal under the guard as in <see cref="ApplyPending"/>. The lines go to the
+        /// first body's report entry; a reason to stop also to the report's general lines.
         /// </summary>
         public static void FinishPending(BuildContext ctx)
         {
             List<PendingBodyOverrides> pending = ctx.Shared.PendingBodyOverrides;
             if (pending.Count == 0) return;
             bool multibody = SwSheetMetal.OfType(ctx.Doc, "SheetMetal").Count > 1;
-            foreach (PendingBodyOverrides p in pending)
+            var guardNotes = new List<string>();
+            string? abort = null;
+            var written = new List<(PendingBodyOverrides p, Feature sm, List<string> lines)>();
+            if (multibody) written = WriteGuarded(ctx, guardNotes, out abort);
+            else
             {
-                if (!(Live(ctx.Doc, p.SheetMetal) is Feature sm)) continue;
+                foreach (PendingBodyOverrides p in pending)
+                {
+                    if (!(Live(ctx.Doc, p.SheetMetal) is Feature sm)) continue;
+                    written.Add((p, sm, !p.Gauge ? WritePartValues(ctx.Doc, sm, p.OwnValues)
+                        : new List<string> { "Eigene Blechparameter des Körpers nicht gesetzt: Das Teil hat nur diesen Blechkörper, und seine Werte kommen aus der Blechstärkentabelle." }));
+                }
+                ctx.Doc.EditRebuild3();
+            }
+            ReportEntry? firstEntry = null;
+            foreach (var (p, sm, lines) in written)
+            {
                 ReportEntry? entry = ctx.Report.Entries.LastOrDefault(e => e.Feature == p.Flange);
-                List<string> lines;
-                if (multibody) lines = SwSheetMetal.Apply(ctx.Doc, sm, p.Body, true, p.Groups);
-                else if (!p.Gauge) lines = WritePartValues(ctx.Doc, sm, p.OwnValues);
-                else lines = new List<string> { "Eigene Blechparameter des Körpers nicht gesetzt: Das Teil hat nur diesen Blechkörper, und seine Werte kommen aus der Blechstärkentabelle." };
                 if (entry == null) continue;
+                firstEntry ??= entry;
                 if (lines.Count == 0) entry.Details.Add(multibody ? SheetMetalRules.OwnValuesSet(sm.Name, p.Flange) : SheetMetalRules.OwnValuesAtEnd);
                 entry.Details.AddRange(lines);
                 if (lines.Count > 0 && entry.Status == ReportStatus.Ok) entry.Status = ReportStatus.Warning;
             }
+            if (abort != null) guardNotes.Add(abort);
+            if (firstEntry != null && guardNotes.Count > 0)
+            {
+                firstEntry.Details.AddRange(guardNotes);
+                if (firstEntry.Status == ReportStatus.Ok) firstEntry.Status = ReportStatus.Warning;
+            }
+            else ctx.Report.General.AddRange(guardNotes);
+            if (abort != null)
+            {
+                ctx.Report.Aborted = true;
+                if (firstEntry != null) ctx.Report.General.Add(abort);
+            }
             pending.Clear();
+        }
+
+        /// <summary>
+        /// Writes the waiting overrides on their SheetMetals under the guard (A1 P1), as every write
+        /// that may touch the defaults: the snapshot leaves out the SheetMetals being written and,
+        /// through its flange, their body – they change by design –; the defaults, every other
+        /// SheetMetal and the other bodies are compared and written back. If the guard wrote back,
+        /// the written SheetMetals are read back once more. Returns each written one with its lines
+        /// (empty: set and read back); the guard's notes go to <paramref name="guardNotes"/>,
+        /// <paramref name="abort"/> is its reason to stop the run, or null.
+        /// </summary>
+        private static List<(PendingBodyOverrides p, Feature sm, List<string> lines)> WriteGuarded(BuildContext ctx, List<string> guardNotes, out string? abort)
+        {
+            abort = null;
+            var live = new List<(PendingBodyOverrides p, Feature sm)>();
+            foreach (PendingBodyOverrides p in ctx.Shared.PendingBodyOverrides)
+                if (Live(ctx.Doc, p.SheetMetal) is Feature sm)
+                    live.Add((p, sm));
+            SheetMetalGuard.State? before = ctx.Shared.Guard?.Take();
+            Feature? own = null;
+            foreach (var (p, sm) in live)
+            {
+                before?.SheetMetals.Remove(sm.Name);
+                if (own == null && ctx.Created.TryGetValue(p.Flange, out Feature flange)) own = flange;
+            }
+            var written = live.Select(x => (p: x.p, sm: x.sm, lines: SwSheetMetal.Apply(ctx.Doc, x.sm, x.p.Body, true, x.p.Groups))).ToList();
             ctx.Doc.EditRebuild3();
+            if (before == null) return written;
+            int had = guardNotes.Count;
+            abort = ctx.Shared.Guard!.Check(before, guardNotes, own);
+            // Written back: the defaults or another SheetMetal may have taken the new values with them.
+            if (abort != null || guardNotes.Count > had)
+                foreach (var (p, sm, lines) in written)
+                    foreach (string line in SwSheetMetal.Compare(ctx.Doc, sm, p.Body, true, p.Groups.ToList()))
+                        if (!lines.Contains(line)) lines.Add(line);
+            return written;
+        }
+
+        /// <summary>The override groups the body of this SheetMetal still waits for (B15); null if it waits for none.</summary>
+        private static IReadOnlyList<int>? WaitingGroups(BuildContext ctx, Feature? sm)
+        {
+            string? name = sm == null ? null : NameOf(sm);
+            return name == null ? null : ctx.Shared.PendingBodyOverrides.FirstOrDefault(p => NameOf(p.SheetMetal) == name)?.Groups;
+        }
+
+        private static string? NameOf(Feature f)
+        {
+            try
+            {
+                return f.Name;
+            }
+            catch (Exception)
+            {
+                // Deleted with its flange.
+                return null;
+            }
         }
 
         /// <summary>The feature if it is still in the document.</summary>
@@ -500,7 +593,7 @@ namespace Spiegelwerk.Build.Builders
         };
 
         /// <summary>The SheetMetal of the body a tab joins: the copy of the shared one, else the only one in the target.</summary>
-        private static SheetMetalParameters? TabTarget(BuildContext ctx, BaseFlangeRecord r)
+        private static Feature? TabSheetMetal(BuildContext ctx, BaseFlangeRecord r)
         {
             Feature? sm = r.TabOfSheetMetal != null && ctx.Created.TryGetValue(r.TabOfSheetMetal, out Feature copy) ? copy : null;
             if (sm == null)
@@ -508,7 +601,7 @@ namespace Spiegelwerk.Build.Builders
                 List<Feature> all = SwSheetMetal.OfType(ctx.Doc, "SheetMetal");
                 if (all.Count == 1) sm = all[0];
             }
-            return sm == null ? null : TryRead(ctx.Doc, sm, true);
+            return sm;
         }
 
         /// <summary>Newer versions: OverrideDefaultSheetMetalParameters on the flange, then its thickness and radius – only if the switch took.</summary>
@@ -531,15 +624,17 @@ namespace Spiegelwerk.Build.Builders
         /// Reads the flange back under its own selection access (no capture, no rollback) and
         /// names what differs from the copy's intended values.
         /// </summary>
-        private static List<string> ReadBack(ModelDoc2 doc, Feature f, BaseFlangeRecord r, bool revDir, bool revThk, List<SideTarget> sides)
+        /// <param name="thickness">The thickness the flange should have now: the original's, or its body's while that waits for its own (B15).</param>
+        /// <param name="radius">The bend radius, likewise.</param>
+        private static List<string> ReadBack(ModelDoc2 doc, Feature f, BaseFlangeRecord r, double thickness, double radius, bool revDir, bool revThk, List<SideTarget> sides)
         {
             var d = (BaseFlangeFeatureData)(object)f.GetDefinition();
             if (d == null || !d.AccessSelections(doc, null)) return new List<string> { "Basislasche ließ sich nicht zurücklesen." };
             var values = new List<(string, double, double, ScalarKind)>();
             try
             {
-                values.Add(("Blechdicke", r.Thickness, d.Thickness, ScalarKind.Length));
-                values.Add(("Biegeradius", r.BendRadius, d.BendRadius, ScalarKind.Length));
+                values.Add(("Blechdicke", thickness, d.Thickness, ScalarKind.Length));
+                values.Add(("Biegeradius", radius, d.BendRadius, ScalarKind.Length));
                 values.Add(("Richtung umkehren", revDir ? 1 : 0, d.ReverseDirection ? 1 : 0, ScalarKind.Flag));
                 if (!r.ClosedProfile)
                 {

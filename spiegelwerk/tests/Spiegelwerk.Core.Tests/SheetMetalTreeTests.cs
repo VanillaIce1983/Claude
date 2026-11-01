@@ -99,6 +99,23 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Flat_pattern_listed_at_the_top_and_in_its_folder_still_counts_once()
+        {
+            // The walk sees a feature twice when its folder lists it too: one flat pattern, one SheetMetal.
+            var top = new[]
+            {
+                F("Sheet-Metal", "TemplateSheetMetal", null, F("Sheet-Metal1", "SheetMetal")),
+                F("Sheet-Metal1", "SheetMetal"),
+                F("Base-Flange1", "SMBaseFlange", new[] { "Sheet-Metal1", "Sketch1" }, F("Sketch1", "ProfileFeature")),
+                F("Flat-Pattern", "TemplateFlatPattern", null, F("Flat-Pattern1", "FlatPattern")),
+                F("Flat-Pattern1", "FlatPattern", null, F("Bend-Lines1", "ProfileFeature")),
+            };
+            SheetMetalTree tree = SheetMetalTree.Of(top, new Dictionary<string, FlatPatternFacts> { ["Flat-Pattern1"] = new FlatPatternFacts() });
+            Assert.Equal("Base-Flange1", tree.FlatPatternOwners["Flat-Pattern1"]);
+            Assert.True(tree.OwnerFromTree("Flat-Pattern1"));
+        }
+
+        [Fact]
         public void Flat_pattern_without_body_features_follows_its_parents()
         {
             // Two bodies: the parents lead to the body – directly, over its SheetMetal, or over a tab to the SheetMetal it shares.

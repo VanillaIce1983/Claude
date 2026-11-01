@@ -212,6 +212,20 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Flange_on_a_body_waiting_for_its_thickness_is_read_back_against_what_the_body_has_now()
+        {
+            // B15: until the second body, the first body and its tabs have the defaults – no deviation the copy will not keep.
+            Assert.True(SheetMetalRules.ReadsBackCurrentBendValues(new[] { 0 }, null, false));
+            Assert.True(SheetMetalRules.ReadsBackCurrentBendValues(new[] { 1, 0 }, false, false));
+            // Not waiting, or only for allowance and relief: thickness and radius are already its own.
+            Assert.False(SheetMetalRules.ReadsBackCurrentBendValues(null, null, false));
+            Assert.False(SheetMetalRules.ReadsBackCurrentBendValues(new[] { 1, 2 }, null, false));
+            // Its own thickness over the defaults, or from the gauge table: the original's.
+            Assert.False(SheetMetalRules.ReadsBackCurrentBendValues(new[] { 0 }, true, false));
+            Assert.False(SheetMetalRules.ReadsBackCurrentBendValues(new[] { 0 }, null, true));
+        }
+
+        [Fact]
         public void Own_values_take_the_overridden_groups_from_the_body_and_the_rest_from_the_defaults()
         {
             var defaults = new SheetMetalParameters

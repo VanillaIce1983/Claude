@@ -142,9 +142,11 @@ namespace Spiegelwerk.Core.Planning
             foreach (string p in fp.Parents.Where(_types.ContainsKey).OrderBy(p => _order[p]))
                 if (BaseFlangeOf(p, all) is string owner)
                     return owner;
-            List<TreeFeature> sheetMetals = all.Where(f => f.Type == "SheetMetal").ToList();
-            if (all.Count(f => f.Type == "FlatPattern") == 1 && sheetMetals.Count == 1 &&
-                _owners.TryGetValue(sheetMetals[0].Name, out var only) && only.kind == PartOwnerKind.SheetMetal)
+            // A feature can be walked twice (at the top level and in its folder): count names, not entries.
+            List<string> sheetMetals = all.Where(f => f.Type == "SheetMetal").Select(f => f.Name).Distinct(StringComparer.Ordinal).ToList();
+            int flatPatterns = all.Where(f => f.Type == "FlatPattern").Select(f => f.Name).Distinct(StringComparer.Ordinal).Count();
+            if (flatPatterns == 1 && sheetMetals.Count == 1 &&
+                _owners.TryGetValue(sheetMetals[0], out var only) && only.kind == PartOwnerKind.SheetMetal)
                 return only.owner;
             return null;
         }
