@@ -52,8 +52,8 @@ namespace Spiegelwerk.Sw
         }
 
         /// <summary>
-        /// Esc came with the last step: nothing of this run is left to stop, but an assembly run
-        /// asks before its next component.
+        /// Esc came with the last step: nothing of this run is left to build, but the original is
+        /// not deleted, and an assembly run asks before its next component.
         /// </summary>
         public bool EscAtEnd { get; private set; }
 

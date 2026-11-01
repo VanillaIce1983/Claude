@@ -154,8 +154,10 @@ namespace Spiegelwerk.Build
                 MarkOtherBodies(records, bodyScope);
                 for (int i = 0; i < records.Count; i++) CaptureDimensions(features[i], records[i]);
                 // With selected bodies, a feature may also change a body that is gone at the end; only the rolled-back state shows it.
-                ISet<string>? rebuilt = req.Bodies.Count > 0 || seedBodies ? new HashSet<string>(features.Select(f => f.Name), StringComparer.Ordinal) : null;
-                if (opt.VerifySteps && !MassCapture.Measure(source, records, progress, rebuilt)) return CancelledBeforeBuild(report, RunSteps.Measure);
+                MassCapture.ForeignRule? foreign = req.Bodies.Count > 0 || seedBodies
+                    ? new MassCapture.ForeignRule(SwDoc.FeaturesInCreationOrder(source).Select(f => f.Name), features.Concat(skipped.Select(s => s.feature)).Select(f => f.Name))
+                    : null;
+                if (opt.VerifySteps && !MassCapture.Measure(source, records, progress, foreign)) return CancelledBeforeBuild(report, RunSteps.Measure);
             }
 
             // Capture and measurement end with the bar at the end; an interrupted regeneration may have stopped it mid-tree.
@@ -208,8 +210,12 @@ namespace Spiegelwerk.Build
                 target.EditRebuild3();
                 bool atEnd = SwDoc.RollToEnd(target);
                 if (!atEnd)
+                {
+                    // Not complete: in an assembly the part stays open and unsaved, the original is not deleted.
+                    report.Aborted = true;
                     report.General.Add("Achtung: Die Rückrollleiste steht nach dem Aufbau nicht am Ende des Feature-Baums (Neuaufbau unterbrochen?). " +
                                        "Bitte ans Ende setzen und das Ergebnis prüfen.");
+                }
 
                 // ---- 3. finish
                 if (opt.Target == MirrorTarget.NewPart)
@@ -222,6 +228,8 @@ namespace Spiegelwerk.Build
                 {
                     NoteEquationDrivenDimensions(source, ctx, report);
                     if (opt.DeleteOriginal && !atEnd) report.General.Add("Original nicht gelöscht: Die Rückrollleiste steht nicht am Ende.");
+                    // Esc with the last step: everything is built, but the user wanted to stop – deleting cannot be undone.
+                    else if (opt.DeleteOriginal && progress.EscAtEnd) report.General.Add("Original nicht gelöscht: Der Lauf wurde mit Esc abgebrochen.");
                     else if (opt.DeleteOriginal) DeleteOriginals(source, features, bodyScope, report);
                 }
             }

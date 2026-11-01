@@ -131,6 +131,15 @@ namespace Spiegelwerk.Capture
             return all.Where(f => wanted.Contains(f.Name) && !SwDoc.IsSystemFeature(f) && !standard.Contains(f.Name)).ToList();
         }
 
+        /// <summary>
+        /// The features of a body that change solids: IBody2.GetFeatures without sketches and
+        /// reference geometry (they change no body) and without sub-features outside the tree
+        /// walk (cosmetic threads) – the same rule for the body scope and for the measurement.
+        /// </summary>
+        internal static IEnumerable<Feature> SolidFeatures(Body2 b, ICollection<string> treeWalk) =>
+            (b.GetFeatures() is object[] fs ? fs.OfType<Feature>() : Enumerable.Empty<Feature>())
+            .Where(f => treeWalk.Contains(f.Name) && !SwDoc.IsSketch(f) && !IsDatum(f) && !SwDoc.IsSystemFeature(f));
+
         internal static bool IsDatum(Feature f) => f.GetTypeName2() is "RefPlane" or "RefAxis" or "CoordSys";
 
         /// <summary>
@@ -147,10 +156,7 @@ namespace Spiegelwerk.Capture
             var bodies = new List<BodyHistory>();
             foreach (Body2 b in SwDoc.SolidBodies(doc))
             {
-                // Sketches and reference geometry change no body; sub-features outside the tree walk (threads) neither.
-                IEnumerable<Feature> made = b.GetFeatures() is object[] fs ? fs.OfType<Feature>() : Enumerable.Empty<Feature>();
-                List<string> names = made.Where(f => order.ContainsKey(f.Name) && !SwDoc.IsSketch(f) && !IsDatum(f) && !SwDoc.IsSystemFeature(f))
-                    .Select(f => f.Name).Distinct().OrderBy(n => order[n]).ToList();
+                List<string> names = SolidFeatures(b, order.Keys).Select(f => f.Name).Distinct().OrderBy(n => order[n]).ToList();
                 bodies.Add(new BodyHistory(b.Name, names, selectedBodies.Contains(b.Name)));
             }
             return BodyScope.Of(bodies, collected.Select(f => f.Name), chosen.Select(f => f.Name));
