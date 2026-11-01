@@ -100,6 +100,16 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Material_note_says_fixed_values_only_for_a_new_part()
+        {
+            // A new part: the first body writes the material's values as the part's, fixed.
+            Assert.Equal(SheetMetalRules.MaterialNote, SheetMetalRules.MaterialNoteFor(false));
+            // Same part: the copy never writes the shared defaults and follows the material through them.
+            Assert.Equal(SheetMetalRules.MaterialSharedNote, SheetMetalRules.MaterialNoteFor(true));
+            Assert.DoesNotContain("als feste Werte übernommen", SheetMetalRules.MaterialSharedNote);
+        }
+
+        [Fact]
         public void Same_part_copy_overrides_what_the_part_defaults_do_not_give_it()
         {
             SheetMetalParameters defaults = Params(0.002, 0.001, 0.44);

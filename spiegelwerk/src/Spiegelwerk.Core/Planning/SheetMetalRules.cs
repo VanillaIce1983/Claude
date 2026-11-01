@@ -453,8 +453,23 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>The copy got no second sheet-metal body: the first body's own values became the part's at the end.</summary>
         public const string OwnValuesAtEnd = "Kein zweiter Blechkörper entstanden: Eigene Blechparameter des Körpers am Ende als Werte des Teils gesetzt.";
 
-        /// <summary>The copy gets fixed values where the original takes them from its material.</summary>
+        /// <summary>A new part: the copy gets fixed values where the original takes them from its material.</summary>
         public const string MaterialNote = "Blechparameter des Werkstoffs als feste Werte übernommen.";
+
+        /// <summary>
+        /// Same part: the copy never writes the shared defaults, which take their values from the
+        /// material as the original's do; only the groups its SheetMetal overrides become fixed values.
+        /// </summary>
+        public const string MaterialSharedNote = "Blechparameter aus dem Werkstoff: Im selben Teil folgt die Kopie wie das Original dem Werkstoff über die geteilten Standardwerte; " +
+                                                 "nur Gruppen, die ihr Blech-Feature überschreibt, werden feste Werte.";
+
+        /// <summary>
+        /// The note for a base flange whose original takes its values from the material: fixed
+        /// values in a new part (the first body writes them as the part's), the shared
+        /// material-driven defaults in the same part – also where the copy's SheetMetal overrides
+        /// groups, since the others stay with the defaults.
+        /// </summary>
+        public static string MaterialNoteFor(bool samePart) => samePart ? MaterialSharedNote : MaterialNote;
 
         /// <summary>Grain direction: no API member reads or sets it.</summary>
         public const string GrainNote = "Eine Faserrichtung der Abwicklung ist über die API nicht lesbar und wird nicht übernommen.";

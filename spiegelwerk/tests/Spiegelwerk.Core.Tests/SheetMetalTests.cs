@@ -386,7 +386,7 @@ namespace Spiegelwerk.Core.Tests
             Assert.False(fp.TouchesSheetMetalDefaults);
             Assert.False(fp.DeleteWithAbsorbed);
             Assert.Contains(SheetMetalRules.FlatDeviates, new[] { "Abwicklung weicht ab – K-Faktor/Biegezugabe/feste Fläche prüfen." });
-            Assert.True(new[] { SheetMetalRules.MaterialNote, SheetMetalRules.GrainNote }.All(s => s.EndsWith(".")));
+            Assert.True(new[] { SheetMetalRules.MaterialNote, SheetMetalRules.MaterialSharedNote, SheetMetalRules.GrainNote }.All(s => s.EndsWith(".")));
         }
     }
 }

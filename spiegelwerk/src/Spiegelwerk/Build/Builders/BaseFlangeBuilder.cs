@@ -79,7 +79,8 @@ namespace Spiegelwerk.Build.Builders
             SheetMetalParameters? partValues = overrideMode == BodyOverrideMode.PartValues ? SheetMetalRules.OwnValues(r.Defaults, r.Body!) : r.Defaults;
             FlangeCreation values = SheetMetalRules.CreationValues(first, r.MergesIntoExisting, partValues, r.Body, template, targetBody,
                 r.OwnBendAllowance, r.OwnRelief, r.Thickness, r.BendRadius);
-            if (r.UsesMaterialParameters) notes.Add(SheetMetalRules.MaterialNote);
+            // Same part: the defaults stay the original's, material-driven ones too – the copy shares them.
+            if (r.UsesMaterialParameters) notes.Add(SheetMetalRules.MaterialNoteFor(ctx.SamePart));
             bool gauge = first && r.Gauge != null && File.Exists(r.Gauge.TablePath);
             if (r.Gauge != null && first && !gauge)
                 notes.Add($"Blechstärkentabelle „{r.Gauge.TablePath}“ nicht gefunden; die Werte werden fest übernommen.");
