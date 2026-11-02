@@ -26,8 +26,9 @@ Beim allerersten Start legt das Programm die Bestandsdatei an und füllt sie mit
 | Bearbeiten / Löschen | Knöpfe oben, Doppelklick oder Rechtsklick auf die Zeile |
 | Rechtsklick auf eine Gruppe | Umbenennen, nach oben oder unten verschieben |
 | Filter | Suche, Materialgruppe, Dicke, „Nur knappe Bestände“ (wie die Datenschnitte in der Excel-Liste) |
-| Lieferung | Wird die Menge einer Position mit vermerkter Bestellung erhöht, fragt das Programm, ob die Lieferung da ist, und entfernt den Vermerk |
-| Bestellvermerke aufräumen | Rechtsklick → „Bestellung geliefert“ für eine Position oder „Alle Bestellvermerke entfernen …“ |
+| Lieferung buchen | Rechtsklick (oder Doppelklick) auf **Offene Bestellung** → **Geliefert – Menge zum Bestand addieren**. Die bestellte Menge ist vorausgefüllt und lässt sich ändern. Bei einer Teillieferung bleibt der Rest als offene Bestellung stehen („2 Tafeln am 27.10.2026 (Rest)“). Geht auch im Reiter „Bestellung“. |
+| Menge von Hand erhöht | Hat die Position eine offene Bestellung, fragt das Programm, ob die Lieferung da ist, und entfernt den Vermerk |
+| Bestellvermerke aufräumen | Rechtsklick → „Bestellvermerk entfernen (ohne Mengenänderung)“ oder „Alle Bestellvermerke entfernen …“ |
 | Verlauf | Wer hat wann welche Menge geändert (öffnet sich in Excel) |
 | Export für Excel | Der ganze Bestand als CSV-Datei |
 

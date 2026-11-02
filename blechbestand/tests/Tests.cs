@@ -35,6 +35,7 @@ namespace Blechbestand.Tests
             Run("Speichern, Sicherung, Verlauf", Store_);
             Run("Zwei Rechner gleichzeitig", Concurrency_);
             Run("Bestell-Mail", Mail_);
+            Run("Lieferung buchen (Bestellvermerke)", Delivery_);
             Console.WriteLine();
             Console.WriteLine(failures == 0 ? $"Alle {checks} Prüfungen bestanden." : $"{failures} von {checks} Prüfungen fehlgeschlagen.");
             return failures == 0 ? 0 : 1;
@@ -248,6 +249,54 @@ namespace Blechbestand.Tests
             {
                 Directory.Delete(dir, true);
             }
+        }
+
+        private static void Delivery_()
+        {
+            List<OrderNoteEntry> one = OrderNotes.Parse("10 Tafeln am 02.11.2026");
+            Equal(1, one.Count, "ein Eintrag");
+            Equal(10m, one[0].Quantity, "Menge");
+            Equal(Units.Sheets, one[0].Unit, "Einheit Tafeln");
+            Equal("02.11.2026", one[0].Date, "Datum");
+
+            OrderNoteEntry seed = OrderNotes.Parse("1 Paket am 27.10.2026 (Notiz „T4ST“)").Single();
+            Equal(1m, seed.Quantity, "Menge aus Startdaten");
+            Equal(Units.Packages, seed.Unit, "Einheit Paket");
+
+            List<OrderNoteEntry> two = OrderNotes.Parse("3 Tafeln am 02.11.2026; 1,5 Pakete am 5.11.26");
+            Equal(2, two.Count, "zwei Einträge");
+            Equal(1.5m, two[1].Quantity, "Kommazahl");
+            Equal("5.11.26", two[1].Date, "kurzes Datum");
+            OrderNoteEntry free = OrderNotes.Parse("Lieferant ruft an").Single();
+            Check(!free.Quantity.HasValue && free.Unit == null, "freier Text ohne Menge");
+            Equal(0, OrderNotes.Parse("").Count, "leer");
+
+            // Komplett geliefert: Eintrag fällt weg
+            Check(OrderNotes.ApplyDelivery("10 Tafeln am 02.11.2026", "10 Tafeln am 02.11.2026", 10, Units.Sheets, true, out string n1) && n1 == "", "vollständig: " + n1);
+            // Teillieferung: Rest bleibt stehen
+            Check(OrderNotes.ApplyDelivery("10 Tafeln am 02.11.2026", "10 Tafeln am 02.11.2026", 8, Units.Sheets, false, out string n2), "Teillieferung gefunden");
+            Equal("2 Tafeln am 02.11.2026 (Rest)", n2, "Rest");
+            // Mehr geliefert als bestellt: Eintrag fällt weg, auch ohne Häkchen
+            OrderNotes.ApplyDelivery("10 Tafeln am 02.11.2026", "10 Tafeln am 02.11.2026", 12, Units.Sheets, false, out string n3);
+            Equal("", n3, "Überlieferung");
+            // Nur einer von zwei Einträgen
+            OrderNotes.ApplyDelivery("3 Tafeln am 02.11.2026; 1 Paket am 05.11.2026", "1 Paket am 05.11.2026", 1, Units.Packages, true, out string n4);
+            Equal("3 Tafeln am 02.11.2026", n4, "anderer Eintrag bleibt");
+            // Andere Einheit ohne Häkchen: kein Rest berechenbar, Eintrag bleibt
+            OrderNotes.ApplyDelivery("1 Paket am 05.11.2026", "1 Paket am 05.11.2026", 25, Units.Sheets, false, out string n5);
+            Equal("1 Paket am 05.11.2026", n5, "andere Einheit");
+            // Schon gebucht (z. B. anderer Rechner): nicht gefunden
+            Check(!OrderNotes.ApplyDelivery("", "10 Tafeln am 02.11.2026", 10, Units.Sheets, true, out _), "nicht mehr vorhanden");
+
+            Check(OrderNotes.LooksComplete(one[0], 10, Units.Sheets), "10 von 10 = erledigt");
+            Check(!OrderNotes.LooksComplete(one[0], 8, Units.Sheets), "8 von 10 = Teillieferung");
+            Check(OrderNotes.LooksComplete(one[0], 8, Units.Packages), "andere Einheit = erledigt vorschlagen");
+            Check(OrderNotes.LooksComplete(free, 5, Units.Sheets), "freier Text = erledigt vorschlagen");
+
+            // Export-Vermerk und Zerlegen passen zusammen
+            var line = new OrderLine { Item = new SheetItem(), Quantity = 12, Unit = Units.Sheets };
+            OrderNoteEntry roundTrip = OrderNotes.Parse(OrderMail.OrderNote(line, new DateTime(2026, 11, 2))).Single();
+            Check(roundTrip.Quantity == 12m && roundTrip.Unit == Units.Sheets && roundTrip.Date == "02.11.2026", "Vermerk aus dem Export wird erkannt");
         }
 
         private static void Mail_()

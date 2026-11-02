@@ -132,12 +132,35 @@ namespace Blechbestand.UI
             {
                 if (KeyAt(e.RowIndex) is string g) Theme.PaintGroupRow(grid, e, g, groupCounts.TryGetValue(g, out int n) ? n : 0);
             };
-            grid.CellClick += (s, e) =>
+            grid.CellMouseClick += (s, e) =>
             {
-                // Klick irgendwo auf eine Zeile außer Menge/Einheit setzt oder entfernt das Häkchen
-                if (e.RowIndex < 0 || !(KeyAt(e.RowIndex) is Guid)) return;
+                // Linksklick irgendwo auf eine Zeile außer Menge/Einheit setzt oder entfernt das Häkchen
+                if (e.Button != MouseButtons.Left || e.RowIndex < 0 || !(KeyAt(e.RowIndex) is Guid)) return;
                 if (e.ColumnIndex == ColQuantity || e.ColumnIndex == ColUnit) return;
                 ToggleRow(e.RowIndex);
+            };
+            // Rechtsklick: Lieferung buchen (vor allem auf „Offene Bestellung“)
+            var menu = new ContextMenuStrip { Font = Theme.UiFont(10f) };
+            var delivered = new ToolStripMenuItem("Geliefert – Menge zum Bestand addieren …", null, (s, e) => BookDelivery())
+            {
+                Font = Theme.UiFont(10f, FontStyle.Bold),
+            };
+            var clearNote = new ToolStripMenuItem("Bestellvermerk entfernen (ohne Mengenänderung)", null, (s, e) => ClearOpenOrder());
+            menu.Items.Add(delivered);
+            menu.Items.Add(clearNote);
+            grid.CellMouseDown += (s, e) =>
+            {
+                if (e.Button != MouseButtons.Right || e.RowIndex < 0 || !(KeyAt(e.RowIndex) is Guid id)) return;
+                EndEditing();
+                try { grid.CurrentCell = grid.Rows[e.RowIndex].Cells[Math.Max(0, e.ColumnIndex)]; } catch (InvalidOperationException) { return; }
+                SheetItem it = host.Inventory.Find(id);
+                bool hasOrder = it != null && it.OpenOrder.Length > 0;
+                delivered.Enabled = hasOrder;
+                clearNote.Enabled = hasOrder;
+                List<OrderNoteEntry> notes = hasOrder ? OrderNotes.Parse(it.OpenOrder) : new List<OrderNoteEntry>();
+                delivered.Text = "Geliefert – Menge zum Bestand addieren" +
+                    (notes.Count == 1 && notes[0].Quantity.HasValue ? " (" + Units.Format(notes[0].Quantity.Value, notes[0].Unit) + ")" : "") + " …";
+                menu.Show(grid, grid.PointToClient(Cursor.Position));
             };
             grid.KeyDown += (s, e) =>
             {
@@ -218,6 +241,31 @@ namespace Blechbestand.UI
         {
             DataGridViewCell cell = grid.Rows[rowIndex].Cells[ColCheck];
             cell.Value = !(cell.Value is bool b && b); // löst CellValueChanged aus
+        }
+
+        private SheetItem CurrentItem() =>
+            grid.CurrentCell != null && KeyAt(grid.CurrentCell.RowIndex) is Guid id ? host.Inventory.Find(id) : null;
+
+        private void BookDelivery()
+        {
+            SheetItem it = CurrentItem();
+            if (it == null || it.OpenOrder.Length == 0) return;
+            DeliveryDialog.Book(FindForm(), host, it.Id);
+        }
+
+        private void ClearOpenOrder()
+        {
+            SheetItem it = CurrentItem();
+            if (it == null || it.OpenOrder.Length == 0) return;
+            Guid id = it.Id;
+            host.Modify((inv, log) =>
+            {
+                SheetItem x = inv.Find(id) ?? throw new ItemGoneException();
+                log.Add(x.DisplayName, "Offene Bestellung", x.OpenOrder, "entfernt");
+                x.OpenOrder = "";
+                x.ChangedAt = DateTime.Now;
+                x.ChangedBy = host.Store.UserName;
+            });
         }
 
         public void EndEditing()
@@ -524,7 +572,9 @@ namespace Blechbestand.UI
             row.Cells[ColStock].ToolTipText = "Bestand: " + i.StockText + (i.MinimumText.Length > 0 ? "\nMindestbestand: " + i.MinimumText : "");
             row.Cells[ColStock].Style.SelectionForeColor = lf;
             row.Cells[ColOrder].Style.ForeColor = i.OpenOrder.Length > 0 ? Theme.AccentDark : Color.Empty;
-            row.Cells[ColOrder].ToolTipText = i.OpenOrder.Length > 0 ? "Bereits bestellt: " + i.OpenOrder : "";
+            row.Cells[ColOrder].ToolTipText = i.OpenOrder.Length > 0
+                ? "Bereits bestellt: " + i.OpenOrder + "\nRechtsklick → „Geliefert – Menge zum Bestand addieren“"
+                : "";
         }
 
         private void UpdateSummary()

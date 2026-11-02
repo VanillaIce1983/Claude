@@ -113,6 +113,7 @@ namespace Blechbestand.UI
             {
                 if (e.RowIndex < 0) return;
                 if (e.ColumnIndex == ColPackages || e.ColumnIndex == ColSheets) { grid.BeginEdit(true); return; }
+                if (e.ColumnIndex == ColOrder && SelectedItem()?.OpenOrder.Length > 0) { BookDelivery(); return; }
                 if (KeyAt(e.RowIndex) is Guid) EditSelected();
             };
             grid.RowPostPaint += (s, e) =>
@@ -442,7 +443,9 @@ namespace Blechbestand.UI
             StyleLevelCell(row.Cells[ColPackages], i.PackagesLevel, i.MinPackages, Units.Packages);
             StyleLevelCell(row.Cells[ColSheets], i.SheetsLevel, i.MinSheets, Units.Sheets);
             row.Cells[ColOrder].Style.ForeColor = i.OpenOrder.Length > 0 ? Theme.AccentDark : Color.Empty;
-            row.Cells[ColOrder].ToolTipText = i.OpenOrder.Length > 0 ? "Bestellt: " + i.OpenOrder + "\nRechtsklick → „Bestellung geliefert“ entfernt den Vermerk." : "";
+            row.Cells[ColOrder].ToolTipText = i.OpenOrder.Length > 0
+                ? "Bestellt: " + i.OpenOrder + "\nDoppelklick oder Rechtsklick → „Geliefert – Menge zum Bestand addieren“"
+                : "";
             row.Cells[ColNote].ToolTipText = i.Note;
         }
 
@@ -722,12 +725,19 @@ namespace Blechbestand.UI
         }
 
         private ToolStripMenuItem receivedItem;
+        private ToolStripMenuItem deliveredItem;
 
         private void BuildMenus()
         {
+            deliveredItem = new ToolStripMenuItem("Geliefert – Menge zum Bestand addieren …", null, (s, e) => BookDelivery())
+            {
+                Font = Theme.UiFont(10f, FontStyle.Bold),
+            };
+            itemMenu.Items.Add(deliveredItem);
+            itemMenu.Items.Add(new ToolStripSeparator());
             itemMenu.Items.Add("Bearbeiten …", null, (s, e) => EditSelected());
             itemMenu.Items.Add("Zur Bestellung vormerken", null, (s, e) => { SheetItem it = SelectedItem(); if (it != null) host.AddToOrder(it.Id); });
-            receivedItem = new ToolStripMenuItem("Bestellung geliefert (Vermerk entfernen)", null, (s, e) => ClearOpenOrder());
+            receivedItem = new ToolStripMenuItem("Bestellvermerk entfernen (ohne Mengenänderung)", null, (s, e) => ClearOpenOrder());
             itemMenu.Items.Add(receivedItem);
             itemMenu.Items.Add("Alle Bestellvermerke entfernen …", null, (s, e) => ClearAllOpenOrders());
             itemMenu.Items.Add(new ToolStripSeparator());
@@ -747,7 +757,20 @@ namespace Blechbestand.UI
         private void UpdateItemMenu()
         {
             SheetItem it = SelectedItem();
-            receivedItem.Enabled = it != null && it.OpenOrder.Length > 0;
+            bool hasOrder = it != null && it.OpenOrder.Length > 0;
+            receivedItem.Enabled = hasOrder;
+            deliveredItem.Enabled = hasOrder;
+            List<OrderNoteEntry> notes = hasOrder ? OrderNotes.Parse(it.OpenOrder) : new List<OrderNoteEntry>();
+            deliveredItem.Text = "Geliefert – Menge zum Bestand addieren" +
+                (notes.Count == 1 && notes[0].Quantity.HasValue ? " (" + Units.Format(notes[0].Quantity.Value, notes[0].Unit) + ")" : "") + " …";
+        }
+
+        private void BookDelivery()
+        {
+            EndEditing();
+            SheetItem it = SelectedItem();
+            if (it == null || it.OpenOrder.Length == 0) return;
+            DeliveryDialog.Book(FindForm(), host, it.Id);
         }
 
         private void ClearOpenOrder()
