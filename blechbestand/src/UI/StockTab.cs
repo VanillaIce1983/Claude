@@ -729,6 +729,7 @@ namespace Blechbestand.UI
             itemMenu.Items.Add("Zur Bestellung vormerken", null, (s, e) => { SheetItem it = SelectedItem(); if (it != null) host.AddToOrder(it.Id); });
             receivedItem = new ToolStripMenuItem("Bestellung geliefert (Vermerk entfernen)", null, (s, e) => ClearOpenOrder());
             itemMenu.Items.Add(receivedItem);
+            itemMenu.Items.Add("Alle Bestellvermerke entfernen …", null, (s, e) => ClearAllOpenOrders());
             itemMenu.Items.Add(new ToolStripSeparator());
             itemMenu.Items.Add("Neues Material …", null, (s, e) => AddItem());
             itemMenu.Items.Add("Ähnliches Material anlegen (Kopie) …", null, (s, e) => DuplicateSelected());
@@ -740,6 +741,7 @@ namespace Blechbestand.UI
             groupMenu.Items.Add("Gruppe nach unten", null, (s, e) => MoveGroup(+1));
             groupMenu.Items.Add(new ToolStripSeparator());
             groupMenu.Items.Add("Neues Material in dieser Gruppe …", null, (s, e) => AddItem());
+            groupMenu.Items.Add("Alle Bestellvermerke entfernen …", null, (s, e) => ClearAllOpenOrders());
         }
 
         private void UpdateItemMenu()
@@ -760,6 +762,33 @@ namespace Blechbestand.UI
                 x.OpenOrder = "";
                 x.ChangedAt = DateTime.Now;
                 x.ChangedBy = host.Store.UserName;
+            });
+        }
+
+        /// <summary>Entfernt alle Vermerke „bestellt am …“ (z. B. nach einem Probeexport).</summary>
+        private void ClearAllOpenOrders()
+        {
+            List<SheetItem> marked = host.Inventory.Items.Where(i => i.OpenOrder.Length > 0).ToList();
+            if (marked.Count == 0)
+            {
+                MessageBox.Show(FindForm(), "Es ist bei keiner Position eine Bestellung vermerkt.", "Bestellvermerke",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            string list = string.Join("\n", marked.Take(12).Select(i => "• " + i.DisplayName + ": " + i.OpenOrder));
+            if (marked.Count > 12) list += "\n• … und " + (marked.Count - 12) + " weitere";
+            if (MessageBox.Show(FindForm(),
+                    "Bei " + marked.Count + " Position(en) ist eine Bestellung vermerkt:\n\n" + list +
+                    "\n\nAlle diese Vermerke entfernen? Die Mengen bleiben unverändert.",
+                    "Bestellvermerke entfernen", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+            host.Modify((inv, log) =>
+            {
+                foreach (SheetItem x in inv.Items.Where(i => i.OpenOrder.Length > 0))
+                {
+                    log.Add(x.DisplayName, "Offene Bestellung", x.OpenOrder, "entfernt");
+                    x.OpenOrder = "";
+                }
             });
         }
 

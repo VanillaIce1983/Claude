@@ -27,6 +27,7 @@ Beim allerersten Start legt das Programm die Bestandsdatei an und füllt sie mit
 | Rechtsklick auf eine Gruppe | Umbenennen, nach oben oder unten verschieben |
 | Filter | Suche, Materialgruppe, Dicke, „Nur knappe Bestände“ (wie die Datenschnitte in der Excel-Liste) |
 | Lieferung | Wird die Menge einer Position mit vermerkter Bestellung erhöht, fragt das Programm, ob die Lieferung da ist, und entfernt den Vermerk |
+| Bestellvermerke aufräumen | Rechtsklick → „Bestellung geliefert“ für eine Position oder „Alle Bestellvermerke entfernen …“ |
 | Verlauf | Wer hat wann welche Menge geändert (öffnet sich in Excel) |
 | Export für Excel | Der ganze Bestand als CSV-Datei |
 
@@ -36,9 +37,9 @@ Beim allerersten Start legt das Programm die Bestandsdatei an und füllt sie mit
 2. Oder **Knappe Positionen vorschlagen**: Damit wird alles Rote und Gelbe angehakt, was noch nicht bestellt ist.
 3. Rechts Empfänger, Betreff und Text prüfen. Empfänger und Texte merkt sich das Programm.
 4. **In Outlook öffnen**: Eine neue E-Mail erscheint mit der Bestellliste als Tabelle (Werkstoff, Dicke, Format, Menge, Eulanda-Nr., Gewicht). Deine Outlook-Signatur bleibt darunter erhalten. Gesendet wird erst mit „Senden“ in Outlook.
-5. Danach steht an den Positionen „10 Tafeln am 02.11.2026“ (Spalte **Offene Bestellung**). Abschalten lässt sich das mit dem Häkchen „Danach als bestellt vermerken“.
+5. Über der Tabelle erscheint ein grüner Balken. Erst mit **Als bestellt vermerken** steht an den Positionen „10 Tafeln am 02.11.2026“ (Spalte **Offene Bestellung**) und sie verschwinden aus der Auswahl. **Nicht vermerken** lässt die Auswahl stehen, z. B. wenn keine E-Mail aufgegangen ist.
 
-**Outlook:** Direkt angesteuert wird das klassische Outlook (Microsoft 365 / Office). Das „neue Outlook für Windows“ hat dafür keine Schnittstelle. Dann öffnet das Programm die Bestellung als E-Mail-Datei (.eml) mit dem Standard-Mailprogramm. Klappt auch das nicht: **In Zwischenablage kopieren** und in eine neue Mail einfügen (Strg+V), die Tabelle bleibt dabei erhalten.
+**Outlook:** Direkt angesteuert wird das klassische Outlook (Microsoft 365 / Office); das Mailfenster wird dabei nach vorne geholt. Das „neue Outlook für Windows“ hat dafür keine Schnittstelle. Dann öffnet das Programm eine neue E-Mail mit Empfänger und Betreff im Standard-Mailprogramm (z. B. im neuen Outlook) und legt die Bestellliste in die Zwischenablage: in die E-Mail klicken und **Strg+V** drücken, die Tabelle bleibt dabei erhalten. **In Zwischenablage kopieren** funktioniert mit jedem Mailprogramm.
 
 ## Mehrere Rechner (Laser und Büro)
 

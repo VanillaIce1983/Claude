@@ -273,14 +273,11 @@ namespace Blechbestand.Tests
             Equal("Blechbestellung 02.11.2026", OrderMail.Subject("Blechbestellung {datum}", new DateTime(2026, 11, 2)), "Betreff");
             Equal("10 Tafeln am 02.11.2026", OrderMail.OrderNote(lines[0], new DateTime(2026, 11, 2)), "Bestellvermerk");
 
-            string eml = OrderMail.BuildEml("einkauf@firma.de", "", "Blechbestellung für Woche 45", OrderMail.BuildFullHtml(lines, "a", "b"), text);
-            Check(eml.StartsWith("X-Unsent: 1\r\n"), "Entwurf-Kennzeichen");
-            Check(eml.Contains("To: einkauf@firma.de\r\n"), "Empfänger");
-            Check(!eml.Contains("Cc:"), "kein leeres Cc");
-            Check(eml.Contains("Subject: =?utf-8?B?"), "Betreff mit Umlaut kodiert");
-            string b64 = eml.Split(new[] { "Content-Transfer-Encoding: base64\r\n\r\n" }, StringSplitOptions.None)[2].Split(new[] { "\r\n--" }, StringSplitOptions.None)[0];
-            string decoded = Encoding.UTF8.GetString(Convert.FromBase64String(b64.Replace("\r\n", "")));
-            Check(decoded.Contains("0012771") && decoded.StartsWith("<!DOCTYPE html>"), "HTML-Teil dekodierbar");
+            Equal("mailto:einkauf@firma.de?subject=Blechbestellung%2002.11.2026",
+                OrderMail.BuildMailto("einkauf@firma.de", "", "Blechbestellung 02.11.2026"), "mailto ohne Cc");
+            Equal("mailto:einkauf@firma.de,chef@firma.de?cc=lager@firma.de&subject=Bleche%20f%C3%BCr%20KW%2045%20%26%20Rest",
+                OrderMail.BuildMailto(" einkauf@firma.de; chef@firma.de ", "lager@firma.de", "Bleche für KW 45 & Rest"), "mailto mit mehreren Empfängern, Umlaut, &");
+            Equal("mailto:?subject=X", OrderMail.BuildMailto("", null, "X"), "mailto ohne Empfänger");
 
             string fragment = "<b>Grüße</b>";
             byte[] cf = OrderMail.BuildClipboardHtml(fragment);

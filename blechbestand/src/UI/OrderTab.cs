@@ -41,7 +41,9 @@ namespace Blechbestand.UI
         private readonly TextBox subject;
         private readonly TextBox intro;
         private readonly TextBox outro;
-        private readonly CheckBox markOrdered;
+        private Control resultPanel;
+        private Label resultLabel;
+        private List<OrderLine> exportedLines;
         private readonly Label summary;
         private List<object> rowKeys = new List<object>();
         private bool updating;
@@ -152,7 +154,46 @@ namespace Blechbestand.UI
             gridFrame.Controls.Add(grid);
 
             // ---------- E-Mail an den Einkauf ----------
-            Control mailPanel = BuildMailPanel(out to, out cc, out subject, out intro, out outro, out markOrdered, out summary);
+            Control mailPanel = BuildMailPanel(out to, out cc, out subject, out intro, out outro, out summary);
+
+            // Hinweisbalken nach dem Export: erst nach Bestätigung „bestellt“ vermerken und Auswahl leeren
+            var bar = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = Color.FromArgb(0xE2, 0xF0, 0xD9),
+                Padding = new Padding(Theme.S(12), Theme.S(6), Theme.S(8), Theme.S(6)),
+                Margin = new Padding(0),
+                Visible = false,
+            };
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.Paint += (s, e) =>
+            {
+                using (var p = new Pen(Color.FromArgb(0x8F, 0xC1, 0x6F))) e.Graphics.DrawRectangle(p, 0, 0, bar.Width - 1, bar.Height - 1);
+            };
+            resultLabel = new Label
+            {
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                ForeColor = Color.FromArgb(0x1B, 0x4D, 0x1F),
+                Font = Theme.UiFont(10f),
+                Margin = new Padding(0, Theme.S(4), Theme.S(12), Theme.S(4)),
+            };
+            var confirm = Theme.PrimaryButton("Als bestellt vermerken");
+            confirm.Click += (s, e) => ConfirmOrdered();
+            var keep = Theme.SecondaryButton("Nicht vermerken");
+            keep.Click += (s, e) => HideResult();
+            var barButtons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = new Padding(0) };
+            barButtons.Controls.Add(confirm);
+            barButtons.Controls.Add(keep);
+            bar.Controls.Add(resultLabel, 0, 0);
+            bar.Controls.Add(barButtons, 1, 0);
+            resultPanel = bar;
+            var barGap = new Panel { Dock = DockStyle.Top, Height = Theme.S(6), Visible = false };
+            bar.VisibleChanged += (s, e) => barGap.Visible = bar.Visible;
 
             var split = new Panel { Dock = DockStyle.Fill };
             split.Controls.Add(gridFrame);
@@ -161,6 +202,8 @@ namespace Blechbestand.UI
             gridFrame.BringToFront();
 
             Controls.Add(split);
+            Controls.Add(barGap);
+            Controls.Add(bar);
             Controls.Add(toolbar);
             split.BringToFront();
 
@@ -211,7 +254,7 @@ namespace Blechbestand.UI
         }
 
         private Control BuildMailPanel(out TextBox toBox, out TextBox ccBox, out TextBox subjectBox, out TextBox introBox,
-            out TextBox outroBox, out CheckBox markBox, out Label summaryLabel)
+            out TextBox outroBox, out Label summaryLabel)
         {
             AppSettings st = host.Settings;
             int width = Theme.S(350);
@@ -281,15 +324,6 @@ namespace Blechbestand.UI
             outroBox = Box(st.OrderOutro, true, 2);
             inner.Controls.Add(outroBox);
 
-            markBox = new CheckBox
-            {
-                Text = "Danach als „bestellt“ vermerken",
-                Checked = st.MarkAsOrdered,
-                AutoSize = true,
-                Margin = new Padding(0, Theme.S(10), 0, Theme.S(4)),
-            };
-            inner.Controls.Add(markBox);
-
             summaryLabel = new Label
             {
                 AutoSize = true,
@@ -315,7 +349,8 @@ namespace Blechbestand.UI
 
             inner.Controls.Add(new Label
             {
-                Text = "Öffnet eine neue E-Mail mit der Bestellliste als Tabelle. Gesendet wird erst, wenn du in Outlook auf „Senden“ klickst.",
+                Text = "Öffnet eine neue E-Mail mit der Bestellliste als Tabelle. Gesendet wird erst, wenn du in Outlook auf „Senden“ klickst. " +
+                       "„bestellt“ wird erst vermerkt, wenn du es danach bestätigst.",
                 AutoSize = true,
                 ForeColor = Theme.Muted,
                 Font = Theme.UiFont(9f),
@@ -653,7 +688,6 @@ namespace Blechbestand.UI
             st.OrderCc = cc.Text.Trim();
             st.OrderIntro = intro.Text;
             st.OrderOutro = outro.Text;
-            st.MarkAsOrdered = markOrdered.Checked;
         }
 
         private List<OrderLine> PrepareExport()
@@ -680,78 +714,114 @@ namespace Blechbestand.UI
             List<OrderLine> lines = PrepareExport();
             if (lines == null) return;
             string html = OrderMail.BuildHtml(lines, intro.Text, outro.Text);
-            string text = OrderMail.BuildText(lines, intro.Text, outro.Text);
             string subj = subject.Text.Trim().Length > 0 ? subject.Text.Trim() : OrderMail.Subject(host.Settings.OrderSubject, DateTime.Now);
+            HideResult();
 
             Cursor.Current = Cursors.WaitCursor;
             bool ok = OutlookExporter.TryCreateDraft(to.Text.Trim(), cc.Text.Trim(), subj, html, out string error);
             Cursor.Current = Cursors.Default;
-            if (!ok)
+            if (ok)
             {
-                // Ohne klassisches Outlook: E-Mail-Datei erzeugen und mit dem Standard-Mailprogramm öffnen
-                string path = Path.Combine(Path.GetTempPath(), "Blechbestellung_" + DateTime.Now.ToString("yyyy-MM-dd_HHmmss") + ".eml");
-                try
-                {
-                    File.WriteAllText(path, OrderMail.BuildEml(to.Text.Trim(), cc.Text.Trim(), subj, OrderMail.BuildFullHtml(lines, intro.Text, outro.Text), text), new UTF8Encoding(false));
-                    Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-                    ok = true;
-                    MessageBox.Show(FindForm(),
-                        "Outlook (klassisch) konnte nicht direkt angesteuert werden" + (string.IsNullOrEmpty(error) ? "." : ":\n" + error) +
-                        "\n\nDie Bestellung wurde stattdessen als E-Mail-Datei geöffnet. Falls sie nicht als neue Nachricht erscheint: " +
-                        "„In Zwischenablage kopieren“ und in eine neue E-Mail einfügen (Strg+V).",
-                        "Bestellung", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(FindForm(),
-                        "Es konnte keine E-Mail geöffnet werden.\n\n" + (error ?? "") + "\n" + ex.Message +
-                        "\n\nBitte „In Zwischenablage kopieren“ benutzen und die Liste in eine neue E-Mail einfügen.",
-                        "Bestellung", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
+                ShowResult("✓ E-Mail in Outlook geöffnet (" + DateTime.Now.ToString("HH:mm") + ", " + Count(lines) + "). Dort prüfen, senden und hier bestätigen.\n" +
+                           "Keine E-Mail zu sehen? Dann „Nicht vermerken“ und rechts „In Zwischenablage kopieren“ benutzen.", lines);
+                return;
             }
-            if (ok) AfterExport(lines);
+
+            // Kein klassisches Outlook (z. B. neues Outlook): neue Mail im Standard-Mailprogramm, Liste per Strg+V einfügen
+            if (!CopyToClipboard(lines)) return;
+            MessageBox.Show(FindForm(),
+                "Das klassische Outlook lässt sich auf diesem Rechner nicht ansteuern" + (string.IsNullOrEmpty(error) ? "." : ":\n" + error) +
+                "\n\nStattdessen öffnet sich jetzt eine neue E-Mail in deinem Standard-Mailprogramm (z. B. im neuen Outlook) mit Empfänger und Betreff." +
+                "\n\nDie Bestellliste ist schon in der Zwischenablage:\nin die E-Mail klicken und Strg+V drücken.",
+                "Bestellung", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            bool opened;
+            string mailError = null;
+            try
+            {
+                Process.Start(new ProcessStartInfo(OrderMail.BuildMailto(to.Text, cc.Text, subj)) { UseShellExecute = true });
+                opened = true;
+            }
+            catch (Exception ex)
+            {
+                opened = false;
+                mailError = ex.Message;
+            }
+            if (!opened)
+            {
+                MessageBox.Show(FindForm(),
+                    "Es ließ sich kein Mailprogramm öffnen" + (string.IsNullOrEmpty(mailError) ? "." : ":\n" + mailError) +
+                    "\n\nDie Bestellliste ist in der Zwischenablage: eine neue E-Mail öffnen und mit Strg+V einfügen.",
+                    "Bestellung", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            ShowResult("✓ " + (opened ? "Neue E-Mail geöffnet" : "Bestellliste kopiert") + " (" + DateTime.Now.ToString("HH:mm") + ", " + Count(lines) + ").\n" +
+                       "Die Liste ist in der Zwischenablage: in der E-Mail Strg+V drücken, senden und hier bestätigen.", lines);
         }
 
         private void ExportClipboard()
         {
             List<OrderLine> lines = PrepareExport();
             if (lines == null) return;
+            HideResult();
+            if (!CopyToClipboard(lines)) return;
+            ShowResult("✓ Bestellliste in der Zwischenablage (" + DateTime.Now.ToString("HH:mm") + ", " + Count(lines) + ").\n" +
+                       "In einer neuen E-Mail mit Strg+V einfügen, senden und hier bestätigen.", lines);
+        }
+
+        private static string Count(List<OrderLine> lines) => lines.Count == 1 ? "1 Position" : lines.Count + " Positionen";
+
+        /// <summary>Legt die komplette Mail (Text, Tabelle, Schluss) als HTML und als Text in die Zwischenablage.</summary>
+        private bool CopyToClipboard(List<OrderLine> lines)
+        {
             try
             {
                 var data = new DataObject();
                 data.SetData(DataFormats.Html, new MemoryStream(OrderMail.BuildClipboardHtml(OrderMail.BuildHtml(lines, intro.Text, outro.Text))));
                 data.SetData(DataFormats.UnicodeText, OrderMail.BuildText(lines, intro.Text, outro.Text));
                 Clipboard.SetDataObject(data, true);
+                return true;
             }
             catch (Exception ex)
             {
-                MessageBox.Show(FindForm(), "Kopieren fehlgeschlagen:\n" + ex.Message, "Bestellung", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                MessageBox.Show(FindForm(), "Kopieren in die Zwischenablage fehlgeschlagen:\n" + ex.Message, "Bestellung",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
             }
-            MessageBox.Show(FindForm(), "Die Bestellliste ist in der Zwischenablage.\nIn einer neuen E-Mail mit Strg+V einfügen.",
-                "Bestellung", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            AfterExport(lines);
         }
 
-        /// <summary>Vermerkt die Bestellung an den Positionen und leert die Auswahl.</summary>
-        private void AfterExport(List<OrderLine> lines)
+        /// <summary>Zeigt die Rückmeldung nach dem Export. Die Auswahl bleibt, bis „Als bestellt vermerken“ bestätigt wird.</summary>
+        private void ShowResult(string text, List<OrderLine> lines)
         {
-            if (markOrdered.Checked)
+            exportedLines = lines;
+            resultLabel.Text = text;
+            resultPanel.Visible = true;
+        }
+
+        private void HideResult()
+        {
+            exportedLines = null;
+            resultPanel.Visible = false;
+        }
+
+        /// <summary>Vermerkt die exportierten Positionen als bestellt und nimmt sie aus der Auswahl.</summary>
+        private void ConfirmOrdered()
+        {
+            List<OrderLine> lines = exportedLines;
+            if (lines == null) { HideResult(); return; }
+            DateTime today = DateTime.Now;
+            var notes = lines.ToDictionary(l => l.Item.Id, l => OrderMail.OrderNote(l, today));
+            bool saved = host.Modify((inv, log) =>
             {
-                DateTime today = DateTime.Now;
-                var notes = lines.ToDictionary(l => l.Item.Id, l => OrderMail.OrderNote(l, today));
-                host.Modify((inv, log) =>
+                foreach (KeyValuePair<Guid, string> n in notes)
                 {
-                    foreach (KeyValuePair<Guid, string> n in notes)
-                    {
-                        SheetItem it = inv.Find(n.Key);
-                        if (it == null) continue;
-                        string before = it.OpenOrder;
-                        it.OpenOrder = before.Length > 0 ? before + "; " + n.Value : n.Value;
-                        log.Add(it.DisplayName, "Offene Bestellung", before, it.OpenOrder);
-                    }
-                });
-            }
+                    SheetItem it = inv.Find(n.Key);
+                    if (it == null) continue;
+                    string before = it.OpenOrder;
+                    it.OpenOrder = before.Length > 0 ? before + "; " + n.Value : n.Value;
+                    log.Add(it.DisplayName, "Offene Bestellung", before, it.OpenOrder);
+                }
+            });
+            if (!saved) return; // Fehlermeldung kam schon; Auswahl und Rückmeldung bleiben
+            HideResult();
             foreach (OrderLine l in lines) entries.Remove(l.Item.Id);
             rowKeys = new List<object>();
             Rebuild();

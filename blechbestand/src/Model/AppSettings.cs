@@ -26,8 +26,6 @@ namespace Blechbestand.Model
 
         public string OrderOutro { get; set; } = "Vielen Dank!";
 
-        public bool MarkAsOrdered { get; set; } = true;
-
         /// <summary>Schriftgröße der Tabellen in Punkt (für die Lasermaschine gern größer).</summary>
         public float FontSize { get; set; } = 10.5f;
 

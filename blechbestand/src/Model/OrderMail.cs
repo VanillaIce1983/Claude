@@ -19,7 +19,7 @@ namespace Blechbestand.Model
         public decimal? Weight => Unit == Units.Sheets && Item.WeightPerSheet.HasValue ? Quantity * Item.WeightPerSheet.Value : (decimal?)null;
     }
 
-    /// <summary>Baut die Bestell-E-Mail an den Einkauf (HTML für Outlook, Text, .eml-Datei, Zwischenablage).</summary>
+    /// <summary>Baut die Bestell-E-Mail an den Einkauf (HTML für Outlook, Text, mailto-Link, Zwischenablage).</summary>
     public static class OrderMail
     {
         public static string Subject(string template, DateTime date)
@@ -94,9 +94,6 @@ namespace Blechbestand.Model
             return sb.ToString();
         }
 
-        public static string BuildFullHtml(IList<OrderLine> lines, string intro, string outro) =>
-            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body>" + BuildHtml(lines, intro, outro) + "</body></html>";
-
         /// <summary>Reiner Text, z. B. für Mailprogramme ohne HTML.</summary>
         public static string BuildText(IList<OrderLine> lines, string intro, string outro)
         {
@@ -122,28 +119,24 @@ namespace Blechbestand.Model
         }
 
         /// <summary>
-        /// E-Mail-Datei (.eml) als ungesendeter Entwurf (X-Unsent: 1). Wird von Outlook und anderen
-        /// Mailprogrammen als neue Nachricht geöffnet.
+        /// mailto-Link für eine neue, leere E-Mail mit Empfänger, Cc und Betreff im Standard-Mailprogramm
+        /// (z. B. dem neuen Outlook). Den Inhalt fügt man aus der Zwischenablage ein, weil lange Texte
+        /// in einem Link nicht zuverlässig ankommen.
         /// </summary>
-        public static string BuildEml(string to, string cc, string subject, string html, string text)
+        public static string BuildMailto(string to, string cc, string subject)
         {
-            string boundary = "----=_Blechbestand_" + Guid.NewGuid().ToString("N");
-            var sb = new StringBuilder();
-            sb.Append("X-Unsent: 1\r\n");
-            if (!string.IsNullOrWhiteSpace(to)) sb.Append("To: ").Append(HeaderValue(to)).Append("\r\n");
-            if (!string.IsNullOrWhiteSpace(cc)) sb.Append("Cc: ").Append(HeaderValue(cc)).Append("\r\n");
-            sb.Append("Subject: ").Append(EncodeHeader(subject ?? "")).Append("\r\n");
-            sb.Append("MIME-Version: 1.0\r\n");
-            sb.Append("Content-Type: multipart/alternative; boundary=\"").Append(boundary).Append("\"\r\n\r\n");
-            sb.Append("--").Append(boundary).Append("\r\n");
-            sb.Append("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
-            sb.Append(Base64Lines(text ?? "")).Append("\r\n");
-            sb.Append("--").Append(boundary).Append("\r\n");
-            sb.Append("Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
-            sb.Append(Base64Lines(html ?? "")).Append("\r\n");
-            sb.Append("--").Append(boundary).Append("--\r\n");
-            return sb.ToString();
+            var query = new List<string>();
+            string ccList = AddressList(cc);
+            if (ccList.Length > 0) query.Add("cc=" + ccList);
+            if (!string.IsNullOrWhiteSpace(subject)) query.Add("subject=" + Uri.EscapeDataString(HeaderValue(subject)));
+            return "mailto:" + AddressList(to) + (query.Count > 0 ? "?" + string.Join("&", query) : "");
         }
+
+        /// <summary>„a@x.de; b@y.de“ → „a@x.de,b@y.de“ (URL-sicher, @ bleibt lesbar).</summary>
+        private static string AddressList(string addresses) =>
+            string.Join(",", (addresses ?? "").Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(a => a.Trim()).Where(a => a.Length > 0)
+                .Select(a => Uri.EscapeDataString(a).Replace("%40", "@")));
 
         /// <summary>Windows-Zwischenablageformat „HTML Format“ (CF_HTML) als UTF-8-Bytes.</summary>
         public static byte[] BuildClipboardHtml(string fragment)
@@ -191,20 +184,5 @@ namespace Blechbestand.Model
 
         private static string HeaderValue(string s) => (s ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
 
-        private static string EncodeHeader(string s)
-        {
-            s = HeaderValue(s);
-            if (s.All(c => c >= 32 && c < 127)) return s;
-            return "=?utf-8?B?" + Convert.ToBase64String(Encoding.UTF8.GetBytes(s)) + "?=";
-        }
-
-        private static string Base64Lines(string s)
-        {
-            string b = Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
-            var sb = new StringBuilder();
-            for (int i = 0; i < b.Length; i += 76)
-                sb.Append(b, i, Math.Min(76, b.Length - i)).Append("\r\n");
-            return sb.ToString().TrimEnd();
-        }
     }
 }

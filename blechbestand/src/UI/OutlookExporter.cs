@@ -7,12 +7,17 @@ namespace Blechbestand.UI
     /// <summary>
     /// Öffnet eine neue E-Mail im klassischen Outlook (Microsoft 365 / Office) über dessen COM-Schnittstelle.
     /// Die Mail wird nur angezeigt, nicht gesendet. Eine eingerichtete Outlook-Signatur bleibt unter der Liste erhalten.
-    /// Das „neue Outlook“ für Windows hat keine solche Schnittstelle; dann greift die .eml-Datei als Ersatz.
+    /// Das „neue Outlook“ für Windows hat keine solche Schnittstelle; dafür gibt es im Reiter Bestellung den Weg
+    /// über das Standard-Mailprogramm und die Zwischenablage.
     /// </summary>
     internal static class OutlookExporter
     {
         private const int OlMailItem = 0;
         private const int OlFormatHtml = 2;
+        private const int AsfwAny = -1;
+
+        [DllImport("user32.dll")]
+        private static extern bool AllowSetForegroundWindow(int processId);
 
         public static bool TryCreateDraft(string to, string cc, string subject, string htmlContent, out string error)
         {
@@ -34,13 +39,16 @@ namespace Blechbestand.UI
             }
             if (type == null)
             {
-                error = "Outlook (klassisch) ist auf diesem Rechner nicht installiert.";
+                error = "Das klassische Outlook ist auf diesem Rechner nicht installiert.";
                 return false;
             }
 
-            object app = null, mail = null;
+            object app = null, mail = null, inspector = null;
             try
             {
+                // Outlook darf sein Fenster in den Vordergrund holen (sonst öffnet es oft verdeckt hinter Blechbestand).
+                try { AllowSetForegroundWindow(AsfwAny); } catch (Exception) { }
+
                 app = Activator.CreateInstance(type);
                 dynamic outlook = app;
                 mail = outlook.CreateItem(OlMailItem);
@@ -53,12 +61,16 @@ namespace Blechbestand.UI
                 m.Display(false);
                 string existing = m.HTMLBody as string;
                 m.HTMLBody = OrderMail.InsertIntoBody(existing, htmlContent);
+                try
+                {
+                    inspector = m.GetInspector;
+                    ((dynamic)inspector).Activate();
+                }
+                catch (Exception)
+                {
+                    // Nach vorne holen ist nur eine Hilfe; die Mail ist trotzdem offen.
+                }
                 return true;
-            }
-            catch (COMException ex)
-            {
-                error = ex.Message;
-                return false;
             }
             catch (Exception ex)
             {
@@ -68,6 +80,7 @@ namespace Blechbestand.UI
             finally
             {
                 // Outlook-Fenster bleibt offen; nur unsere Referenzen freigeben.
+                if (inspector != null && Marshal.IsComObject(inspector)) Marshal.ReleaseComObject(inspector);
                 if (mail != null && Marshal.IsComObject(mail)) Marshal.ReleaseComObject(mail);
                 if (app != null && Marshal.IsComObject(app)) Marshal.ReleaseComObject(app);
             }
