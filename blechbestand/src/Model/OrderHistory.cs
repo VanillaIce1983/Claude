@@ -42,6 +42,9 @@ namespace Blechbestand.Model
         public string ErpNumber { get; set; } = "";
         public decimal? WeightPerSheet { get; set; }
 
+        /// <summary>Tafeln pro Paket zum Zeitpunkt der Buchung (für das Gewicht gelieferter Pakete).</summary>
+        public decimal? SheetsPerPackage { get; set; }
+
         public DateTime BookedAt { get; set; }
         public string BookedBy { get; set; } = "";
 
@@ -60,16 +63,31 @@ namespace Blechbestand.Model
         [XmlIgnore]
         public string DeliveredText => Units.Format(DeliveredQuantity, DeliveredUnit);
 
+        /// <summary>„1 Paket (17 Tafeln)“ bei Paketen mit bekannter Tafelzahl.</summary>
+        [XmlIgnore]
+        public string DeliveredDetail =>
+            DeliveredUnit == Units.Packages && SheetsPerPackage.HasValue
+                ? DeliveredText + " (" + Units.Format(DeliveredQuantity * SheetsPerPackage.Value, Units.Sheets) + ")"
+                : DeliveredText;
+
         [XmlIgnore]
         public string OrderedText => OrderedQuantity.HasValue && OrderedUnit.Length > 0 ? Units.Format(OrderedQuantity.Value, OrderedUnit) : "";
 
-        /// <summary>Gewicht der gelieferten Tafeln in kg (nur bei Tafeln mit bekanntem Tafelgewicht).</summary>
+        /// <summary>Gewicht der Lieferung in kg; bei Paketen über die Tafeln pro Paket.</summary>
         [XmlIgnore]
-        public decimal? Weight => DeliveredUnit == Units.Sheets && WeightPerSheet.HasValue ? DeliveredQuantity * WeightPerSheet.Value : (decimal?)null;
+        public decimal? Weight
+        {
+            get
+            {
+                if (!WeightPerSheet.HasValue) return null;
+                if (DeliveredUnit == Units.Sheets) return DeliveredQuantity * WeightPerSheet.Value;
+                return SheetsPerPackage.HasValue ? DeliveredQuantity * SheetsPerPackage.Value * WeightPerSheet.Value : (decimal?)null;
+            }
+        }
 
         /// <summary>Neuer Eintrag aus der Position (Momentaufnahme) und dem Bestellvermerk.</summary>
         public static DeliveryRecord Create(SheetItem item, OrderNoteEntry order, decimal delivered, string unit,
-            DateTime deliveredOn, bool partial, string bookedBy)
+            DateTime deliveredOn, bool partial, string bookedBy, decimal? sheetsPerPackage = null)
         {
             return new DeliveryRecord
             {
@@ -89,6 +107,7 @@ namespace Blechbestand.Model
                 Note = item.Note,
                 ErpNumber = item.ErpNumber,
                 WeightPerSheet = item.WeightPerSheet,
+                SheetsPerPackage = sheetsPerPackage,
                 BookedAt = DateTime.Now,
                 BookedBy = bookedBy ?? "",
             };

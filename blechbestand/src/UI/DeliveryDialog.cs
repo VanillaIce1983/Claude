@@ -270,7 +270,8 @@ namespace Blechbestand.UI
                     it.ChangedBy = host.Store.UserName;
                     if (entry == null && raw == null)
                         entry = new OrderNoteEntry { Raw = current.OpenOrder };
-                    history.Deliveries.Add(DeliveryRecord.Create(it, entry, qty, u, day, partial, host.Store.UserName));
+                    history.Deliveries.Add(DeliveryRecord.Create(it, entry, qty, u, day, partial, host.Store.UserName,
+                        it.PackageSheets(inv.PackageWeight)));
                 });
             }
         }

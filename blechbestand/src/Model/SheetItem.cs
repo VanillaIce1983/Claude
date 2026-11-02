@@ -46,6 +46,12 @@ namespace Blechbestand.Model
 
         public decimal? MinPackages { get; set; }
 
+        /// <summary>
+        /// Tafeln pro Paket, nur wenn dieses Material anders gepackt wird. Leer = automatisch aus dem
+        /// Paketgewicht des Lieferanten (<see cref="Inventory.PackageWeight"/>), abgerundet.
+        /// </summary>
+        public decimal? SheetsPerPackage { get; set; }
+
         public decimal? MinSheets { get; set; }
 
         /// <summary>Vermerk über eine offene Bestellung, z. B. „10 Tafeln am 27.10.2026“.</summary>
@@ -124,6 +130,17 @@ namespace Blechbestand.Model
             }
         }
 
+        /// <summary>Tafeln in einem Paket: eigener Wert, sonst Paketgewicht ÷ Tafelgewicht, abgerundet.</summary>
+        public decimal? PackageSheets(decimal packageWeight) =>
+            SheetsPerPackage.HasValue && SheetsPerPackage.Value > 0 ? SheetsPerPackage : Packaging.SheetsPerPackage(WeightPerSheet, packageWeight);
+
+        /// <summary>Gewicht eines Pakets in kg (Tafeln pro Paket × Tafelgewicht).</summary>
+        public decimal? PackageWeight(decimal packageWeight)
+        {
+            decimal? n = PackageSheets(packageWeight);
+            return n.HasValue && WeightPerSheet.HasValue ? n.Value * WeightPerSheet.Value : (decimal?)null;
+        }
+
         public SheetItem Clone() => (SheetItem)MemberwiseClone();
 
         /// <summary>Ersetzt null-Texte (z. B. aus älteren Dateien) durch leere Texte.</summary>
@@ -138,6 +155,19 @@ namespace Blechbestand.Model
             Note = (Note ?? "").Trim();
             OpenOrder = (OpenOrder ?? "").Trim();
             ChangedBy = ChangedBy ?? "";
+        }
+    }
+
+    /// <summary>Wie der Lieferant packt: ein Paket wiegt höchstens so viel, die Tafelzahl wird abgerundet.</summary>
+    public static class Packaging
+    {
+        public const decimal DefaultPackageWeight = 2500m;
+
+        /// <summary>z. B. 2.500 kg ÷ 144 kg = 17,4 → 17 Tafeln. Mindestens 1, null ohne Tafelgewicht oder Paketgewicht.</summary>
+        public static decimal? SheetsPerPackage(decimal? weightPerSheet, decimal packageWeight)
+        {
+            if (!weightPerSheet.HasValue || weightPerSheet.Value <= 0 || packageWeight <= 0) return null;
+            return Math.Max(1m, Math.Floor(packageWeight / weightPerSheet.Value));
         }
     }
 

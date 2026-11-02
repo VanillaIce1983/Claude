@@ -13,10 +13,27 @@ namespace Blechbestand.Model
         public decimal Quantity { get; set; }
         public string Unit { get; set; } = Units.Sheets;
 
+        /// <summary>Tafeln pro Paket (aus dem Paketgewicht), für Gewicht und Angabe „1 Paket (17 Tafeln)“.</summary>
+        public decimal? SheetsPerPackage { get; set; }
+
         public string QuantityText => Units.Format(Quantity, Unit);
 
-        /// <summary>Gewicht in kg, nur bei Tafeln mit bekanntem Tafelgewicht.</summary>
-        public decimal? Weight => Unit == Units.Sheets && Item.WeightPerSheet.HasValue ? Quantity * Item.WeightPerSheet.Value : (decimal?)null;
+        /// <summary>„1 Paket (17 Tafeln)“ bei Paketen, sonst wie <see cref="QuantityText"/>.</summary>
+        public string QuantityDetail =>
+            Unit == Units.Packages && SheetsPerPackage.HasValue
+                ? QuantityText + " (" + Units.Format(Quantity * SheetsPerPackage.Value, Units.Sheets) + ")"
+                : QuantityText;
+
+        /// <summary>Gewicht in kg; bei Paketen über die Tafeln pro Paket.</summary>
+        public decimal? Weight
+        {
+            get
+            {
+                if (!Item.WeightPerSheet.HasValue) return null;
+                if (Unit == Units.Sheets) return Quantity * Item.WeightPerSheet.Value;
+                return SheetsPerPackage.HasValue ? Quantity * SheetsPerPackage.Value * Item.WeightPerSheet.Value : (decimal?)null;
+            }
+        }
     }
 
     /// <summary>Baut die Bestell-E-Mail an den Einkauf (HTML für Outlook, Text, mailto-Link, Zwischenablage).</summary>
@@ -74,7 +91,7 @@ namespace Blechbestand.Model
                 Td(sb, bg, i.Material, bold: true);
                 Td(sb, bg, string.IsNullOrWhiteSpace(i.Thickness) ? "" : i.Thickness + " mm", right: true);
                 Td(sb, bg, i.Dimension);
-                Td(sb, bg, l.QuantityText, bold: true, right: true);
+                Td(sb, bg, l.QuantityDetail, bold: true, right: true);
                 Td(sb, bg, i.ErpNumber);
                 Td(sb, bg, i.Note);
                 Td(sb, bg, Numbers.FormatWeight(l.Weight), right: true);
@@ -84,7 +101,7 @@ namespace Blechbestand.Model
             decimal total = TotalWeight(lines);
             if (total > 0)
             {
-                sb.Append("<tr><td colspan=\"8\" style=\"").Append(Cell).Append("text-align:right;font-weight:bold;\">Gesamtgewicht der Tafeln ca.</td>");
+                sb.Append("<tr><td colspan=\"8\" style=\"").Append(Cell).Append("text-align:right;font-weight:bold;\">Gesamtgewicht ca.</td>");
                 sb.Append("<td style=\"").Append(Cell).Append("text-align:right;font-weight:bold;white-space:nowrap;\">").Append(Enc(Numbers.FormatWeight(total))).Append("</td></tr>");
             }
             sb.Append("</table>");
@@ -103,7 +120,7 @@ namespace Blechbestand.Model
             foreach (OrderLine l in lines)
             {
                 SheetItem i = l.Item;
-                var parts = new List<string> { pos + ".", l.QuantityText, i.Material };
+                var parts = new List<string> { pos + ".", l.QuantityDetail, i.Material };
                 if (!string.IsNullOrWhiteSpace(i.Thickness)) parts.Add(i.Thickness + " mm");
                 if (!string.IsNullOrWhiteSpace(i.Dimension)) parts.Add(i.Dimension);
                 if (!string.IsNullOrWhiteSpace(i.Note)) parts.Add(i.Note);
@@ -113,7 +130,7 @@ namespace Blechbestand.Model
                 pos++;
             }
             decimal total = TotalWeight(lines);
-            if (total > 0) sb.AppendLine().AppendLine("Gesamtgewicht der Tafeln ca. " + Numbers.FormatWeight(total));
+            if (total > 0) sb.AppendLine().AppendLine("Gesamtgewicht ca. " + Numbers.FormatWeight(total));
             if (!string.IsNullOrWhiteSpace(outro)) sb.AppendLine().AppendLine(Normalize(outro));
             return sb.ToString();
         }

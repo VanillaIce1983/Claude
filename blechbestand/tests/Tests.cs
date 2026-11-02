@@ -34,6 +34,7 @@ namespace Blechbestand.Tests
             Run("Sortierung und Gruppen", Groups_);
             Run("Speichern, Sicherung, Verlauf", Store_);
             Run("Zwei Rechner gleichzeitig", Concurrency_);
+            Run("Paketgewicht", Packages_);
             Run("Bestell-Mail", Mail_);
             Run("Lieferung buchen (Bestellvermerke)", Delivery_);
             Run("Bestellhistorie", History_);
@@ -317,7 +318,7 @@ namespace Blechbestand.Tests
             Equal("8 Tafeln", r.DeliveredText, "gelieferte Menge");
             Equal(576m, r.Weight, "Gewicht 8 × 72 kg");
             Check(r.Partial, "Teillieferung");
-            Equal((decimal?)null, DeliveryRecord.Create(steel4, null, 1, Units.Packages, DateTime.Today, false, "x").Weight, "Pakete ohne Gewicht");
+            Equal((decimal?)null, DeliveryRecord.Create(steel4, null, 1, Units.Packages, DateTime.Today, false, "x").Weight, "Pakete ohne Tafelzahl ohne Gewicht");
 
             var h = new OrderHistory();
             h.Deliveries.Add(DeliveryRecord.Create(alu, null, 5, Units.Sheets, new DateTime(2026, 10, 30), false, "Büro"));
@@ -400,22 +401,76 @@ namespace Blechbestand.Tests
             }
         }
 
+        private static void Packages_()
+        {
+            Equal(17m, Packaging.SheetsPerPackage(144m, 2500m), "4 mm Stahl: 2.500 ÷ 144 = 17,4 → 17");
+            Equal(34m, Packaging.SheetsPerPackage(72m, 2500m), "2 mm: 34,7 → 34");
+            Equal(23m, Packaging.SheetsPerPackage(107.64m, 2500m), "3 mm: 23,2 → 23");
+            Equal(4m, Packaging.SheetsPerPackage(540m, 2500m), "15 mm: 4,6 → 4");
+            Equal(1m, Packaging.SheetsPerPackage(3000m, 2500m), "schwerer als ein Paket: mindestens 1");
+            Equal((decimal?)null, Packaging.SheetsPerPackage(null, 2500m), "ohne Tafelgewicht");
+            Equal((decimal?)null, Packaging.SheetsPerPackage(144m, 0m), "Paketgewicht 0 = aus");
+
+            Inventory inv = SeedData.Create();
+            Equal(2500m, inv.PackageWeight, "Standard-Paketgewicht 2,5 t");
+            SheetItem steel4 = inv.Items.Single(i => i.Material == "1.0332" && i.Thickness == "4");
+            Equal(17m, steel4.PackageSheets(inv.PackageWeight), "automatisch");
+            Equal(2448m, steel4.PackageWeight(inv.PackageWeight), "Paketgewicht 17 × 144 kg");
+            steel4.SheetsPerPackage = 15;
+            Equal(15m, steel4.PackageSheets(inv.PackageWeight), "eigener Wert hat Vorrang");
+            Equal(2160m, steel4.PackageWeight(inv.PackageWeight), "Gewicht mit eigenem Wert");
+            steel4.SheetsPerPackage = null;
+            Equal(18m, steel4.PackageSheets(2600m), "anderes Paketgewicht");
+
+            // Lieferung von Paketen in der Historie mit Gewicht; ältere Einträge ohne Tafelzahl bleiben ohne Gewicht
+            DeliveryRecord withCount = DeliveryRecord.Create(steel4, null, 2, Units.Packages, DateTime.Today, false, "Laser", 17);
+            Equal(4896m, withCount.Weight, "2 Pakete × 17 × 144 kg");
+            Equal("2 Pakete (34 Tafeln)", withCount.DeliveredDetail, "Pakete mit Tafelzahl");
+            Equal((decimal?)null, DeliveryRecord.Create(steel4, null, 1, Units.Packages, DateTime.Today, false, "x").Weight, "ohne Tafelzahl kein Gewicht");
+
+            // Paketgewicht und eigener Wert werden gespeichert; alte Dateien ohne Angabe bekommen 2.500 kg
+            string dir = TempDir();
+            try
+            {
+                var store = new DataStore(Path.Combine(dir, "bestand.xml"));
+                store.CreateIfMissing(SeedData.Create);
+                Guid id = store.Load().Items.Single(i => i.Material == "1.0332" && i.Thickness == "6").Id;
+                store.Modify((i2, log) => { i2.PackageWeight = 2400m; i2.Find(id).SheetsPerPackage = 10; });
+                Inventory back = store.Load();
+                Equal(2400m, back.PackageWeight, "Paketgewicht gespeichert");
+                Equal(10m, back.Find(id).SheetsPerPackage, "eigener Wert gespeichert");
+                string old = File.ReadAllText(store.FilePath).Replace("<PackageWeight>2400</PackageWeight>", "");
+                File.WriteAllText(store.FilePath, old);
+                Equal(2500m, store.Load().PackageWeight, "ältere Datei ohne Paketgewicht → 2.500 kg");
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
         private static void Mail_()
         {
             Inventory inv = SeedData.Create();
             var lines = new List<OrderLine>
             {
                 new OrderLine { Item = inv.Items.Single(i => i.Note == "gebürstet"), Quantity = 10, Unit = Units.Sheets },
-                new OrderLine { Item = inv.Items.Single(i => i.Material == "1.0332" && i.Thickness == "4"), Quantity = 1, Unit = Units.Packages },
+                new OrderLine { Item = inv.Items.Single(i => i.Material == "1.0332" && i.Thickness == "4"), Quantity = 1, Unit = Units.Packages, SheetsPerPackage = 17 },
             };
-            Equal(720m, OrderMail.TotalWeight(lines), "Gewicht nur aus Tafeln");
+            Equal(720m + 2448m, OrderMail.TotalWeight(lines), "Gewicht aus Tafeln und Paket (17 × 144 kg)");
+            Equal("1 Paket (17 Tafeln)", lines[1].QuantityDetail, "Paket mit Tafelzahl");
+            Equal("10 Tafeln", lines[0].QuantityDetail, "Tafeln unverändert");
+            Equal((decimal?)null, new OrderLine { Item = lines[1].Item, Quantity = 1, Unit = Units.Packages }.Weight, "Paket ohne Tafelzahl ohne Gewicht");
             string html = OrderMail.BuildHtml(lines, "Hallo,\n\nbitte bestellen:", "Danke & Gruß");
             Check(html.Contains("10 Tafeln"), "Menge im HTML");
             Check(html.Contains("1 Paket"), "Paket im HTML");
             Check(html.Contains("0012771"), "Eulanda-Nr. im HTML");
             Check(html.Contains("Danke &amp; Gruß") || html.Contains("Danke &amp; Gru&#223;"), "HTML maskiert");
             Check(html.Contains("Hallo,<br><br>bitte bestellen:"), "Zeilenumbrüche");
-            Check(html.Contains("720 kg"), "Gesamtgewicht");
+            Check(html.Contains("720 kg"), "Gewicht der Tafeln");
+            Check(html.Contains("1 Paket (17 Tafeln)"), "Paket mit Tafelzahl im HTML");
+            Check(html.Contains("2.448 kg"), "Paketgewicht im HTML");
+            Check(html.Contains("Gesamtgewicht ca.") && html.Contains("3.168 kg"), "Gesamtgewicht inklusive Paket");
 
             string text = OrderMail.BuildText(lines, "Hallo", "Danke");
             Check(text.Contains("1. 10 Tafeln 1.4301 2 mm 3000x1500 gebürstet (Edelstahl), Eulanda-Nr. 0012771"), "Textzeile: " + text);

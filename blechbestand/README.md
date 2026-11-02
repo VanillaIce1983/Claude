@@ -38,10 +38,19 @@ Beim allerersten Start legt das Programm die Bestandsdatei an und füllt sie mit
 1. Positionen anhaken (Klick auf die Zeile oder Leertaste). Die Bestellmenge wird vorgeschlagen: bei Paketen 1 Paket, bei Tafeln bis zum doppelten Mindestbestand. Der Vorschlag lässt sich überschreiben, die Einheit (Tafeln/Pakete) ebenso.
 2. Oder **Knappe Positionen vorschlagen**: Damit wird alles Rote und Gelbe angehakt, was noch nicht bestellt ist.
 3. Rechts Empfänger, Betreff und Text prüfen. Empfänger und Texte merkt sich das Programm.
-4. **In Outlook öffnen**: Eine neue E-Mail erscheint mit der Bestellliste als Tabelle (Werkstoff, Dicke, Format, Menge, Eulanda-Nr., Gewicht). Deine Outlook-Signatur bleibt darunter erhalten. Gesendet wird erst mit „Senden“ in Outlook.
+4. **In Outlook öffnen**: Eine neue E-Mail erscheint mit der Bestellliste als Tabelle (Werkstoff, Dicke, Format, Menge, Eulanda-Nr., Gewicht). Pakete stehen mit Tafelzahl und Gewicht drin, z. B. „1 Paket (17 Tafeln) · 2.448 kg“. Deine Outlook-Signatur bleibt darunter erhalten. Gesendet wird erst mit „Senden“ in Outlook.
 5. Über der Tabelle erscheint ein grüner Balken. Erst mit **Als bestellt vermerken** steht an den Positionen „10 Tafeln am 02.11.2026“ (Spalte **Offene Bestellung**) und sie verschwinden aus der Auswahl. **Nicht vermerken** lässt die Auswahl stehen, z. B. wenn keine E-Mail aufgegangen ist.
 
 **Outlook:** Direkt angesteuert wird das klassische Outlook (Microsoft 365 / Office); das Mailfenster wird dabei nach vorne geholt. Das „neue Outlook für Windows“ hat dafür keine Schnittstelle. Dann öffnet das Programm eine neue E-Mail mit Empfänger und Betreff im Standard-Mailprogramm (z. B. im neuen Outlook) und legt die Bestellliste in die Zwischenablage: in die E-Mail klicken und **Strg+V** drücken, die Tabelle bleibt dabei erhalten. **In Zwischenablage kopieren** funktioniert mit jedem Mailprogramm.
+
+## Paketgewicht
+
+Beim Lieferanten wiegt ein Paket höchstens **2.500 kg**, die Tafelzahl wird abgerundet: **Tafeln pro Paket = 2.500 kg ÷ Gewicht pro Tafel, abgerundet**. Beispiel 1.0332 4 mm: 2.500 ÷ 144 kg = 17,4 → 17 Tafeln ≈ 2.448 kg.
+
+- Damit haben Pakete ein Gewicht: in der Bestell-Mail („1 Paket (17 Tafeln)“), in der Summe im Reiter „Bestellung“ und in der Bestellhistorie. Im Reiter „Bestand“ zeigt der Tooltip über der Paket-Zelle „1 Paket = 17 Tafeln ≈ 2.448 kg“.
+- Das Paketgewicht steht unter **Einstellungen** und gilt für alle Rechner (es wird in der Bestandsdatei gespeichert). 0 = keine Paketgewichte.
+- Wird ein Material anders gepackt: **Bearbeiten → Tafeln pro Paket** eintragen. Leer = automatisch.
+- In der Historie wird die Tafelzahl beim Buchen festgehalten, spätere Änderungen am Paketgewicht verändern alte Einträge nicht. Pakete, die vor Version 1.5 gebucht wurden, haben dort kein Gewicht.
 
 ## Reiter „Bestellhistorie“
 

@@ -588,7 +588,7 @@ namespace Blechbestand.UI
             }
             string text = lines.Count == 1 ? "1 Position" : lines.Count + " Positionen";
             decimal kg = OrderMail.TotalWeight(lines);
-            if (kg > 0) text += " · Tafeln ca. " + Numbers.FormatWeight(kg);
+            if (kg > 0) text += " · ca. " + Numbers.FormatWeight(kg);
             if (missing > 0) text += "\n" + missing + " ausgewählt ohne Menge";
             summary.Text = text;
             summary.ForeColor = missing > 0 ? Theme.RedFore : Theme.AccentDark;
@@ -722,7 +722,13 @@ namespace Blechbestand.UI
             {
                 if (!entries.TryGetValue(i.Id, out Entry e) || !e.Selected) continue;
                 if (!e.Quantity.HasValue || e.Quantity.Value <= 0) { missingQuantity++; continue; }
-                lines.Add(new OrderLine { Item = i, Quantity = e.Quantity.Value, Unit = e.Unit ?? i.PreferredUnit });
+                lines.Add(new OrderLine
+                {
+                    Item = i,
+                    Quantity = e.Quantity.Value,
+                    Unit = e.Unit ?? i.PreferredUnit,
+                    SheetsPerPackage = i.PackageSheets(host.Inventory.PackageWeight),
+                });
             }
             return lines;
         }

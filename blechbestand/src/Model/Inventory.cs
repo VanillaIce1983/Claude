@@ -11,6 +11,9 @@ namespace Blechbestand.Model
     {
         public int FormatVersion { get; set; } = 1;
 
+        /// <summary>Paketgewicht beim Lieferanten in kg (0 = keine Paketgewichte berechnen).</summary>
+        public decimal PackageWeight { get; set; } = Packaging.DefaultPackageWeight;
+
         [XmlArray("Groups"), XmlArrayItem("Group")]
         public List<string> Groups { get; set; } = new List<string>();
 
@@ -86,6 +89,7 @@ namespace Blechbestand.Model
         /// <summary>Repariert Dateien von Hand oder aus älteren Versionen: null-Listen, fehlende Gruppen, doppelte IDs.</summary>
         public void Normalize()
         {
+            if (PackageWeight < 0) PackageWeight = 0;
             if (Groups == null) Groups = new List<string>();
             if (Items == null) Items = new List<SheetItem>();
             Groups = Groups.Where(g => !string.IsNullOrWhiteSpace(g)).Select(g => g.Trim())

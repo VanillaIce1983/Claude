@@ -314,7 +314,7 @@ namespace Blechbestand.UI
                     var parts = new List<string>();
                     if (g.DeliveredCount > 0) parts.Add(g.DeliveredCount + " geliefert");
                     if (g.OpenCount > 0) parts.Add(g.OpenCount + " noch offen");
-                    if (g.DeliveredWeight > 0) parts.Add("Tafeln ca. " + Numbers.FormatWeight(g.DeliveredWeight));
+                    if (g.DeliveredWeight > 0) parts.Add("geliefert ca. " + Numbers.FormatWeight(g.DeliveredWeight));
                     rows.Add(HeaderRow("O:" + (g.Date?.ToString("yyyy-MM-dd") ?? "ohne"), new Header
                     {
                         Title = g.Date.HasValue ? "Bestellt am " + g.Date.Value.ToString("dddd, dd.MM.yyyy", Numbers.German) : "Ohne Bestelldatum",
@@ -339,7 +339,7 @@ namespace Blechbestand.UI
                     {
                         Title = "Geliefert am " + day.Date.ToString("dddd, dd.MM.yyyy", Numbers.German),
                         Count = day.Records.Count,
-                        Extra = kg > 0 ? "Tafeln ca. " + Numbers.FormatWeight(kg) : null,
+                        Extra = kg > 0 ? "ca. " + Numbers.FormatWeight(kg) : null,
                     }));
                     foreach (DeliveryRecord r in day.Records) rows.Add(DeliveredRow(r, stripe++, false));
                 }
@@ -347,7 +347,7 @@ namespace Blechbestand.UI
                 decimal kgAll = days.Sum(d => d.TotalWeight);
                 summary.Text = count == 0 ? "" :
                     (count == 1 ? "1 Lieferposition" : count + " Lieferpositionen") + " an " + (days.Count == 1 ? "1 Tag" : days.Count + " Tagen") +
-                    (kgAll > 0 ? " · Tafeln ca. " + Numbers.FormatWeight(kgAll) : "");
+                    (kgAll > 0 ? " · ca. " + Numbers.FormatWeight(kgAll) : "");
             }
             grid.Rows.AddRange(rows.ToArray());
 
@@ -397,7 +397,7 @@ namespace Blechbestand.UI
             row.Cells[ColNote].Value = r.Note;
             row.Cells[ColOtherDate].Value = orderView ? r.DeliveredOn.ToString("dd.MM.yyyy") : r.OrderedOn;
             row.Cells[ColOrdered].Value = r.OrderedText;
-            row.Cells[ColDelivered].Value = r.DeliveredText;
+            row.Cells[ColDelivered].Value = r.DeliveredDetail;
             row.Cells[ColWeight].Value = Numbers.FormatWeight(r.Weight);
             row.Cells[ColErp].Value = r.ErpNumber;
             row.Cells[ColBookedBy].Value = r.BookedBy + (r.BookedAt > DateTime.MinValue ? " · " + r.BookedAt.ToString("dd.MM. HH:mm") : "");

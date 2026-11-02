@@ -26,6 +26,8 @@ namespace Blechbestand.UI
         private readonly TextBox weight;
         private readonly TextBox density;
         private readonly TextBox openOrder;
+        private readonly TextBox packageSheets;
+        private readonly Label packageHint;
         private readonly ErrorProvider errors;
         private bool weightTouched;
         private bool settingWeight;
@@ -98,6 +100,20 @@ namespace Blechbestand.UI
             weightRow.Controls.Add(calc);
             Row(table, "Gewicht pro Tafel", weightRow, "Wird aus Dimension, Dicke und Dichte berechnet (Stahl/Edelstahl 8,0, Alu 2,75).");
 
+            packageSheets = new TextBox { Width = Theme.S(90), TextAlign = HorizontalAlignment.Right, Margin = new Padding(Theme.S(3), Theme.S(3), Theme.S(20), 0) };
+            packageHint = new Label
+            {
+                AutoSize = true,
+                ForeColor = Theme.Muted,
+                Font = Theme.UiFont(8.5f),
+                MaximumSize = new Size(Theme.S(430), 0),
+                Margin = new Padding(Theme.S(3), Theme.S(1), Theme.S(3), Theme.S(4)),
+            };
+            var packageStack = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            packageStack.Controls.Add(packageSheets);
+            packageStack.Controls.Add(packageHint);
+            Row(table, "Tafeln pro Paket", packageStack, null);
+
             Section(table, "Bestellung");
             Row(table, "Offene Bestellung", openOrder, "Wird beim Export im Reiter „Bestellung“ automatisch gesetzt.");
 
@@ -128,6 +144,7 @@ namespace Blechbestand.UI
             minPackages.Text = Numbers.Format(item.MinPackages);
             minSheets.Text = Numbers.Format(item.MinSheets);
             weight.Text = Numbers.Format(item.WeightPerSheet);
+            packageSheets.Text = Numbers.Format(item.SheetsPerPackage);
             openOrder.Text = item.OpenOrder;
             density.Text = Numbers.Format(Numbers.DefaultDensity(item.Group, item.Material));
             weightTouched = item.WeightPerSheet.HasValue && !isNew;
@@ -143,6 +160,37 @@ namespace Blechbestand.UI
             };
             group.TextChanged += densityGuess;
             material.TextChanged += densityGuess;
+            weight.TextChanged += (s, e) => UpdatePackageHint();
+            packageSheets.TextChanged += (s, e) => UpdatePackageHint();
+            UpdatePackageHint();
+        }
+
+        /// <summary>Zeigt, wie viele Tafeln automatisch in ein Paket kommen (Paketgewicht ÷ Tafelgewicht, abgerundet).</summary>
+        private void UpdatePackageHint()
+        {
+            decimal max = inventory.PackageWeight;
+            decimal? w = Numbers.ParseQuantityOrNull(weight.Text);
+            decimal? auto = Packaging.SheetsPerPackage(w, max);
+            decimal? own = Numbers.ParseQuantityOrNull(packageSheets.Text);
+            string Weight(decimal n) => w.HasValue ? " ≈ " + Numbers.FormatWeight(n * w.Value) : "";
+            if (own.HasValue && own.Value > 0)
+            {
+                packageHint.Text = "Eigener Wert: 1 Paket = " + Units.Format(own.Value, Units.Sheets) + Weight(own.Value) +
+                                   (auto.HasValue ? ". Automatisch wären es " + Units.Format(auto.Value, Units.Sheets) + "." : ".");
+            }
+            else if (max <= 0)
+            {
+                packageHint.Text = "Leer lassen = automatisch. Unter „Einstellungen“ ist kein Paketgewicht eingetragen.";
+            }
+            else if (auto.HasValue)
+            {
+                packageHint.Text = "Leer lassen = automatisch: 1 Paket = " + Units.Format(auto.Value, Units.Sheets) + Weight(auto.Value) +
+                                   " (" + Numbers.FormatWeight(max) + " ÷ " + Numbers.FormatWeight(w) + ", abgerundet). Nur eintragen, wenn anders gepackt wird.";
+            }
+            else
+            {
+                packageHint.Text = "Leer lassen = automatisch aus " + Numbers.FormatWeight(max) + " Paketgewicht, sobald das Gewicht pro Tafel bekannt ist.";
+            }
         }
 
         protected override void OnShown(EventArgs e)
@@ -248,6 +296,7 @@ namespace Blechbestand.UI
             ok &= ReadNumber(minPackages, out decimal? mp);
             ok &= ReadNumber(minSheets, out decimal? mt);
             ok &= ReadNumber(weight, out decimal? kg);
+            ok &= ReadNumber(packageSheets, out decimal? perPackage);
             if (!ok)
             {
                 System.Media.SystemSounds.Beep.Play();
@@ -266,6 +315,7 @@ namespace Blechbestand.UI
             r.MinPackages = mp;
             r.MinSheets = mt;
             r.WeightPerSheet = kg;
+            r.SheetsPerPackage = perPackage.HasValue && perPackage.Value > 0 ? perPackage : null;
             r.OpenOrder = openOrder.Text.Trim();
 
             SheetItem duplicate = inventory.Items.FirstOrDefault(i => i.Id != r.Id

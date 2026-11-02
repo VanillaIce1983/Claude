@@ -21,9 +21,13 @@ namespace Blechbestand.UI
 
         public float GridFontSize => (float)fontSize.Value;
 
+        public decimal PackageWeightKg => packageWeight.Value;
+
         public string SubjectTemplate => subjectTemplate.Text.Trim().Length > 0 ? subjectTemplate.Text.Trim() : "Blechbestellung {datum}";
 
-        public SettingsDialog(AppSettings settings, string currentPath)
+        private readonly NumericUpDown packageWeight;
+
+        public SettingsDialog(AppSettings settings, string currentPath, decimal currentPackageWeight)
         {
             dataFileSetting = settings.DataFile ?? "";
 
@@ -87,6 +91,26 @@ namespace Blechbestand.UI
             table.Controls.Add(new Label { Text = "Betreff der E-Mail ({datum} = heutiges Datum)", AutoSize = true, Margin = new Padding(0, 0, 0, Theme.S(2)) });
             subjectTemplate = new TextBox { Width = width, Text = settings.OrderSubject };
             table.Controls.Add(subjectTemplate);
+
+            var packageRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, Theme.S(8), 0, 0) };
+            packageWeight = new NumericUpDown
+            {
+                Minimum = 0,
+                Maximum = 20000,
+                Increment = 100,
+                DecimalPlaces = 0,
+                ThousandsSeparator = true,
+                Value = Math.Max(0, Math.Min(20000, currentPackageWeight)),
+                Width = Theme.S(90),
+                Margin = new Padding(Theme.S(3)),
+            };
+            packageRow.Controls.Add(Theme.FlowLabel("Paketgewicht beim Lieferanten", packageWeight.PreferredHeight));
+            packageRow.Controls.Add(packageWeight);
+            packageRow.Controls.Add(Theme.FlowLabel("kg", packageWeight.PreferredHeight));
+            table.Controls.Add(packageRow);
+            table.Controls.Add(Hint("Tafeln pro Paket = Paketgewicht ÷ Gewicht pro Tafel, abgerundet (z. B. 4 mm Stahl: 2.500 ÷ 144 kg = 17 Tafeln ≈ 2.448 kg). " +
+                "Damit bekommen Pakete in der Bestell-Mail und in der Bestellhistorie ein Gewicht. Gilt für alle Rechner; " +
+                "wird ein Material anders gepackt, unter „Bearbeiten“ → „Tafeln pro Paket“ eintragen. 0 = keine Paketgewichte.", width));
 
             Version v = Assembly.GetExecutingAssembly().GetName().Version;
             table.Controls.Add(Hint("Blechbestand " + v.Major + "." + v.Minor + "." + v.Build +

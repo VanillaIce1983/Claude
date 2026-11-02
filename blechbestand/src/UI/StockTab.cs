@@ -441,6 +441,11 @@ namespace Blechbestand.UI
                 ? i.ChangedAt.Value.ToString("dd.MM.yy HH:mm") + (i.ChangedBy.Length > 0 ? " · " + i.ChangedBy : "")
                 : "";
             StyleLevelCell(row.Cells[ColPackages], i.PackagesLevel, i.MinPackages, Units.Packages);
+            decimal? perPackage = i.PackageSheets(host.Inventory.PackageWeight);
+            if (perPackage.HasValue)
+                row.Cells[ColPackages].ToolTipText = "1 Paket = " + Units.Format(perPackage.Value, Units.Sheets) +
+                    (i.WeightPerSheet.HasValue ? " ≈ " + Numbers.FormatWeight(perPackage.Value * i.WeightPerSheet.Value) : "") +
+                    (i.SheetsPerPackage.HasValue ? " (eigener Wert)" : "") + "\n" + row.Cells[ColPackages].ToolTipText;
             StyleLevelCell(row.Cells[ColSheets], i.SheetsLevel, i.MinSheets, Units.Sheets);
             row.Cells[ColOrder].Style.ForeColor = i.OpenOrder.Length > 0 ? Theme.AccentDark : Color.Empty;
             row.Cells[ColOrder].ToolTipText = i.OpenOrder.Length > 0
@@ -568,7 +573,7 @@ namespace Blechbestand.UI
                     decimal delivered = (value ?? 0) - (before ?? 0);
                     if (delivered > 0)
                         history.Deliveries.Add(DeliveryRecord.Create(it, entry, delivered, packages ? Units.Packages : Units.Sheets,
-                            DateTime.Today, false, host.Store.UserName));
+                            DateTime.Today, false, host.Store.UserName, it.PackageSheets(inv.PackageWeight)));
                     log.Add(it.DisplayName, "Offene Bestellung", it.OpenOrder, "geliefert");
                     it.OpenOrder = "";
                 }
@@ -678,6 +683,7 @@ namespace Blechbestand.UI
             Num("Mindest Pakete", before.MinPackages, after.MinPackages, v => target.MinPackages = v);
             Num("Mindest Tafeln", before.MinSheets, after.MinSheets, v => target.MinSheets = v);
             Num("Gewicht pro Tafel", before.WeightPerSheet, after.WeightPerSheet, v => target.WeightPerSheet = v);
+            Num("Tafeln pro Paket", before.SheetsPerPackage, after.SheetsPerPackage, v => target.SheetsPerPackage = v);
         }
 
         private void DeleteSelected()

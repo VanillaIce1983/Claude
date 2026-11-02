@@ -387,7 +387,7 @@ namespace Blechbestand.UI
         private void ShowSettings()
         {
             stockTab.EndEditing();
-            using (var dlg = new SettingsDialog(settings, store?.FilePath ?? settings.ResolveDataFile()))
+            using (var dlg = new SettingsDialog(settings, store?.FilePath ?? settings.ResolveDataFile(), inventory.PackageWeight))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
 
@@ -431,6 +431,17 @@ namespace Blechbestand.UI
                     settings.DataFile = newSetting;
                 }
                 settings.Save();
+
+                // Paketgewicht steht in der Bestandsdatei, damit es für alle Rechner gilt
+                decimal newPackageWeight = dlg.PackageWeightKg;
+                if (store != null && store.Exists && newPackageWeight != inventory.PackageWeight)
+                {
+                    Modify((inv, log) =>
+                    {
+                        log.Add("Einstellungen", "Paketgewicht", Numbers.FormatWeight(inv.PackageWeight), Numbers.FormatWeight(newPackageWeight));
+                        inv.PackageWeight = newPackageWeight;
+                    });
+                }
             }
         }
     }
