@@ -4,6 +4,7 @@ Windows-Programm für den Blechbestand im Lager. Es ersetzt die Excel-Liste „B
 
 - **Reiter „Bestand“:** die Liste wie in der Excel-Tabelle. Der Mann an der Laserschneidmaschine trägt die noch vorhandene Menge direkt in die Zelle ein, Enter speichert sofort.
 - **Reiter „Bestellung / Einkauf“:** Materialien anhaken, Menge eingeben und die Bestellung als fertige E-Mail an den Einkauf in Outlook öffnen.
+- **Reiter „Bestellhistorie“:** alle gebuchten Lieferungen, nach Lieferdatum zusammengefasst.
 
 ![Logo](assets/logo-256.png)
 
@@ -42,6 +43,19 @@ Beim allerersten Start legt das Programm die Bestandsdatei an und füllt sie mit
 
 **Outlook:** Direkt angesteuert wird das klassische Outlook (Microsoft 365 / Office); das Mailfenster wird dabei nach vorne geholt. Das „neue Outlook für Windows“ hat dafür keine Schnittstelle. Dann öffnet das Programm eine neue E-Mail mit Empfänger und Betreff im Standard-Mailprogramm (z. B. im neuen Outlook) und legt die Bestellliste in die Zwischenablage: in die E-Mail klicken und **Strg+V** drücken, die Tabelle bleibt dabei erhalten. **In Zwischenablage kopieren** funktioniert mit jedem Mailprogramm.
 
+## Reiter „Bestellhistorie“
+
+Jede gebuchte Lieferung landet hier, egal ob per Rechtsklick „Geliefert – Menge zum Bestand addieren“ oder per Erhöhen der Menge mit „Lieferung eingetroffen? Ja“. Alle Lieferungen eines Tages stehen unter einer Überschrift („Geliefert am Montag, 02.11.2026 · 3 Positionen · Tafeln ca. 247,5 kg“), der neueste Tag oben.
+
+Pro Zeile: Gruppe, Material, Dicke, Dimension, Bemerkung, Bestellt am, bestellte Menge, gelieferte Menge, Gewicht, Eulandanummer, wer wann gebucht hat und Hinweise wie „Teillieferung, Rest offen“. Die Angaben zum Material werden beim Buchen festgehalten, die Historie bleibt also richtig, auch wenn ein Material später umbenannt oder gelöscht wird.
+
+- **Filter:** Suche, Zeitraum (letzte 30 Tage, 3 Monate, 12 Monate, dieses oder letztes Jahr), Materialgruppe
+- **Export für Excel:** die (gefilterte) Historie als CSV
+- **Eintrag löschen:** für versehentliche Buchungen; der Bestand bleibt dabei unverändert
+- Im Lieferdialog lässt sich das Lieferdatum ändern („Geliefert am“), falls erst später gebucht wird.
+
+Die Historie liegt in einer eigenen Datei neben der Bestandsdatei (`bestand_historie.xml`). So kann ein Rechner, auf dem noch eine ältere Programmversion läuft, sie beim Speichern nicht verlieren.
+
 ## Mehrere Rechner (Laser und Büro)
 
 Standardmäßig liegt die Bestandsdatei unter `Dokumente\Blechbestand\bestand.xml`. Damit Laser-Rechner und Büro dieselben Zahlen sehen, gibt es zwei Wege:
@@ -54,6 +68,7 @@ Mehrere Rechner dürfen gleichzeitig arbeiten. Jede Eingabe sperrt die Datei kur
 Neben der Datei legt das Programm an:
 
 - `Sicherungen\bestand_JJJJ-MM-TT.xml`: eine Sicherung pro Tag vor der ersten Änderung, die letzten 60 bleiben
+- `bestand_historie.xml`: die Bestellhistorie (gebuchte Lieferungen)
 - `bestand_verlauf.csv`: das Änderungsprotokoll (Zeitpunkt, Benutzer, Rechner, Position, alt, neu)
 
 Persönliche Einstellungen (Empfänger, Fenstergröße, Schriftgröße) liegen unter `%APPDATA%\Blechbestand\einstellungen.xml`. Für die Lasermaschine lässt sich unter **Einstellungen** eine größere Tabellenschrift wählen.
@@ -81,6 +96,6 @@ Der Workflow `.github/workflows/blechbestand-windows.yml` baut und testet auf Wi
 | Ordner | Inhalt |
 | --- | --- |
 | `src/Model` | Daten, Speichern mit Sperre und Sicherung, Startdaten, E-Mail-Aufbau (ohne Oberfläche, getestet) |
-| `src/UI` | Hauptfenster, Reiter Bestand und Bestellung, Dialoge, Outlook-Anbindung |
+| `src/UI` | Hauptfenster, Reiter Bestand, Bestellung und Bestellhistorie, Dialoge, Outlook-Anbindung |
 | `tests` | Prüfungen der Datenlogik, u. a. zwei Rechner, die gleichzeitig speichern |
 | `assets`, `scripts/make_icon.py` | Logo (blauer Hintergrund mit Blechtafel-Stapel) und das Skript, das es zeichnet |

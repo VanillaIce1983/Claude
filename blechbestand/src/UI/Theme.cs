@@ -166,7 +166,7 @@ namespace Blechbestand.UI
         }
 
         /// <summary>Zeichnet eine Gruppen-Zwischenüberschrift über die ganze Zeilenbreite (wie in der Excel-Liste).</summary>
-        public static void PaintGroupRow(DataGridView grid, DataGridViewRowPostPaintEventArgs e, string group, int count)
+        public static void PaintGroupRow(DataGridView grid, DataGridViewRowPostPaintEventArgs e, string group, int count, string extra = null)
         {
             Rectangle r = e.RowBounds;
             int width = 0;
@@ -179,7 +179,7 @@ namespace Blechbestand.UI
             const TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
             TextRenderer.DrawText(e.Graphics, group, bold, textRect, GroupText, flags);
             int w = TextRenderer.MeasureText(e.Graphics, group, bold, textRect.Size, flags).Width;
-            string suffix = count == 1 ? "1 Position" : count + " Positionen";
+            string suffix = (count == 1 ? "1 Position" : count + " Positionen") + (string.IsNullOrEmpty(extra) ? "" : " · " + extra);
             var rest = new Rectangle(textRect.X + w + S(10), textRect.Y, Math.Max(0, textRect.Width - w - S(10)), textRect.Height);
             TextRenderer.DrawText(e.Graphics, suffix, grid.DefaultCellStyle.Font, rest, Muted, flags);
             bold.Dispose();

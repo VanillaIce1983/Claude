@@ -35,6 +35,7 @@ namespace Blechbestand.Model
     public sealed class DataStore
     {
         private static readonly XmlSerializer Serializer = new XmlSerializer(typeof(Inventory));
+        private static readonly XmlSerializer HistorySerializer = new XmlSerializer(typeof(OrderHistory));
         private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(8);
 
         public DataStore(string filePath)
@@ -49,6 +50,11 @@ namespace Blechbestand.Model
         public string BackupFolder => Path.Combine(Folder, "Sicherungen");
 
         public string LogPath => Path.Combine(Folder, Path.GetFileNameWithoutExtension(FilePath) + "_verlauf.csv");
+
+        /// <summary>Bestellhistorie in eigener Datei, damit ältere Programmversionen sie beim Speichern nicht verlieren.</summary>
+        public string HistoryPath => Path.Combine(Folder, Path.GetFileNameWithoutExtension(FilePath) + "_historie.xml");
+
+        public DateTime HistoryLastWriteUtc => File.Exists(HistoryPath) ? File.GetLastWriteTimeUtc(HistoryPath) : DateTime.MinValue;
 
         public bool Exists => File.Exists(FilePath);
 
@@ -90,6 +96,30 @@ namespace Blechbestand.Model
             throw new IOException("Die Datendatei konnte nicht gelesen werden:\n" + FilePath + "\n\n" + last?.Message, last);
         }
 
+        /// <summary>Liest die Bestellhistorie; gibt es noch keine, ist sie leer.</summary>
+        public OrderHistory LoadHistory()
+        {
+            Exception last = null;
+            for (int attempt = 0; attempt < 15; attempt++)
+            {
+                if (!File.Exists(HistoryPath)) return new OrderHistory();
+                try
+                {
+                    using (var fs = new FileStream(HistoryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    {
+                        var h = (OrderHistory)HistorySerializer.Deserialize(fs);
+                        h.Normalize();
+                        return h;
+                    }
+                }
+                catch (FileNotFoundException) { return new OrderHistory(); }
+                catch (IOException ex) { last = ex; }
+                catch (InvalidOperationException ex) { last = ex; }
+                Thread.Sleep(150);
+            }
+            throw new IOException("Die Bestellhistorie konnte nicht gelesen werden:\n" + HistoryPath + "\n\n" + last?.Message, last);
+        }
+
         /// <summary>Legt die Datei mit den Startdaten an, falls es sie noch nicht gibt.</summary>
         public void CreateIfMissing(Func<Inventory> seed)
         {
@@ -100,7 +130,7 @@ namespace Blechbestand.Model
                 if (File.Exists(FilePath)) return;
                 Inventory inv = seed();
                 inv.Normalize();
-                Write(inv);
+                WriteXml(FilePath, Serializer, inv);
             }
         }
 
@@ -110,15 +140,25 @@ namespace Blechbestand.Model
             Directory.CreateDirectory(Folder);
             using (AcquireLock())
             {
-                Backup();
-                Write(inventory);
+                Backup(FilePath);
+                WriteXml(FilePath, Serializer, inventory);
             }
         }
 
         /// <summary>
         /// Sperrt die Datei, liest den neuesten Stand, wendet die Änderung an, speichert und gibt den neuen Stand zurück.
         /// </summary>
-        public Inventory Modify(Action<Inventory, ChangeLog> change)
+        public Inventory Modify(Action<Inventory, ChangeLog> change) =>
+            Modify((inv, history, log) => change(inv, log), out _, false);
+
+        /// <summary>
+        /// Wie <see cref="Modify(Action{Inventory, ChangeLog})"/>, ändert zusätzlich die Bestellhistorie
+        /// (z. B. beim Buchen einer Lieferung) – beides unter derselben Sperre.
+        /// </summary>
+        public Inventory Modify(Action<Inventory, OrderHistory, ChangeLog> change, out OrderHistory history) =>
+            Modify(change, out history, true);
+
+        private Inventory Modify(Action<Inventory, OrderHistory, ChangeLog> change, out OrderHistory history, bool withHistory)
         {
             // Nie mit einem leeren Bestand weitermachen, wenn die Datei (z. B. bei einem Netzwerkaussetzer) fehlt.
             if (!File.Exists(FilePath))
@@ -127,42 +167,59 @@ namespace Blechbestand.Model
             using (AcquireLock())
             {
                 Inventory inv = Load();
+                history = withHistory ? LoadHistory() : null;
                 var log = new ChangeLog();
-                change(inv, log);
+                change(inv, history, log);
                 inv.Normalize();
-                Backup();
-                Write(inv);
+                Backup(FilePath);
+                WriteXml(FilePath, Serializer, inv);
+                if (withHistory)
+                {
+                    history.Normalize();
+                    try
+                    {
+                        Backup(HistoryPath);
+                        WriteXml(HistoryPath, HistorySerializer, history);
+                    }
+                    catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                    {
+                        AppendLog(log);
+                        throw new IOException("Der Bestand wurde gespeichert, aber der Eintrag in der Bestellhistorie nicht:\n" +
+                            HistoryPath + "\n\n" + ex.Message, ex);
+                    }
+                }
                 AppendLog(log);
                 return inv;
             }
         }
 
-        private void Write(Inventory inv)
+        /// <summary>Schreibt erst in eine Zwischendatei und ersetzt dann, damit nie eine halbe Datei entsteht.</summary>
+        private static void WriteXml(string path, XmlSerializer serializer, object data)
         {
-            string tmp = FilePath + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            string tmp = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
             var settings = new XmlWriterSettings { Indent = true, Encoding = new UTF8Encoding(false) };
             using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             using (XmlWriter xw = XmlWriter.Create(fs, settings))
             {
-                Serializer.Serialize(xw, inv);
+                serializer.Serialize(xw, data);
             }
             try
             {
-                if (File.Exists(FilePath))
+                if (File.Exists(path))
                 {
                     try
                     {
-                        File.Replace(tmp, FilePath, null);
+                        File.Replace(tmp, path, null);
                     }
                     catch (Exception ex) when (ex is IOException || ex is PlatformNotSupportedException || ex is UnauthorizedAccessException)
                     {
                         // Manche Netzlaufwerke können nicht atomar ersetzen.
-                        File.Copy(tmp, FilePath, true);
+                        File.Copy(tmp, path, true);
                     }
                 }
                 else
                 {
-                    File.Move(tmp, FilePath);
+                    File.Move(tmp, path);
                 }
             }
             finally
@@ -171,18 +228,18 @@ namespace Blechbestand.Model
             }
         }
 
-        /// <summary>Eine Sicherung pro Tag vor der ersten Änderung, ältere werden aufgeräumt.</summary>
-        private void Backup()
+        /// <summary>Eine Sicherung pro Tag und Datei vor der ersten Änderung, ältere werden aufgeräumt.</summary>
+        private void Backup(string path)
         {
             try
             {
-                if (!File.Exists(FilePath)) return;
+                if (!File.Exists(path)) return;
                 Directory.CreateDirectory(BackupFolder);
-                string name = Path.GetFileNameWithoutExtension(FilePath) + "_" + DateTime.Now.ToString("yyyy-MM-dd") + Path.GetExtension(FilePath);
+                string name = Path.GetFileNameWithoutExtension(path) + "_" + DateTime.Now.ToString("yyyy-MM-dd") + Path.GetExtension(path);
                 string target = Path.Combine(BackupFolder, name);
-                if (!File.Exists(target)) File.Copy(FilePath, target);
+                if (!File.Exists(target)) File.Copy(path, target);
 
-                string pattern = Path.GetFileNameWithoutExtension(FilePath) + "_????-??-??" + Path.GetExtension(FilePath);
+                string pattern = Path.GetFileNameWithoutExtension(path) + "_????-??-??" + Path.GetExtension(path);
                 foreach (string old in Directory.GetFiles(BackupFolder, pattern).OrderByDescending(f => f, StringComparer.Ordinal).Skip(BackupsToKeep))
                     File.Delete(old);
             }

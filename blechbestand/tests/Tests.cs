@@ -36,6 +36,7 @@ namespace Blechbestand.Tests
             Run("Zwei Rechner gleichzeitig", Concurrency_);
             Run("Bestell-Mail", Mail_);
             Run("Lieferung buchen (Bestellvermerke)", Delivery_);
+            Run("Bestellhistorie", History_);
             Console.WriteLine();
             Console.WriteLine(failures == 0 ? $"Alle {checks} Prüfungen bestanden." : $"{failures} von {checks} Prüfungen fehlgeschlagen.");
             return failures == 0 ? 0 : 1;
@@ -297,6 +298,80 @@ namespace Blechbestand.Tests
             var line = new OrderLine { Item = new SheetItem(), Quantity = 12, Unit = Units.Sheets };
             OrderNoteEntry roundTrip = OrderNotes.Parse(OrderMail.OrderNote(line, new DateTime(2026, 11, 2))).Single();
             Check(roundTrip.Quantity == 12m && roundTrip.Unit == Units.Sheets && roundTrip.Date == "02.11.2026", "Vermerk aus dem Export wird erkannt");
+        }
+
+        private static void History_()
+        {
+            Inventory inv = SeedData.Create();
+            SheetItem brushed = inv.Items.Single(i => i.Note == "gebürstet");
+            SheetItem steel4 = inv.Items.Single(i => i.Material == "1.0332" && i.Thickness == "4");
+            SheetItem alu = inv.Items.Single(i => i.Material == "3.3535" && i.Thickness == "2");
+            var order = OrderNotes.Parse("10 Tafeln am 27.10.2026").Single();
+
+            DeliveryRecord r = DeliveryRecord.Create(brushed, order, 8, Units.Sheets, new DateTime(2026, 11, 2, 15, 30, 0), true, "Laser");
+            Equal(new DateTime(2026, 11, 2), r.DeliveredOn, "nur der Tag zählt");
+            Equal("1.4301 2 mm gebürstet", r.DisplayName, "Momentaufnahme des Materials");
+            Equal("0012771", r.ErpNumber, "Eulanda-Nr. kopiert");
+            Equal("27.10.2026", r.OrderedOn, "Bestelldatum aus dem Vermerk");
+            Equal("10 Tafeln", r.OrderedText, "bestellte Menge");
+            Equal("8 Tafeln", r.DeliveredText, "gelieferte Menge");
+            Equal(576m, r.Weight, "Gewicht 8 × 72 kg");
+            Check(r.Partial, "Teillieferung");
+            Equal((decimal?)null, DeliveryRecord.Create(steel4, null, 1, Units.Packages, DateTime.Today, false, "x").Weight, "Pakete ohne Gewicht");
+
+            var h = new OrderHistory();
+            h.Deliveries.Add(DeliveryRecord.Create(alu, null, 5, Units.Sheets, new DateTime(2026, 10, 30), false, "Büro"));
+            h.Deliveries.Add(r);
+            h.Deliveries.Add(DeliveryRecord.Create(steel4, null, 1, Units.Packages, new DateTime(2026, 11, 2, 7, 0, 0), false, "Laser"));
+            List<DeliveryDay> days = h.ByDeliveryDate(inv);
+            Equal(2, days.Count, "zwei Liefertage");
+            Equal(new DateTime(2026, 11, 2), days[0].Date, "neuester Tag zuerst");
+            Equal(2, days[0].Records.Count, "gleicher Tag zusammengefasst");
+            Equal("1.0332", days[0].Records[0].Material, "Stahl vor Edelstahl (Reihenfolge der Gruppen)");
+            Equal(576m, days[0].TotalWeight, "Tagesgewicht nur aus Tafeln");
+            Equal(1, h.ByDeliveryDate(inv, h.Deliveries.Where(x => x.Group == "Aluminium")).Count, "gefilterte Gruppierung");
+
+            string dir = TempDir();
+            try
+            {
+                var store = new DataStore(Path.Combine(dir, "bestand.xml")) { UserName = "Laser" };
+                store.CreateIfMissing(SeedData.Create);
+                Equal(0, store.LoadHistory().Deliveries.Count, "ohne Datei leere Historie");
+                Check(!File.Exists(store.HistoryPath), "Historie-Datei entsteht erst beim ersten Eintrag");
+
+                Guid id = store.Load().Items.Single(i => i.Note == "gebürstet").Id;
+                store.Modify((i2, hist, log) =>
+                {
+                    SheetItem it = i2.Find(id);
+                    it.Sheets += 8;
+                    hist.Deliveries.Add(DeliveryRecord.Create(it, order, 8, Units.Sheets, new DateTime(2026, 11, 2), false, "Laser"));
+                }, out OrderHistory saved);
+                Equal(1, saved.Deliveries.Count, "Eintrag zurückgegeben");
+                Equal("bestand_historie.xml", Path.GetFileName(store.HistoryPath), "Dateiname der Historie");
+                Check(File.Exists(store.HistoryPath), "Historie-Datei angelegt");
+                Check(!File.ReadAllText(store.FilePath).Contains("Delivery"), "Historie steckt nicht in bestand.xml");
+                OrderHistory loaded = store.LoadHistory();
+                Equal(1, loaded.Deliveries.Count, "Historie gelesen");
+                Equal("1.4301 2 mm gebürstet", loaded.Deliveries[0].DisplayName, "Eintrag vollständig");
+                Equal(19m, store.Load().Find(id).Sheets, "Bestand mitgebucht");
+
+                // Normale Änderungen (auch von älteren Programmversionen) lassen die Historie unberührt
+                DateTime before = store.HistoryLastWriteUtc;
+                store.Modify((i2, log) => i2.Find(id).Sheets = 5);
+                Equal(before, store.HistoryLastWriteUtc, "Historie bei normaler Änderung unverändert");
+                Equal(1, store.LoadHistory().Deliveries.Count, "Eintrag bleibt");
+
+                // Zweiter Eintrag am nächsten Tag, dann einen löschen
+                store.Modify((i2, hist, log) => hist.Deliveries.Add(DeliveryRecord.Create(i2.Find(id), null, 2, Units.Sheets, new DateTime(2026, 11, 3), false, "Büro")), out _);
+                Equal(2, store.LoadHistory().ByDeliveryDate(null).Count, "zwei Tage");
+                store.Modify((i2, hist, log) => hist.Deliveries.RemoveAll(d => d.DeliveredOn == new DateTime(2026, 11, 3)), out _);
+                Equal(1, store.LoadHistory().Deliveries.Count, "Eintrag gelöscht");
+                Check(Directory.GetFiles(store.BackupFolder, "bestand_historie_*.xml").Length == 1, "Tagessicherung der Historie");
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
         }
 
         private static void Mail_()

@@ -19,6 +19,7 @@ namespace Blechbestand.UI
         private readonly TextBox quantity;
         private readonly ComboBox unit;
         private readonly CheckBox complete;
+        private readonly DateTimePicker deliveredOn;
         private readonly Label preview;
         private readonly ErrorProvider errors = new ErrorProvider { BlinkStyle = ErrorBlinkStyle.NeverBlink };
         private bool completeTouched;
@@ -30,6 +31,7 @@ namespace Blechbestand.UI
         public decimal Delivered { get; private set; }
         public string DeliveredUnit { get; private set; }
         public bool Complete { get; private set; }
+        public DateTime DeliveredOn { get; private set; }
 
         public DeliveryDialog(SheetItem item)
         {
@@ -83,6 +85,15 @@ namespace Blechbestand.UI
             qtyRow.Controls.Add(quantity);
             qtyRow.Controls.Add(unit);
             Row(table, "Geliefert", qtyRow);
+
+            deliveredOn = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Width = Theme.S(130),
+                Value = DateTime.Today,
+                MaxDate = DateTime.Today.AddDays(1),
+            };
+            Row(table, "Geliefert am", deliveredOn);
 
             complete = new CheckBox
             {
@@ -187,6 +198,7 @@ namespace Blechbestand.UI
             Delivered = q.Value;
             DeliveredUnit = unit.SelectedItem as string ?? Units.Sheets;
             Complete = complete.Checked;
+            DeliveredOn = deliveredOn.Value.Date;
             DialogResult = DialogResult.OK;
             Close();
         }
@@ -205,8 +217,8 @@ namespace Blechbestand.UI
         }
 
         /// <summary>
-        /// Zeigt den Dialog und bucht die Lieferung: Menge addieren, Vermerk anpassen, alles im Verlauf.
-        /// Wird von beiden Reitern benutzt.
+        /// Zeigt den Dialog und bucht die Lieferung: Menge addieren, Vermerk anpassen, Eintrag in der
+        /// Bestellhistorie, alles im Verlauf. Wird von den Reitern „Bestand“ und „Bestellung“ benutzt.
         /// </summary>
         public static void Book(IWin32Window owner, IAppHost host, Guid itemId)
         {
@@ -219,9 +231,11 @@ namespace Blechbestand.UI
                 decimal qty = dlg.Delivered;
                 string u = dlg.DeliveredUnit;
                 bool done = dlg.Complete;
-                host.Modify((inv, log) =>
+                DateTime day = dlg.DeliveredOn;
+                host.Modify((inv, history, log) =>
                 {
                     SheetItem it = inv.Find(itemId) ?? throw new ItemGoneException();
+                    OrderNoteEntry entry = raw != null ? OrderNotes.Parse(it.OpenOrder).FirstOrDefault(n => n.Raw == raw) : null;
                     string newNote;
                     if (raw != null)
                     {
@@ -245,6 +259,8 @@ namespace Blechbestand.UI
                         it.Sheets = (before ?? 0) + qty;
                         log.Add(it.DisplayName, "Tafeln (Lieferung)", Numbers.Format(before), Numbers.Format(it.Sheets));
                     }
+                    // Teillieferung nach derselben Regel wie in OrderNotes.ApplyDelivery: gleiche Einheit, weniger als bestellt, nicht als erledigt markiert
+                    bool partial = !done && entry?.Quantity != null && entry.Unit == u && qty < entry.Quantity.Value;
                     if (newNote != it.OpenOrder)
                     {
                         log.Add(it.DisplayName, "Offene Bestellung", it.OpenOrder, newNote.Length > 0 ? newNote : "geliefert");
@@ -252,6 +268,9 @@ namespace Blechbestand.UI
                     }
                     it.ChangedAt = DateTime.Now;
                     it.ChangedBy = host.Store.UserName;
+                    if (entry == null && raw == null)
+                        entry = new OrderNoteEntry { Raw = current.OpenOrder };
+                    history.Deliveries.Add(DeliveryRecord.Create(it, entry, qty, u, day, partial, host.Store.UserName));
                 });
             }
         }

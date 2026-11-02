@@ -10,11 +10,15 @@ namespace Blechbestand.UI
     internal interface IAppHost
     {
         Inventory Inventory { get; }
+        OrderHistory History { get; }
         AppSettings Settings { get; }
         DataStore Store { get; }
 
         /// <summary>Änderung speichern (sperrt die Datei, liest neu, ändert, schreibt). Zeigt Fehler selbst an.</summary>
         bool Modify(Action<Inventory, ChangeLog> change);
+
+        /// <summary>Wie Modify, ändert zusätzlich die Bestellhistorie (z. B. beim Buchen einer Lieferung).</summary>
+        bool Modify(Action<Inventory, OrderHistory, ChangeLog> change);
 
         /// <summary>Der Bestand hat sich geändert (eigene Änderung oder von einem anderen Rechner).</summary>
         event EventHandler DataChanged;
@@ -35,10 +39,13 @@ namespace Blechbestand.UI
         private DataStore store;
         private Inventory inventory = new Inventory();
         private DateTime lastWriteUtc = DateTime.MinValue;
+        private OrderHistory history = new OrderHistory();
+        private DateTime historyWriteUtc = DateTime.MinValue;
 
         private readonly TabControl tabs;
         private readonly StockTab stockTab;
         private readonly OrderTab orderTab;
+        private readonly HistoryTab historyTab;
         private readonly ToolStripStatusLabel statusFile;
         private readonly ToolStripStatusLabel statusSaved;
         private readonly Timer refreshTimer;
@@ -72,12 +79,16 @@ namespace Blechbestand.UI
             };
             stockTab = new StockTab(this) { Dock = DockStyle.Fill };
             orderTab = new OrderTab(this) { Dock = DockStyle.Fill };
+            historyTab = new HistoryTab(this) { Dock = DockStyle.Fill };
             var stockPage = new TabPage("Bestand") { BackColor = Theme.Window, Padding = new Padding(0) };
             var orderPage = new TabPage("Bestellung / Einkauf") { BackColor = Theme.Window, Padding = new Padding(0) };
             stockPage.Controls.Add(stockTab);
             orderPage.Controls.Add(orderTab);
+            var historyPage = new TabPage("Bestellhistorie") { BackColor = Theme.Window, Padding = new Padding(0) };
+            historyPage.Controls.Add(historyTab);
             tabs.TabPages.Add(stockPage);
             tabs.TabPages.Add(orderPage);
+            tabs.TabPages.Add(historyPage);
             tabs.SelectedIndexChanged += (s, e) => TryReload(false);
 
             var status = new StatusStrip { SizingGrip = true, BackColor = Color.White, Font = Theme.UiFont(9f) };
@@ -97,6 +108,7 @@ namespace Blechbestand.UI
         }
 
         public Inventory Inventory => inventory;
+        public OrderHistory History => history;
         public AppSettings Settings => settings;
         public DataStore Store => store;
 
@@ -195,7 +207,9 @@ namespace Blechbestand.UI
                     TryReload(true);
                     return true;
                 case Keys.Control | Keys.F:
-                    if (tabs.SelectedIndex == 0) stockTab.FocusSearch(); else orderTab.FocusSearch();
+                    if (tabs.SelectedIndex == 0) stockTab.FocusSearch();
+                    else if (tabs.SelectedIndex == 1) orderTab.FocusSearch();
+                    else historyTab.FocusSearch();
                     return true;
                 case Keys.Control | Keys.N:
                     tabs.SelectedIndex = 0;
@@ -236,7 +250,19 @@ namespace Blechbestand.UI
             store = candidate;
             inventory = loaded;
             lastWriteUtc = store.LastWriteUtc;
-            UpdateStatus(null);
+            string historyProblem = null;
+            try
+            {
+                history = store.LoadHistory();
+                historyWriteUtc = store.HistoryLastWriteUtc;
+            }
+            catch (Exception ex)
+            {
+                // Bestand trotzdem benutzbar; Buchungen mit Historie schlagen fehl, bis die Datei wieder lesbar ist.
+                history = new OrderHistory();
+                historyProblem = "Bestellhistorie nicht lesbar: " + ex.Message.Split('\n')[0];
+            }
+            UpdateStatus(historyProblem);
             DataChanged?.Invoke(this, EventArgs.Empty);
             return true;
         }
@@ -256,14 +282,25 @@ namespace Blechbestand.UI
                 "Blechbestand", MessageBoxButtons.OK, MessageBoxIcon.Information)));
         }
 
-        public bool Modify(Action<Inventory, ChangeLog> change)
+        public bool Modify(Action<Inventory, ChangeLog> change) =>
+            Save(() => inventory = store.Modify(change));
+
+        public bool Modify(Action<Inventory, OrderHistory, ChangeLog> change) =>
+            Save(() =>
+            {
+                inventory = store.Modify(change, out OrderHistory h);
+                history = h;
+                historyWriteUtc = store.HistoryLastWriteUtc;
+            });
+
+        private bool Save(Action save)
         {
             if (store == null) return false;
             Cursor previous = Cursor.Current;
             Cursor.Current = Cursors.WaitCursor;
             try
             {
-                inventory = store.Modify(change);
+                save();
                 lastWriteUtc = store.LastWriteUtc;
                 UpdateStatus(null);
                 DataChanged?.Invoke(this, EventArgs.Empty);
@@ -306,9 +343,18 @@ namespace Blechbestand.UI
             {
                 if (!store.Exists) { UpdateStatus("Datei nicht gefunden"); return; }
                 DateTime w = store.LastWriteUtc;
-                if (!force && w == lastWriteUtc) return;
-                inventory = store.Load();
-                lastWriteUtc = w;
+                DateTime hw = store.HistoryLastWriteUtc;
+                if (!force && w == lastWriteUtc && hw == historyWriteUtc) return;
+                if (force || w != lastWriteUtc)
+                {
+                    inventory = store.Load();
+                    lastWriteUtc = w;
+                }
+                if (force || hw != historyWriteUtc)
+                {
+                    history = store.LoadHistory();
+                    historyWriteUtc = hw;
+                }
                 UpdateStatus(null);
                 DataChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -349,6 +395,7 @@ namespace Blechbestand.UI
                 settings.OrderSubject = dlg.SubjectTemplate;
                 stockTab.ApplyFontSize(settings.FontSize);
                 orderTab.ApplyFontSize(settings.FontSize);
+                historyTab.ApplyFontSize(settings.FontSize);
 
                 string newSetting = dlg.DataFileSetting;
                 string newPath = string.IsNullOrWhiteSpace(newSetting)

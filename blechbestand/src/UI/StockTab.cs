@@ -552,7 +552,7 @@ namespace Blechbestand.UI
                     "Lieferung eingetroffen?", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
             }
             string field = packages ? "Pakete" : "Tafeln";
-            host.Modify((inv, log) =>
+            void Apply(Inventory inv, OrderHistory history, ChangeLog log)
             {
                 SheetItem it = inv.Find(id) ?? throw new ItemGoneException();
                 decimal? before = packages ? it.Packages : it.Sheets;
@@ -560,12 +560,21 @@ namespace Blechbestand.UI
                 it.ChangedAt = DateTime.Now;
                 it.ChangedBy = host.Store.UserName;
                 log.Add(it.DisplayName, field, Numbers.Format(before), Numbers.Format(value));
-                if (clearOrder && it.OpenOrder.Length > 0)
+                if (history != null && it.OpenOrder.Length > 0)
                 {
+                    // Lieferung = Erhöhung der Menge; ist genau eine Bestellung vermerkt, wird sie zugeordnet
+                    List<OrderNoteEntry> notes = OrderNotes.Parse(it.OpenOrder);
+                    OrderNoteEntry entry = notes.Count == 1 ? notes[0] : new OrderNoteEntry { Raw = it.OpenOrder };
+                    decimal delivered = (value ?? 0) - (before ?? 0);
+                    if (delivered > 0)
+                        history.Deliveries.Add(DeliveryRecord.Create(it, entry, delivered, packages ? Units.Packages : Units.Sheets,
+                            DateTime.Today, false, host.Store.UserName));
                     log.Add(it.DisplayName, "Offene Bestellung", it.OpenOrder, "geliefert");
                     it.OpenOrder = "";
                 }
-            });
+            }
+            if (clearOrder) host.Modify((inv, history, log) => Apply(inv, history, log));
+            else host.Modify((inv, log) => Apply(inv, null, log));
         }
 
         /// <summary>Schnelländerung um ±1 für die markierte Zelle (Pakete oder Tafeln).</summary>
