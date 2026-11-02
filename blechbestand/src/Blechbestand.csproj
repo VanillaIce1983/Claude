@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Blechbestand: Windows-Programm (WinForms) auf Basis von .NET Framework 4.8.
+       .NET Framework 4.8 ist in Windows 10/11 bereits enthalten, die fertige Blechbestand.exe läuft ohne Installation.
+       Gebaut werden kann auf Windows, Linux oder macOS mit dem .NET-SDK (dotnet build -c Release). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>Blechbestand</AssemblyName>
+    <RootNamespace>Blechbestand</RootNamespace>
+    <ApplicationIcon>..\assets\blechbestand.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.0.0</Version>
+    <Product>Blechbestand</Product>
+    <AssemblyTitle>Blechbestand</AssemblyTitle>
+    <Description>Lagerbestand für Blechtafeln mit Bestellung an den Einkauf über Outlook</Description>
+    <Copyright>2026</Copyright>
+    <NeutralLanguage>de-DE</NeutralLanguage>
+    <SatelliteResourceLanguages>de</SatelliteResourceLanguages>
+    <GenerateSupportedRuntime>false</GenerateSupportedRuntime>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <DebugType>embedded</DebugType>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\assets\fenster.ico" LogicalName="Blechbestand.app.ico" />
+    <EmbeddedResource Include="..\assets\logo-256.png" LogicalName="Blechbestand.logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

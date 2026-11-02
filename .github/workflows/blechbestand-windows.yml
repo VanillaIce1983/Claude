@@ -1,0 +1,78 @@
+# Blechbestand (Windows-Programm, .NET Framework 4.8) bauen, Datenlogik testen, die Exe auf Windows einmal starten
+# und mit einem Screenshot als Artefakt bereitstellen.
+name: blechbestand-windows
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'blechbestand/**'
+      - '.github/workflows/blechbestand-windows.yml'
+  pull_request:
+    paths:
+      - 'blechbestand/**'
+      - '.github/workflows/blechbestand-windows.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: blechbestand
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Tests der Datenlogik
+        run: dotnet run -c Release --project tests/Blechbestand.Tests.csproj
+
+      - name: Programm bauen
+        run: dotnet build -c Release src/Blechbestand.csproj
+
+      - name: Starttest (Fenster öffnet sich, Screenshot)
+        run: |
+          $exe = (Resolve-Path src/bin/Release/net48/Blechbestand.exe).Path
+          $p = Start-Process -FilePath $exe -PassThru
+          for ($i = 0; $i -lt 60 -and -not $p.HasExited -and $p.MainWindowHandle -eq 0; $i++) {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+          }
+          if ($p.HasExited) { throw "Blechbestand.exe hat sich beim Start beendet (Exitcode $($p.ExitCode))." }
+          if ($p.MainWindowHandle -eq 0) { throw "Kein Programmfenster nach 30 Sekunden." }
+          Start-Sleep -Seconds 4
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          New-Item -ItemType Directory -Force -Path ../blechbestand-out | Out-Null
+          $bmp.Save((Join-Path (Resolve-Path ../blechbestand-out) 'starttest.png'))
+          if ($p.HasExited) { throw "Blechbestand.exe ist nach dem Start abgestürzt." }
+          Stop-Process -Id $p.Id -Force
+          $data = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Blechbestand\bestand.xml'
+          if (-not (Test-Path $data)) { throw "Bestandsdatei wurde nicht angelegt: $data" }
+          Write-Host "Bestandsdatei angelegt: $data"
+          Copy-Item $exe ../blechbestand-out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blechbestand
+          path: blechbestand-out/
+          if-no-files-found: error
