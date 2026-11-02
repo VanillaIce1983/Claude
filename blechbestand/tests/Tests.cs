@@ -331,6 +331,32 @@ namespace Blechbestand.Tests
             Equal(576m, days[0].TotalWeight, "Tagesgewicht nur aus Tafeln");
             Equal(1, h.ByDeliveryDate(inv, h.Deliveries.Where(x => x.Group == "Aluminium")).Count, "gefilterte Gruppierung");
 
+            // Nach Bestelldatum: Gelieferte und noch offene Positionen derselben Bestellung zusammen
+            Equal(new DateTime(2026, 10, 27), OrderNotes.ParseDate("27.10.2026"), "Datum lesen");
+            Equal(new DateTime(2026, 11, 5), OrderNotes.ParseDate("5.11.26"), "kurzes Datum lesen");
+            Equal((DateTime?)null, OrderNotes.ParseDate("bald"), "unlesbares Datum");
+            Inventory inv2 = SeedData.Create(); // offen: 1.0332 4 mm (1 Paket 27.10.) und EN AW-5005A (10 Tafeln 27.10.)
+            SheetItem nox = inv2.Items.Single(i => i.Material == "EN AW-5005A");
+            nox.OpenOrder = "2 Tafeln am 27.10.2026 (Rest)";
+            inv2.Items.Single(i => i.Material == "1.0330" && i.Thickness == "1").OpenOrder = "3 Tafeln am 02.11.2026";
+            inv2.Items.Single(i => i.Material == "1.0226" && i.Thickness == "3").OpenOrder = "Lieferant meldet sich";
+            var deliveredNox = DeliveryRecord.Create(nox, OrderNotes.Parse("10 Tafeln am 27.10.2026").Single(), 8, Units.Sheets, new DateTime(2026, 10, 30), true, "Laser");
+            var deliveredAlu = DeliveryRecord.Create(alu, OrderNotes.Parse("5 Tafeln am 27.10.2026").Single(), 5, Units.Sheets, new DateTime(2026, 11, 2), false, "Büro");
+            List<OrderGroup> orders = OrderHistory.ByOrderDate(inv2, new[] { deliveredNox, deliveredAlu }, OrderGroupLine.OpenLines(inv2));
+            Equal(3, orders.Count, "drei Bestellungen (02.11., 27.10., ohne Datum)");
+            Equal(new DateTime(2026, 11, 2), orders[0].Date, "neueste Bestellung zuerst");
+            Equal((DateTime?)null, orders[2].Date, "ohne Bestelldatum am Ende");
+            OrderGroup oct = orders[1];
+            Equal(new DateTime(2026, 10, 27), oct.Date, "Bestellung vom 27.10.");
+            Equal(4, oct.Lines.Count, "1 Paket offen, Alu geliefert, NOX geliefert + Rest offen");
+            Equal(2, oct.DeliveredCount, "zwei geliefert");
+            Equal(2, oct.OpenCount, "zwei offen");
+            int iDelivered = oct.Lines.FindIndex(l => !l.IsOpen && l.Material == "EN AW-5005A");
+            int iRest = oct.Lines.FindIndex(l => l.IsOpen && l.Material == "EN AW-5005A");
+            Equal(iDelivered + 1, iRest, "Teillieferung und Rest stehen untereinander");
+            Equal("1.0332", oct.Lines[0].Material, "Stahl zuerst");
+            Equal(5m * 24.75m + 8m * 24.75m, oct.DeliveredWeight, "Gewicht nur der gelieferten Tafeln");
+
             string dir = TempDir();
             try
             {

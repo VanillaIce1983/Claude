@@ -120,6 +120,43 @@ namespace Blechbestand.Model
         public decimal TotalWeight => Records.Sum(r => r.Weight ?? 0m);
     }
 
+    /// <summary>
+    /// Eine Zeile der Ansicht „nach Bestelldatum“: entweder eine gebuchte Lieferung oder eine noch offene Bestellung
+    /// (Eintrag im Feld „Offene Bestellung“ einer Position).
+    /// </summary>
+    public class OrderGroupLine
+    {
+        public DeliveryRecord Delivered { get; set; }
+        public SheetItem OpenItem { get; set; }
+        public OrderNoteEntry OpenEntry { get; set; }
+
+        public bool IsOpen => Delivered == null;
+        public string Group => IsOpen ? OpenItem.Group : Delivered.Group;
+        public string Material => IsOpen ? OpenItem.Material : Delivered.Material;
+        public string Thickness => IsOpen ? OpenItem.Thickness : Delivered.Thickness;
+        public string Note => IsOpen ? OpenItem.Note : Delivered.Note;
+
+        /// <summary>Bestelldatum als Text, wie im Vermerk.</summary>
+        public string OrderedOnText => IsOpen ? (OpenEntry.Date ?? "") : Delivered.OrderedOn;
+
+        public DateTime? OrderedOn => OrderNotes.ParseDate(OrderedOnText);
+
+        /// <summary>Alle offenen Bestellungen aller Positionen als Zeilen.</summary>
+        public static List<OrderGroupLine> OpenLines(Inventory inventory) =>
+            inventory.Items.SelectMany(i => OrderNotes.Parse(i.OpenOrder).Select(e => new OrderGroupLine { OpenItem = i, OpenEntry = e })).ToList();
+    }
+
+    /// <summary>Alles, was am selben Tag bestellt wurde (eine Gruppe in der Ansicht „nach Bestelldatum“).</summary>
+    public class OrderGroup
+    {
+        /// <summary>Bestelldatum; null = ohne erkennbares Bestelldatum.</summary>
+        public DateTime? Date { get; set; }
+        public List<OrderGroupLine> Lines { get; set; } = new List<OrderGroupLine>();
+        public int OpenCount => Lines.Count(l => l.IsOpen);
+        public int DeliveredCount => Lines.Count(l => !l.IsOpen);
+        public decimal DeliveredWeight => Lines.Where(l => !l.IsOpen).Sum(l => l.Delivered.Weight ?? 0m);
+    }
+
     /// <summary>Bestellhistorie, gespeichert in einer eigenen Datei neben der Bestandsdatei („bestand_historie.xml“).</summary>
     [XmlRoot("Bestellhistorie")]
     public class OrderHistory
@@ -144,6 +181,34 @@ namespace Blechbestand.Model
         /// Lieferungen nach Lieferdatum zusammengefasst, neuester Tag zuerst. Innerhalb eines Tages sortiert
         /// wie der Bestand (Gruppenreihenfolge, Werkstoff, Dicke).
         /// </summary>
+        /// <summary>
+        /// Gelieferte und noch offene Positionen nach Bestelldatum zusammengefasst, neueste Bestellung zuerst,
+        /// Positionen ohne Bestelldatum am Ende. Innerhalb einer Bestellung wie der Bestand sortiert; eine
+        /// Teillieferung und ihr offener Rest stehen untereinander.
+        /// </summary>
+        public static List<OrderGroup> ByOrderDate(Inventory inventory, IEnumerable<DeliveryRecord> delivered, IEnumerable<OrderGroupLine> open)
+        {
+            Func<string, int> groupIndex = g => inventory?.GroupIndex(g) ?? 0;
+            IEnumerable<OrderGroupLine> lines = (delivered ?? Enumerable.Empty<DeliveryRecord>()).Select(r => new OrderGroupLine { Delivered = r })
+                .Concat(open ?? Enumerable.Empty<OrderGroupLine>());
+            return lines
+                .GroupBy(l => l.OrderedOn)
+                .OrderBy(g => g.Key.HasValue ? 0 : 1)
+                .ThenByDescending(g => g.Key)
+                .Select(g => new OrderGroup
+                {
+                    Date = g.Key,
+                    Lines = g.OrderBy(l => groupIndex(l.Group))
+                             .ThenBy(l => l.Material, StringComparer.CurrentCultureIgnoreCase)
+                             .ThenBy(l => Numbers.FirstNumber(l.Thickness) ?? 0m)
+                             .ThenBy(l => l.Note, StringComparer.CurrentCultureIgnoreCase)
+                             .ThenBy(l => l.IsOpen ? 1 : 0)
+                             .ThenBy(l => l.IsOpen ? DateTime.MaxValue : l.Delivered.DeliveredOn)
+                             .ToList(),
+                })
+                .ToList();
+        }
+
         public List<DeliveryDay> ByDeliveryDate(Inventory inventory, IEnumerable<DeliveryRecord> records = null)
         {
             Func<string, int> groupIndex = g => inventory?.GroupIndex(g) ?? 0;

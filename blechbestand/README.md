@@ -4,7 +4,7 @@ Windows-Programm für den Blechbestand im Lager. Es ersetzt die Excel-Liste „B
 
 - **Reiter „Bestand“:** die Liste wie in der Excel-Tabelle. Der Mann an der Laserschneidmaschine trägt die noch vorhandene Menge direkt in die Zelle ein, Enter speichert sofort.
 - **Reiter „Bestellung / Einkauf“:** Materialien anhaken, Menge eingeben und die Bestellung als fertige E-Mail an den Einkauf in Outlook öffnen.
-- **Reiter „Bestellhistorie“:** alle gebuchten Lieferungen, nach Lieferdatum zusammengefasst.
+- **Reiter „Bestellhistorie“:** alle gebuchten Lieferungen, wahlweise nach Lieferdatum oder nach Bestelldatum zusammengefasst.
 
 ![Logo](assets/logo-256.png)
 
@@ -45,12 +45,17 @@ Beim allerersten Start legt das Programm die Bestandsdatei an und füllt sie mit
 
 ## Reiter „Bestellhistorie“
 
-Jede gebuchte Lieferung landet hier, egal ob per Rechtsklick „Geliefert – Menge zum Bestand addieren“ oder per Erhöhen der Menge mit „Lieferung eingetroffen? Ja“. Alle Lieferungen eines Tages stehen unter einer Überschrift („Geliefert am Montag, 02.11.2026 · 3 Positionen · Tafeln ca. 247,5 kg“), der neueste Tag oben.
+Jede gebuchte Lieferung landet hier, egal ob per Rechtsklick „Geliefert – Menge zum Bestand addieren“ oder per Erhöhen der Menge mit „Lieferung eingetroffen? Ja“. Oben links wählst du, wie zusammengefasst wird:
+
+- **Zusammenfassen nach Lieferdatum:** alle Lieferungen eines Tages unter einer Überschrift („Geliefert am Montag, 02.11.2026 · 3 Positionen · Tafeln ca. 247,5 kg“), der neueste Tag oben.
+- **Zusammenfassen nach Bestelldatum:** alles, was am selben Tag bestellt wurde (also meist dieselbe Bestell-Mail), unter einer Überschrift („Bestellt am Montag, 02.11.2026 · 4 Positionen · 2 geliefert · 2 noch offen“). Hier stehen auch die **noch offenen** Positionen dieser Bestellung; eine Teillieferung und ihr offener Rest stehen untereinander. Offene Positionen lassen sich per Rechtsklick oder Doppelklick direkt als geliefert buchen. Positionen ohne erkennbares Bestelldatum stehen am Ende unter „Ohne Bestelldatum“.
+
+Die gewählte Ansicht merkt sich das Programm.
 
 Pro Zeile: Gruppe, Material, Dicke, Dimension, Bemerkung, Bestellt am, bestellte Menge, gelieferte Menge, Gewicht, Eulandanummer, wer wann gebucht hat und Hinweise wie „Teillieferung, Rest offen“. Die Angaben zum Material werden beim Buchen festgehalten, die Historie bleibt also richtig, auch wenn ein Material später umbenannt oder gelöscht wird.
 
-- **Filter:** Suche, Zeitraum (letzte 30 Tage, 3 Monate, 12 Monate, dieses oder letztes Jahr), Materialgruppe
-- **Export für Excel:** die (gefilterte) Historie als CSV
+- **Filter:** Suche, Zeitraum (letzte 30 Tage, 3 Monate, 12 Monate, dieses oder letztes Jahr; bezogen auf das Datum der gewählten Ansicht), Materialgruppe
+- **Export für Excel:** die (gefilterte) Ansicht als CSV, mit Bestell- und Lieferdatum und Status
 - **Eintrag löschen:** für versehentliche Buchungen; der Bestand bleibt dabei unverändert
 - Im Lieferdialog lässt sich das Lieferdatum ändern („Geliefert am“), falls erst später gebucht wird.
 

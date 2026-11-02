@@ -13,7 +13,7 @@
     <RootNamespace>Blechbestand</RootNamespace>
     <ApplicationIcon>..\assets\blechbestand.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
     <Product>Blechbestand</Product>
     <AssemblyTitle>Blechbestand</AssemblyTitle>
     <Description>Lagerbestand für Blechtafeln mit Bestellung an den Einkauf über Outlook</Description>

@@ -88,6 +88,15 @@ namespace Blechbestand.Model
             return delivered >= entry.Quantity.Value;
         }
 
+        private static readonly string[] DateFormats = { "dd.MM.yyyy", "d.M.yyyy", "dd.MM.yy", "d.M.yy" };
+
+        /// <summary>„27.10.2026“ oder „5.11.26“ → Datum; null wenn leer oder unlesbar.</summary>
+        public static DateTime? ParseDate(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            return DateTime.TryParseExact(text.Trim(), DateFormats, Numbers.German, DateTimeStyles.None, out DateTime d) ? d.Date : (DateTime?)null;
+        }
+
         private static List<string> Split(string openOrder) =>
             (openOrder ?? "").Split(';').Select(p => p.Trim()).Where(p => p.Length > 0).ToList();
     }

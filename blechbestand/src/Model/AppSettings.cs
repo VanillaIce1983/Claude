@@ -35,6 +35,9 @@ namespace Blechbestand.Model
 
         public bool WindowMaximized { get; set; }
 
+        /// <summary>Bestellhistorie nach Bestelldatum statt nach Lieferdatum zusammenfassen.</summary>
+        public bool HistoryByOrderDate { get; set; }
+
         [XmlIgnore]
         public static string SettingsFolder =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Blechbestand");
