@@ -28,8 +28,19 @@ namespace Blechbestand.UI
             public string Unit;
         }
 
+        /// <summary>Sonderposition: Material, das nicht im Bestand steht, nur für diese Bestellung.</summary>
+        private sealed class SpecialLine
+        {
+            public SheetItem Item;
+            public decimal? Quantity;
+            public string Unit;
+        }
+
+        private const string SpecialGroup = "Sonderpositionen (nicht im Bestand)";
+
         private readonly IAppHost host;
         private readonly Dictionary<Guid, Entry> entries = new Dictionary<Guid, Entry>();
+        private readonly List<SpecialLine> specials = new List<SpecialLine>();
         private readonly Dictionary<string, int> groupCounts = new Dictionary<string, int>();
         private readonly DataGridView grid;
         private readonly TextBox search;
@@ -67,6 +78,8 @@ namespace Blechbestand.UI
             onlySelected.CheckedChanged += (s, e) => Rebuild();
             var suggest = Theme.SecondaryButton("Knappe Positionen vorschlagen");
             suggest.Click += (s, e) => SuggestLow();
+            var special = Theme.SecondaryButton("+ Sonderposition");
+            special.Click += (s, e) => OpenSpecialDialog(null, false);
             var clear = Theme.SecondaryButton("Auswahl leeren");
             clear.Click += (s, e) => ClearSelection();
 
@@ -77,6 +90,7 @@ namespace Blechbestand.UI
             toolbar.Controls.Add(onlyLow);
             toolbar.Controls.Add(onlySelected);
             toolbar.Controls.Add(suggest);
+            toolbar.Controls.Add(special);
             toolbar.Controls.Add(clear);
 
             // ---------- Tabelle ----------
@@ -117,7 +131,8 @@ namespace Blechbestand.UI
             };
             grid.CellBeginEdit += (s, e) =>
             {
-                if (!(KeyAt(e.RowIndex) is Guid) || (e.ColumnIndex != ColQuantity && e.ColumnIndex != ColUnit))
+                object key = KeyAt(e.RowIndex);
+                if (!(key is Guid || key is SpecialLine) || (e.ColumnIndex != ColQuantity && e.ColumnIndex != ColUnit))
                     e.Cancel = true;
             };
             grid.CellValidating += Grid_CellValidating;
@@ -135,7 +150,14 @@ namespace Blechbestand.UI
             grid.CellMouseClick += (s, e) =>
             {
                 // Linksklick irgendwo auf eine Zeile außer Menge/Einheit setzt oder entfernt das Häkchen
-                if (e.Button != MouseButtons.Left || e.RowIndex < 0 || !(KeyAt(e.RowIndex) is Guid)) return;
+                if (e.Button != MouseButtons.Left || e.RowIndex < 0) return;
+                if (KeyAt(e.RowIndex) is SpecialLine sl)
+                {
+                    // Sonderposition: nur das Häkchen entfernt sie (mit Rückfrage)
+                    if (e.ColumnIndex == ColCheck) RemoveSpecial(sl);
+                    return;
+                }
+                if (!(KeyAt(e.RowIndex) is Guid)) return;
                 if (e.ColumnIndex == ColQuantity || e.ColumnIndex == ColUnit) return;
                 ToggleRow(e.RowIndex);
             };
@@ -148,9 +170,28 @@ namespace Blechbestand.UI
             var clearNote = new ToolStripMenuItem("Bestellvermerk entfernen (ohne Mengenänderung)", null, (s, e) => ClearOpenOrder());
             menu.Items.Add(delivered);
             menu.Items.Add(clearNote);
+            // Rechtsklick auf eine Sonderposition
+            var specialMenu = new ContextMenuStrip { Font = Theme.UiFont(10f) };
+            SpecialLine menuLine = null;
+            specialMenu.Items.Add(new ToolStripMenuItem("Sonderposition bearbeiten …", null, (s, e) => { if (menuLine != null) OpenSpecialDialog(menuLine, false); })
+            {
+                Font = Theme.UiFont(10f, FontStyle.Bold),
+            });
+            specialMenu.Items.Add("Dauerhaft in den Bestand aufnehmen …", null, (s, e) => { if (menuLine != null) OpenSpecialDialog(menuLine, true); });
+            specialMenu.Items.Add(new ToolStripSeparator());
+            specialMenu.Items.Add("Sonderposition entfernen", null, (s, e) => { if (menuLine != null) RemoveSpecial(menuLine); });
             grid.CellMouseDown += (s, e) =>
             {
-                if (e.Button != MouseButtons.Right || e.RowIndex < 0 || !(KeyAt(e.RowIndex) is Guid id)) return;
+                if (e.Button != MouseButtons.Right || e.RowIndex < 0) return;
+                if (KeyAt(e.RowIndex) is SpecialLine sl)
+                {
+                    EndEditing();
+                    try { grid.CurrentCell = grid.Rows[e.RowIndex].Cells[Math.Max(0, e.ColumnIndex)]; } catch (InvalidOperationException) { return; }
+                    menuLine = sl;
+                    specialMenu.Show(grid, grid.PointToClient(Cursor.Position));
+                    return;
+                }
+                if (!(KeyAt(e.RowIndex) is Guid id)) return;
                 EndEditing();
                 try { grid.CurrentCell = grid.Rows[e.RowIndex].Cells[Math.Max(0, e.ColumnIndex)]; } catch (InvalidOperationException) { return; }
                 SheetItem it = host.Inventory.Find(id);
@@ -162,8 +203,20 @@ namespace Blechbestand.UI
                     (notes.Count == 1 && notes[0].Quantity.HasValue ? " (" + Units.Format(notes[0].Quantity.Value, notes[0].Unit) + ")" : "") + " …";
                 menu.Show(grid, grid.PointToClient(Cursor.Position));
             };
+            grid.CellDoubleClick += (s, e) =>
+            {
+                if (e.RowIndex >= 0 && KeyAt(e.RowIndex) is SpecialLine sl && e.ColumnIndex != ColQuantity && e.ColumnIndex != ColUnit)
+                    OpenSpecialDialog(sl, false);
+            };
             grid.KeyDown += (s, e) =>
             {
+                if (e.KeyCode == Keys.Delete && grid.CurrentCell != null && !grid.IsCurrentCellInEditMode
+                    && KeyAt(grid.CurrentCell.RowIndex) is SpecialLine del)
+                {
+                    RemoveSpecial(del);
+                    e.Handled = true;
+                    return;
+                }
                 if (e.KeyCode == Keys.Space && grid.CurrentCell != null && KeyAt(grid.CurrentCell.RowIndex) is Guid
                     && grid.CurrentCell.ColumnIndex != ColQuantity && grid.CurrentCell.ColumnIndex != ColUnit)
                 {
@@ -475,6 +528,13 @@ namespace Blechbestand.UI
             List<SheetItem> items = VisibleItems();
             var keys = new List<object>();
             groupCounts.Clear();
+            if (specials.Count > 0)
+            {
+                // Sonderpositionen immer oben und unabhängig von Suche und Filtern
+                keys.Add(SpecialGroup);
+                groupCounts[SpecialGroup] = specials.Count;
+                keys.AddRange(specials);
+            }
             string lastGroup = null;
             foreach (SheetItem i in items)
             {
@@ -491,7 +551,10 @@ namespace Blechbestand.UI
                 {
                     int stripe = 0;
                     for (int r = 0; r < grid.Rows.Count; r++)
+                    {
                         if (rowKeys[r] is Guid id) FillRow(grid.Rows[r], byId[id], stripe++);
+                        else if (rowKeys[r] is SpecialLine sl) FillSpecialRow(grid.Rows[r], sl);
+                    }
                     grid.Invalidate();
                 }
                 else
@@ -517,6 +580,10 @@ namespace Blechbestand.UI
                             row.DefaultCellStyle.BackColor = Theme.GroupBack;
                             row.DefaultCellStyle.SelectionBackColor = Theme.GroupBack;
                         }
+                        else if (k is SpecialLine sl)
+                        {
+                            FillSpecialRow(row, sl);
+                        }
                         else
                         {
                             FillRow(row, byId[(Guid)k], stripe++);
@@ -537,7 +604,7 @@ namespace Blechbestand.UI
                     }
                     else
                     {
-                        int first = keys.FindIndex(x => x is Guid);
+                        int first = keys.FindIndex(x => x is Guid || x is SpecialLine);
                         try { grid.CurrentCell = first >= 0 ? grid.Rows[first].Cells[ColMaterial] : null; } catch (InvalidOperationException) { }
                     }
                 }
@@ -577,6 +644,31 @@ namespace Blechbestand.UI
                 : "";
         }
 
+        private void FillSpecialRow(DataGridViewRow row, SpecialLine s)
+        {
+            SheetItem i = s.Item;
+            row.Tag = s;
+            row.DefaultCellStyle.BackColor = Color.FromArgb(0xE2, 0xF0, 0xD9);
+            row.Cells[ColCheck].Value = true;
+            row.Cells[ColMaterial].Value = i.Material;
+            row.Cells[ColThickness].Value = i.Thickness;
+            row.Cells[ColNote].Value = i.Note.Length > 0 ? i.Dimension + " · " + i.Note : i.Dimension;
+            row.Cells[ColStock].Value = "nicht im Bestand";
+            row.Cells[ColStock].Style.ForeColor = Theme.Muted;
+            row.Cells[ColMin].Value = "";
+            row.Cells[ColQuantity].Value = s.Quantity.HasValue ? Numbers.Format(s.Quantity) : "";
+            row.Cells[ColUnit].Value = s.Unit ?? Units.Sheets;
+            row.Cells[ColErp].Value = "";
+            row.Cells[ColOrder].Value = "";
+            CatalogMaterial known = MaterialCatalog.Find(i.Material);
+            string tip = "Sonderposition – nur für diese Bestellung, nicht im Bestand." +
+                         (known != null ? "\n" + known.Display : "") +
+                         (i.WeightPerSheet.HasValue ? "\nca. " + Numbers.FormatWeight(i.WeightPerSheet) + " pro Tafel" : "") +
+                         "\nDoppelklick: bearbeiten · Rechtsklick: in den Bestand aufnehmen oder entfernen";
+            foreach (DataGridViewCell c in row.Cells)
+                if (c.ColumnIndex != ColQuantity && c.ColumnIndex != ColUnit) c.ToolTipText = tip;
+        }
+
         private void UpdateSummary()
         {
             List<OrderLine> lines = CollectLines(out int missing);
@@ -611,7 +703,13 @@ namespace Blechbestand.UI
 
         private void Grid_CellValueChanged(object sender, DataGridViewCellEventArgs e)
         {
-            if (updating || e.RowIndex < 0 || !(KeyAt(e.RowIndex) is Guid id)) return;
+            if (updating || e.RowIndex < 0) return;
+            if (KeyAt(e.RowIndex) is SpecialLine sl)
+            {
+                SpecialValueChanged(e.RowIndex, e.ColumnIndex, sl);
+                return;
+            }
+            if (!(KeyAt(e.RowIndex) is Guid id)) return;
             SheetItem item = host.Inventory.Find(id);
             if (item == null) return;
             Entry entry = EntryFor(item);
@@ -684,17 +782,24 @@ namespace Blechbestand.UI
         {
             EndEditing();
             entries.Clear();
+            specials.Clear();
             rowKeys = new List<object>();
             Rebuild();
         }
 
-        /// <summary>Hakt eine Position an (aus dem Reiter „Bestand“) und zeigt sie.</summary>
-        public void Select(Guid id)
+        /// <summary>Hakt eine Position an (aus dem Reiter „Bestand“) und zeigt sie, auf Wunsch mit Menge und Einheit.</summary>
+        public void Select(Guid id, decimal? quantity = null, string unit = null)
         {
             SheetItem item = host.Inventory.Find(id);
             if (item == null) return;
             Entry e = EntryFor(item);
-            if (!e.Selected)
+            if (quantity.HasValue && quantity.Value > 0)
+            {
+                e.Selected = true;
+                e.Unit = unit ?? e.Unit ?? item.PreferredUnit;
+                e.Quantity = quantity;
+            }
+            else if (!e.Selected)
             {
                 e.Selected = true;
                 e.Unit = e.Unit ?? item.PreferredUnit;
@@ -728,6 +833,17 @@ namespace Blechbestand.UI
                     Quantity = e.Quantity.Value,
                     Unit = e.Unit ?? i.PreferredUnit,
                     SheetsPerPackage = i.PackageSheets(host.Inventory.PackageWeight),
+                });
+            }
+            foreach (SpecialLine s in specials)
+            {
+                if (!s.Quantity.HasValue || s.Quantity.Value <= 0) { missingQuantity++; continue; }
+                lines.Add(new OrderLine
+                {
+                    Item = s.Item,
+                    Quantity = s.Quantity.Value,
+                    Unit = s.Unit ?? Units.Sheets,
+                    SheetsPerPackage = s.Item.PackageSheets(host.Inventory.PackageWeight),
                 });
             }
             return lines;
@@ -848,6 +964,7 @@ namespace Blechbestand.UI
         private void ShowResult(string text, List<OrderLine> lines)
         {
             exportedLines = lines;
+            if (lines.Any(IsSpecial)) text += "\nSonderpositionen (nicht im Bestand) werden nicht vermerkt.";
             resultLabel.Text = text;
             resultPanel.Visible = true;
         }
@@ -864,8 +981,8 @@ namespace Blechbestand.UI
             List<OrderLine> lines = exportedLines;
             if (lines == null) { HideResult(); return; }
             DateTime today = DateTime.Now;
-            var notes = lines.ToDictionary(l => l.Item.Id, l => OrderMail.OrderNote(l, today));
-            bool saved = host.Modify((inv, log) =>
+            var notes = lines.Where(l => !IsSpecial(l)).ToDictionary(l => l.Item.Id, l => OrderMail.OrderNote(l, today));
+            bool saved = notes.Count == 0 || host.Modify((inv, log) =>
             {
                 foreach (KeyValuePair<Guid, string> n in notes)
                 {
@@ -879,8 +996,101 @@ namespace Blechbestand.UI
             if (!saved) return; // Fehlermeldung kam schon; Auswahl und Rückmeldung bleiben
             HideResult();
             foreach (OrderLine l in lines) entries.Remove(l.Item.Id);
+            specials.RemoveAll(sp => lines.Any(l => l.Item.Id == sp.Item.Id));
             rowKeys = new List<object>();
             Rebuild();
+        }
+
+        // =====================================================================
+        // Sonderpositionen
+        // =====================================================================
+
+        private bool IsSpecial(OrderLine line) => specials.Any(s => s.Item.Id == line.Item.Id);
+
+        private void SpecialValueChanged(int rowIndex, int column, SpecialLine sl)
+        {
+            DataGridViewRow row = grid.Rows[rowIndex];
+            if (column == ColQuantity) sl.Quantity = Numbers.ParseQuantityOrNull(Convert.ToString(row.Cells[ColQuantity].Value));
+            else if (column == ColUnit) sl.Unit = Convert.ToString(row.Cells[ColUnit].Value);
+            updating = true;
+            try { FillSpecialRow(row, sl); }
+            finally { updating = false; }
+            UpdateSummary();
+        }
+
+        private void RemoveSpecial(SpecialLine sl)
+        {
+            EndEditing();
+            if (MessageBox.Show(FindForm(), "Sonderposition „" + sl.Item.DisplayName + "“ aus der Bestellung entfernen?", "Sonderposition",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+            specials.Remove(sl);
+            rowKeys = new List<object>();
+            Rebuild();
+        }
+
+        /// <summary>Neue Sonderposition (line = null) oder bestehende bearbeiten bzw. in den Bestand aufnehmen.</summary>
+        private void OpenSpecialDialog(SpecialLine line, bool toStock)
+        {
+            EndEditing();
+            SheetItem result;
+            decimal quantity;
+            string unit;
+            bool addToStock;
+            using (var dlg = new SpecialOrderDialog(host.Inventory, line?.Item, line?.Quantity, line?.Unit ?? Units.Sheets, toStock))
+            {
+                if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+                result = dlg.Item;
+                quantity = dlg.Quantity;
+                unit = dlg.Unit;
+                addToStock = dlg.AddToStock;
+            }
+
+            // Gibt es das Blech schon im Bestand? Dann dort anhaken statt doppelt führen.
+            SheetItem same = host.Inventory.FindSame(result);
+            if (same != null)
+            {
+                if (line != null) specials.Remove(line);
+                MessageBox.Show(FindForm(),
+                    "„" + same.DisplayName + "“ (" + same.Dimension + ") gibt es schon im Bestand, Gruppe „" + same.Group + "“.\n\n" +
+                    "Die Position ist dort mit " + Units.Format(quantity, unit) + " angehakt.",
+                    "Sonderposition", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Select(same.Id, quantity, unit);
+                return;
+            }
+
+            if (addToStock)
+            {
+                result.ChangedAt = DateTime.Now;
+                result.ChangedBy = host.Store.UserName;
+                if (!host.Modify((inv, log) =>
+                    {
+                        result.Group = inv.EnsureGroup(result.Group);
+                        inv.Items.Add(result);
+                        log.Add(result.DisplayName, "Neu angelegt", "", "aus Sonderposition der Bestellung");
+                    }))
+                    return;
+                if (line != null) specials.Remove(line);
+                Select(result.Id, quantity, unit);
+                return;
+            }
+
+            if (line == null)
+            {
+                line = new SpecialLine();
+                specials.Add(line);
+            }
+            line.Item = result;
+            line.Quantity = quantity;
+            line.Unit = unit;
+            rowKeys = new List<object>();
+            Rebuild();
+            int idx = rowKeys.IndexOf(line);
+            if (idx >= 0)
+            {
+                try { grid.CurrentCell = grid.Rows[idx].Cells[ColQuantity]; } catch (InvalidOperationException) { }
+                grid.Focus();
+            }
         }
     }
 }

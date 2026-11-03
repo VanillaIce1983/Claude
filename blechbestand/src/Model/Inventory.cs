@@ -22,6 +22,9 @@ namespace Blechbestand.Model
 
         public SheetItem Find(Guid id) => Items.FirstOrDefault(i => i.Id == id);
 
+        /// <summary>Eine Position mit gleichem Werkstoff, gleicher Dicke, gleichem Format und gleicher Bemerkung.</summary>
+        public SheetItem FindSame(SheetItem probe) => Items.FirstOrDefault(i => i.Id != probe.Id && i.SameSheetAs(probe));
+
         public int GroupIndex(string group)
         {
             int i = Groups.FindIndex(g => string.Equals(g, group, StringComparison.CurrentCultureIgnoreCase));

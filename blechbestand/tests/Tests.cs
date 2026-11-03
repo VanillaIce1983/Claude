@@ -38,6 +38,7 @@ namespace Blechbestand.Tests
             Run("Bestell-Mail", Mail_);
             Run("Lieferung buchen (Bestellvermerke)", Delivery_);
             Run("Bestellhistorie", History_);
+            Run("Werkstoffliste und Sonderpositionen", Catalog_);
             Console.WriteLine();
             Console.WriteLine(failures == 0 ? $"Alle {checks} Prüfungen bestanden." : $"{failures} von {checks} Prüfungen fehlgeschlagen.");
             return failures == 0 ? 0 : 1;
@@ -447,6 +448,73 @@ namespace Blechbestand.Tests
             {
                 Directory.Delete(dir, true);
             }
+        }
+
+        private static void Catalog_()
+        {
+            Check(MaterialCatalog.All.Count >= 30, "mindestens 30 gängige Werkstoffe");
+            Equal(MaterialCatalog.All.Count, MaterialCatalog.All.Select(m => m.Material.ToLowerInvariant()).Distinct().Count(), "Werkstoffnummern eindeutig");
+            Check(MaterialCatalog.All.All(m => m.Density > 0 && m.Group.Length > 0 && m.Material.Length > 0), "Dichte, Gruppe und Nummer überall gesetzt");
+
+            // Alle Werkstoffe der bisherigen Excel-Liste sind in der Werkstoffliste
+            Inventory inv = SeedData.Create();
+            foreach (string m in inv.Items.Select(i => i.Material).Distinct())
+                Check(MaterialCatalog.Find(m) != null, "Werkstoff aus der Liste bekannt: " + m);
+            // … mit denselben Dichten wie bisher (Alu 2,75, sonst 8,0), damit „Berechnen“ gleich rechnet
+            foreach (SheetItem i in inv.Items)
+            {
+                bool alu = (i.Group + " " + i.Material).ToLowerInvariant().Contains("alu") || i.Material.StartsWith("3.3") || i.Material.StartsWith("EN AW");
+                Equal(alu ? 2.75m : 8.0m, Numbers.DefaultDensity(i.Group, i.Material), "Dichte unverändert: " + i.DisplayName);
+            }
+
+            Equal("1.0038", MaterialCatalog.Find("1.0038")?.Material, "nach Nummer");
+            Equal("1.0038", MaterialCatalog.Find("S235JR")?.Material, "nach Kurzname");
+            Equal("1.0038", MaterialCatalog.Find("s235 jr")?.Material, "Schreibweise egal");
+            Equal("1.4301", MaterialCatalog.Find("V2A")?.Material, "nach weiterem Namen V2A");
+            Equal("1.4404", MaterialCatalog.Find("v4a")?.Material, "nach weiterem Namen V4A");
+            Equal("EN AW-5754", MaterialCatalog.Find("ENAW5754")?.Material, "ohne Bindestrich und Leerzeichen");
+            Equal("1.8965", MaterialCatalog.Find("Corten")?.Material, "Corten");
+            Equal("CW508L", MaterialCatalog.Find("Messing")?.Material, "Messing");
+            Check(MaterialCatalog.Find("Holz") == null && MaterialCatalog.Find("") == null, "Unbekanntes → null");
+
+            CatalogMaterial s355 = MaterialCatalog.Find("1.0976");
+            Equal("1.0976 – S355MC, thermomechanisch gewalzt, zum Kaltumformen", s355.Display, "Listeneintrag");
+            Equal("1.0976", MaterialCatalog.Normalize(s355.Display), "Listeneintrag → Nummer");
+            Equal("Hardox 450", MaterialCatalog.Normalize(MaterialCatalog.Find("Hardox 450").Display), "Listeneintrag ohne Nummer");
+            Equal("Sonderwerkstoff X", MaterialCatalog.Normalize(" Sonderwerkstoff X "), "freier Text bleibt");
+            Equal(MaterialCatalog.Find("1.0976"), MaterialCatalog.Find(s355.Display), "Listeneintrag wird erkannt");
+
+            Equal(8.9m, Numbers.DefaultDensity("", "CW004A"), "Dichte Kupfer");
+            Equal(8.5m, Numbers.DefaultDensity("", "CuZn37"), "Dichte Messing");
+            Equal(2.75m, Numbers.DefaultDensity("", "EN AW-5083"), "Dichte Alu aus der Liste");
+            Equal(2.75m, Numbers.DefaultDensity("Aluminium", "Sonderlegierung"), "unbekannt: Gruppe Alu → 2,75");
+            Equal(8.0m, Numbers.DefaultDensity("", "Sonderstahl"), "unbekannt → 8,0");
+            Equal(MaterialCatalog.Stainless, MaterialCatalog.Find("1.4404").Group, "Gruppe Edelstahl");
+            Equal("Stahlblech DC01/DD11", MaterialCatalog.Find("1.0330").Group, "Gruppe wie in der Excel-Liste");
+
+            Equal("1,5", SheetItem.CleanThickness(" 1.5 mm"), "Dicke bereinigt");
+            Equal("2500x1250", SheetItem.CleanDimension("2500 × 1250"), "Dimension bereinigt");
+            Check(SheetItem.SameMaterial("S235JR", "1.0038"), "S235JR = 1.0038");
+            Check(!SheetItem.SameMaterial("1.4301", "1.4404"), "1.4301 ≠ 1.4404");
+
+            // Sonderposition, die es schon im Bestand gibt
+            SheetItem probe = new SheetItem { Material = "V2A", Thickness = "2.0".Replace(".0", ""), Dimension = "3000 x 1500", Note = "gebürstet" };
+            Equal("0012771", inv.FindSame(probe)?.ErpNumber, "gleiches Blech im Bestand gefunden (V2A 2 mm gebürstet)");
+            probe.Note = "";
+            Equal("0004991", inv.FindSame(probe)?.ErpNumber, "ohne Bemerkung das andere Blech");
+            probe.Dimension = "2500x1250";
+            Check(inv.FindSame(probe) == null, "anderes Format → nicht im Bestand");
+            Check(inv.FindSame(new SheetItem { Material = "1.0038", Thickness = "3", Dimension = "3000x1500" }) == null, "S235JR nicht im Bestand");
+
+            // Sonderposition in der Mail: Gewicht aus der Werkstoffliste, Paket mit Tafelzahl
+            var special = new SheetItem { Material = "1.0038", Thickness = "5", Dimension = "3000x1500" };
+            special.WeightPerSheet = Numbers.SheetWeight(special.Dimension, special.Thickness, Numbers.DefaultDensity(special.Group, special.Material));
+            Equal(180m, special.WeightPerSheet, "S235JR 5 mm 3000x1500 = 180 kg");
+            var line = new OrderLine { Item = special, Quantity = 1, Unit = Units.Packages, SheetsPerPackage = special.PackageSheets(2500m) };
+            Equal("1 Paket (13 Tafeln)", line.QuantityDetail, "Sonderposition als Paket");
+            Equal(2340m, line.Weight, "Gewicht Sonderposition");
+            string text = OrderMail.BuildText(new List<OrderLine> { line }, "", "");
+            Check(text.Contains("1 Paket (13 Tafeln) 1.0038 5 mm 3000x1500") && !text.Contains("()"), "Textzeile ohne leere Gruppe: " + text);
         }
 
         private static void Mail_()

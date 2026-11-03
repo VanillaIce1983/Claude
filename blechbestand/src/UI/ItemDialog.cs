@@ -31,6 +31,8 @@ namespace Blechbestand.UI
         private readonly ErrorProvider errors;
         private bool weightTouched;
         private bool settingWeight;
+        private bool groupTouched;
+        private bool settingGroup;
 
         public SheetItem Result { get; private set; }
 
@@ -57,12 +59,14 @@ namespace Blechbestand.UI
             int w = Theme.S(260);
             group = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = w };
             group.Items.AddRange(inventory.Groups.Cast<object>().ToArray());
+            group.Items.AddRange(MaterialCatalog.All.Select(m => m.Group)
+                .Where(g => !inventory.Groups.Contains(g, StringComparer.CurrentCultureIgnoreCase))
+                .Distinct().Cast<object>().ToArray());
             material = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = w };
-            material.Items.AddRange(inventory.Items.Select(i => i.Material).Where(m => m.Length > 0)
-                .Distinct(StringComparer.CurrentCultureIgnoreCase).OrderBy(m => m).Cast<object>().ToArray());
+            MaterialPicker.Fill(material, inventory);
             thickness = new TextBox { Width = Theme.S(120) };
             dimension = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = Theme.S(160) };
-            dimension.Items.AddRange(new object[] { "3000x1500", "2500x1250", "2000x1000", "4000x2000", "4000x1500" });
+            dimension.Items.AddRange(MaterialCatalog.Dimensions.Cast<object>().ToArray());
             note = new TextBox { Width = w };
             erp = new TextBox { Width = Theme.S(160) };
             packages = new TextBox { Width = Theme.S(90), TextAlign = HorizontalAlignment.Right };
@@ -73,23 +77,21 @@ namespace Blechbestand.UI
             density = new TextBox { Width = Theme.S(60), TextAlign = HorizontalAlignment.Right };
             openOrder = new TextBox { Width = w };
 
-            var table = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, Dock = DockStyle.Fill };
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            var table = DialogLayout.Table();
 
-            Section(table, "Material");
-            Row(table, "Materialgruppe", group, "z. B. Edelstahl – neuer Name legt eine neue Gruppe an");
-            Row(table, "Werkstoff", material, "z. B. 1.4301, 3.3535, EN AW-5754");
-            Row(table, "Dicke T [mm]", thickness, "z. B. 2 oder 1,5 – bei Riffelblech auch 1,5-2");
-            Row(table, "Dimension [mm]", dimension, null);
-            Row(table, "Bemerkung", note, "z. B. gebürstet, Folie einseitig");
-            Row(table, "Eulandanummer", erp, null);
+            DialogLayout.Section(table, "Material");
+            DialogLayout.Row(table, "Materialgruppe", group, "z. B. Edelstahl – neuer Name legt eine neue Gruppe an");
+            Label materialHint = DialogLayout.Row(table, "Werkstoff", material, MaterialPicker.DefaultHint);
+            DialogLayout.Row(table, "Dicke T [mm]", thickness, "z. B. 2 oder 1,5 – bei Riffelblech auch 1,5-2");
+            DialogLayout.Row(table, "Dimension [mm]", dimension, null);
+            DialogLayout.Row(table, "Bemerkung", note, "z. B. gebürstet, Folie einseitig");
+            DialogLayout.Row(table, "Eulandanummer", erp, null);
 
-            Section(table, "Bestand und Mindestbestand");
-            Row(table, "Pakete", Pair(packages, "Mindestbestand", minPackages), null);
-            Row(table, "Tafeln", Pair(sheets, "Mindestbestand", minSheets), "Rot = unter Mindestbestand, gelb = genau erreicht. Leer = keine Ampel.");
+            DialogLayout.Section(table, "Bestand und Mindestbestand");
+            DialogLayout.Row(table, "Pakete", DialogLayout.Pair(packages, "Mindestbestand", minPackages), null);
+            DialogLayout.Row(table, "Tafeln", DialogLayout.Pair(sheets, "Mindestbestand", minSheets), "Rot = unter Mindestbestand, gelb = genau erreicht. Leer = keine Ampel.");
 
-            Section(table, "Gewicht");
+            DialogLayout.Section(table, "Gewicht");
             var calc = Theme.SecondaryButton("Berechnen");
             calc.Click += (s, e) => CalculateWeight(true);
             var weightRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
@@ -98,7 +100,7 @@ namespace Blechbestand.UI
             weightRow.Controls.Add(density);
             weightRow.Controls.Add(Theme.FlowLabel("kg/dm³", weight.PreferredHeight));
             weightRow.Controls.Add(calc);
-            Row(table, "Gewicht pro Tafel", weightRow, "Wird aus Dimension, Dicke und Dichte berechnet (Stahl/Edelstahl 8,0, Alu 2,75).");
+            DialogLayout.Row(table, "Gewicht pro Tafel", weightRow, "Wird aus Dimension, Dicke und Dichte berechnet. Die Dichte kommt aus der Werkstoffliste (Stahl/Edelstahl 8,0, Alu 2,75, Kupfer 8,9, Messing 8,5).");
 
             packageSheets = new TextBox { Width = Theme.S(90), TextAlign = HorizontalAlignment.Right, Margin = new Padding(Theme.S(3), Theme.S(3), Theme.S(20), 0) };
             packageHint = new Label
@@ -112,10 +114,10 @@ namespace Blechbestand.UI
             var packageStack = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             packageStack.Controls.Add(packageSheets);
             packageStack.Controls.Add(packageHint);
-            Row(table, "Tafeln pro Paket", packageStack, null);
+            DialogLayout.Row(table, "Tafeln pro Paket", packageStack, null);
 
-            Section(table, "Bestellung");
-            Row(table, "Offene Bestellung", openOrder, "Wird beim Export im Reiter „Bestellung“ automatisch gesetzt.");
+            DialogLayout.Section(table, "Bestellung");
+            DialogLayout.Row(table, "Offene Bestellung", openOrder, "Wird beim Export im Reiter „Bestellung“ automatisch gesetzt.");
 
             var ok = Theme.PrimaryButton(isNew ? "Anlegen" : "Speichern");
             ok.MinimumSize = new Size(Theme.S(110), 0);
@@ -150,6 +152,15 @@ namespace Blechbestand.UI
             weightTouched = item.WeightPerSheet.HasValue && !isNew;
 
             weight.TextChanged += (s, e) => { if (!settingWeight) weightTouched = weight.Text.Trim().Length > 0; };
+            group.TextChanged += (s, e) => { if (!settingGroup) groupTouched = true; };
+            // Werkstoff aus der Liste gewählt: bei neuem Material die passende Gruppe vorschlagen
+            MaterialPicker.Attach(material, materialHint, m =>
+            {
+                if (!isNew || groupTouched) return;
+                settingGroup = true;
+                group.Text = inventory.Groups.FirstOrDefault(g => string.Equals(g, m.Group, StringComparison.CurrentCultureIgnoreCase)) ?? m.Group;
+                settingGroup = false;
+            });
             EventHandler auto = (s, e) => CalculateWeight(false);
             thickness.TextChanged += auto;
             dimension.TextChanged += auto;
@@ -198,62 +209,6 @@ namespace Blechbestand.UI
             base.OnShown(e);
             if (isNew && original.Group.Length > 0 && original.Material.Length > 0) thickness.Focus();
             else if (isNew) group.Focus();
-        }
-
-        private static void Section(TableLayoutPanel t, string title)
-        {
-            var l = new Label
-            {
-                Text = title,
-                AutoSize = true,
-                Font = Theme.UiFont(10.5f, FontStyle.Bold),
-                ForeColor = Theme.Accent,
-                Margin = new Padding(0, t.Controls.Count == 0 ? 0 : Theme.S(12), 0, Theme.S(4)),
-            };
-            t.Controls.Add(l);
-            t.SetColumnSpan(l, 2);
-        }
-
-        private static void Row(TableLayoutPanel t, string label, Control input, string hint)
-        {
-            var l = new Label
-            {
-                Text = label,
-                AutoSize = true,
-                Anchor = AnchorStyles.Left | AnchorStyles.Top,
-                Margin = new Padding(0, Theme.S(7), Theme.S(12), 0),
-            };
-            t.Controls.Add(l);
-            if (hint == null)
-            {
-                input.Margin = new Padding(Theme.S(3), Theme.S(3), Theme.S(20), Theme.S(3));
-                t.Controls.Add(input);
-                return;
-            }
-            var stack = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-            input.Margin = new Padding(Theme.S(3), Theme.S(3), Theme.S(20), 0);
-            stack.Controls.Add(input);
-            stack.Controls.Add(new Label
-            {
-                Text = hint,
-                AutoSize = true,
-                ForeColor = Theme.Muted,
-                Font = Theme.UiFont(8.5f),
-                MaximumSize = new Size(Theme.S(430), 0),
-                Margin = new Padding(Theme.S(3), Theme.S(1), Theme.S(3), Theme.S(4)),
-            });
-            t.Controls.Add(stack);
-        }
-
-        private static Control Pair(TextBox first, string secondLabel, TextBox second)
-        {
-            var p = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-            first.Margin = new Padding(Theme.S(3));
-            p.Controls.Add(first);
-            p.Controls.Add(Theme.FlowLabel(secondLabel, first.PreferredHeight));
-            second.Margin = new Padding(Theme.S(3));
-            p.Controls.Add(second);
-            return p;
         }
 
         private void CalculateWeight(bool force)
@@ -305,9 +260,9 @@ namespace Blechbestand.UI
 
             SheetItem r = original.Clone();
             r.Group = group.Text.Trim();
-            r.Material = material.Text.Trim();
-            r.Thickness = thickness.Text.Trim().Replace('.', ',').Replace(" mm", "").Replace("mm", "");
-            r.Dimension = dimension.Text.Trim().Replace(" ", "").Replace("×", "x").Replace("X", "x");
+            r.Material = MaterialCatalog.Normalize(material.Text);
+            r.Thickness = SheetItem.CleanThickness(thickness.Text);
+            r.Dimension = SheetItem.CleanDimension(dimension.Text);
             r.Note = note.Text.Trim();
             r.ErpNumber = erp.Text.Trim();
             r.Packages = p;

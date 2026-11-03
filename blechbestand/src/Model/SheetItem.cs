@@ -143,6 +143,32 @@ namespace Blechbestand.Model
 
         public SheetItem Clone() => (SheetItem)MemberwiseClone();
 
+        /// <summary>„1.5 mm“ → „1,5“.</summary>
+        public static string CleanThickness(string text) =>
+            (text ?? "").Trim().Replace('.', ',').Replace(" mm", "").Replace("mm", "").Trim();
+
+        /// <summary>„3000 × 1500“ → „3000x1500“.</summary>
+        public static string CleanDimension(string text) =>
+            (text ?? "").Trim().Replace(" ", "").Replace("×", "x").Replace("X", "x");
+
+        /// <summary>„1.0038“, „1.0038 – S235JR, …“ und „S235JR“ sind derselbe Werkstoff.</summary>
+        public static bool SameMaterial(string a, string b)
+        {
+            a = (a ?? "").Trim();
+            b = (b ?? "").Trim();
+            if (string.Equals(a, b, StringComparison.CurrentCultureIgnoreCase)) return true;
+            CatalogMaterial ca = MaterialCatalog.Find(a);
+            return ca != null && ReferenceEquals(ca, MaterialCatalog.Find(b));
+        }
+
+        /// <summary>Gleicher Werkstoff, gleiche Dicke, gleiches Format und gleiche Bemerkung (Gruppe egal).</summary>
+        public bool SameSheetAs(SheetItem other) =>
+            other != null
+            && SameMaterial(Material, other.Material)
+            && string.Equals(CleanThickness(Thickness), CleanThickness(other.Thickness), StringComparison.CurrentCultureIgnoreCase)
+            && string.Equals(CleanDimension(Dimension), CleanDimension(other.Dimension), StringComparison.CurrentCultureIgnoreCase)
+            && string.Equals((Note ?? "").Trim(), (other.Note ?? "").Trim(), StringComparison.CurrentCultureIgnoreCase);
+
         /// <summary>Ersetzt null-Texte (z. B. aus älteren Dateien) durch leere Texte.</summary>
         public void Normalize()
         {

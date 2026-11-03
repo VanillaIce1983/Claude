@@ -124,7 +124,7 @@ namespace Blechbestand.Model
                 if (!string.IsNullOrWhiteSpace(i.Thickness)) parts.Add(i.Thickness + " mm");
                 if (!string.IsNullOrWhiteSpace(i.Dimension)) parts.Add(i.Dimension);
                 if (!string.IsNullOrWhiteSpace(i.Note)) parts.Add(i.Note);
-                string line = string.Join(" ", parts) + " (" + i.Group + ")";
+                string line = string.Join(" ", parts) + (string.IsNullOrWhiteSpace(i.Group) ? "" : " (" + i.Group + ")");
                 if (!string.IsNullOrWhiteSpace(i.ErpNumber)) line += ", Eulanda-Nr. " + i.ErpNumber;
                 sb.AppendLine(line);
                 pos++;

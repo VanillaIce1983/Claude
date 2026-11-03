@@ -23,7 +23,7 @@ Beim allerersten Start legt das Programm die Bestandsdatei an und füllt sie mit
 | Menge eintragen | Zelle in **Pakete** oder **Tafeln** anklicken, Zahl tippen, **Enter**. Leer oder „-“ = keine. Auch `1,5` geht. |
 | Schnell ±1 | Zelle markieren, dann **−1** / **+1** unten rechts (oder die Tasten − und +) |
 | Ampel | Rot = unter Mindestbestand, gelb = Mindestbestand genau erreicht. Die Mindestbestände stehen in eigenen Spalten. |
-| Neues Material | **+ Neues Material** (Strg+N). Gruppe, Werkstoff, Dicke, Dimension, Eulandanummer, Mindestbestand. Das Gewicht pro Tafel wird aus Format, Dicke und Dichte berechnet. Ein neuer Gruppenname legt eine neue Gruppe an. |
+| Neues Material | **+ Neues Material** (Strg+N). Gruppe, Werkstoff, Dicke, Dimension, Eulandanummer, Mindestbestand. Den Werkstoff wählst du aus der eingebauten [Werkstoffliste](#werkstoffliste) oder trägst ihn frei ein, die passende Gruppe wird vorgeschlagen. Das Gewicht pro Tafel wird aus Format, Dicke und Dichte berechnet. Ein neuer Gruppenname legt eine neue Gruppe an. |
 | Bearbeiten / Löschen | Knöpfe oben, Doppelklick oder Rechtsklick auf die Zeile |
 | Rechtsklick auf eine Gruppe | Umbenennen, nach oben oder unten verschieben |
 | Filter | Suche, Materialgruppe, Dicke, „Nur knappe Bestände“ (wie die Datenschnitte in der Excel-Liste) |
@@ -37,11 +37,28 @@ Beim allerersten Start legt das Programm die Bestandsdatei an und füllt sie mit
 
 1. Positionen anhaken (Klick auf die Zeile oder Leertaste). Die Bestellmenge wird vorgeschlagen: bei Paketen 1 Paket, bei Tafeln bis zum doppelten Mindestbestand. Der Vorschlag lässt sich überschreiben, die Einheit (Tafeln/Pakete) ebenso.
 2. Oder **Knappe Positionen vorschlagen**: Damit wird alles Rote und Gelbe angehakt, was noch nicht bestellt ist.
-3. Rechts Empfänger, Betreff und Text prüfen. Empfänger und Texte merkt sich das Programm.
-4. **In Outlook öffnen**: Eine neue E-Mail erscheint mit der Bestellliste als Tabelle (Werkstoff, Dicke, Format, Menge, Eulanda-Nr., Gewicht). Pakete stehen mit Tafelzahl und Gewicht drin, z. B. „1 Paket (17 Tafeln) · 2.448 kg“. Deine Outlook-Signatur bleibt darunter erhalten. Gesendet wird erst mit „Senden“ in Outlook.
-5. Über der Tabelle erscheint ein grüner Balken. Erst mit **Als bestellt vermerken** steht an den Positionen „10 Tafeln am 02.11.2026“ (Spalte **Offene Bestellung**) und sie verschwinden aus der Auswahl. **Nicht vermerken** lässt die Auswahl stehen, z. B. wenn keine E-Mail aufgegangen ist.
+3. Sonderfall, der nicht im Bestand steht: **+ Sonderposition**. Werkstoff aus der [Werkstoffliste](#werkstoffliste) wählen, Dicke, Format und Menge eintragen. Die Position steht oben unter „Sonderpositionen (nicht im Bestand)“ und kommt mit Gewicht in die Bestell-Mail. Mit dem Haken **Dauerhaft in den Bestand aufnehmen** wird das Material stattdessen gleich im Reiter „Bestand“ angelegt (ohne Mindestbestand) und läuft danach wie jede andere Position: Bestellvermerk, Lieferung buchen, Historie. Gibt es das Blech schon im Bestand, wird dort angehakt. Doppelklick bearbeitet eine Sonderposition, Rechtsklick nimmt sie in den Bestand auf oder entfernt sie.
+4. Rechts Empfänger, Betreff und Text prüfen. Empfänger und Texte merkt sich das Programm.
+5. **In Outlook öffnen**: Eine neue E-Mail erscheint mit der Bestellliste als Tabelle (Werkstoff, Dicke, Format, Menge, Eulanda-Nr., Gewicht). Pakete stehen mit Tafelzahl und Gewicht drin, z. B. „1 Paket (17 Tafeln) · 2.448 kg“. Deine Outlook-Signatur bleibt darunter erhalten. Gesendet wird erst mit „Senden“ in Outlook.
+6. Über der Tabelle erscheint ein grüner Balken. Erst mit **Als bestellt vermerken** steht an den Positionen „10 Tafeln am 02.11.2026“ (Spalte **Offene Bestellung**) und sie verschwinden aus der Auswahl. Sonderpositionen ohne Bestand werden dabei nur aus der Auswahl genommen. **Nicht vermerken** lässt die Auswahl stehen, z. B. wenn keine E-Mail aufgegangen ist.
 
 **Outlook:** Direkt angesteuert wird das klassische Outlook (Microsoft 365 / Office); das Mailfenster wird dabei nach vorne geholt. Das „neue Outlook für Windows“ hat dafür keine Schnittstelle. Dann öffnet das Programm eine neue E-Mail mit Empfänger und Betreff im Standard-Mailprogramm (z. B. im neuen Outlook) und legt die Bestellliste in die Zwischenablage: in die E-Mail klicken und **Strg+V** drücken, die Tabelle bleibt dabei erhalten. **In Zwischenablage kopieren** funktioniert mit jedem Mailprogramm.
+
+## Werkstoffliste
+
+Beim Anlegen von Material und bei Sonderpositionen stehen die gängigen Laser-Werkstoffe zur Auswahl. Gewählt wird die Werkstoffnummer, darunter steht, was sie bedeutet, z. B. „1.0976 → S355MC, thermomechanisch gewalzt“. Kurznamen wie S235JR, V2A, V4A, Corten oder Messing werden ebenfalls erkannt. In den Bestand kommt ein Werkstoff erst, wenn du ihn dort anlegst.
+
+| Gruppe | Werkstoffe |
+| --- | --- |
+| Stahlblech DC01/DD11 | 1.0330 DC01, 1.0338 DC04, 1.0332 DD11, 1.0335 DD13 |
+| Baustahl | 1.0038 S235JR, 1.0044 S275JR, 1.0577 S355J2+N, 1.0976 S355MC, 1.0980 S420MC, 1.8965 S355J2W (Corten) |
+| Hochfest / Verschleißfest | 1.8974 S700MC, 1.8928 S690QL, Hardox 400, Hardox 450, Hardox 500 |
+| Verzinktes Blech | 1.0226 DX51D+Z, 1.0242 S250GD+Z, DC01+ZE |
+| Edelstahl | 1.4301, 1.4307, 1.4404, 1.4571, 1.4016, 1.4509, 1.4003, 1.4828 |
+| Aluminium | EN AW-1050A, EN AW-3003, EN AW-5005A, EN AW-5754, 3.3535, EN AW-5083, EN AW-6082 |
+| Kupfer / Messing | CW004A Cu-ETP, CW508L CuZn37 |
+
+Die Dichte für das Tafelgewicht kommt aus der Liste und rechnet wie die bisherige Excel-Liste: Stahl und Edelstahl 8,0, Aluminium 2,75, Kupfer 8,9, Messing 8,5 kg/dm³. Andere Werkstoffe lassen sich jederzeit frei eintragen.
 
 ## Paketgewicht
 

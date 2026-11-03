@@ -71,9 +71,14 @@ namespace Blechbestand.Model
             return Math.Round(l * w * t.Value / 1000000m * density, 2);
         }
 
-        /// <summary>Übliche Dichte zur Gewichtsberechnung: Aluminium 2,75, sonst 8,0 kg/dm³ (wie in der bisherigen Liste).</summary>
+        /// <summary>
+        /// Übliche Dichte zur Gewichtsberechnung: aus der Werkstoffliste, sonst Aluminium 2,75 und alles andere 8,0 kg/dm³
+        /// (wie in der bisherigen Excel-Liste).
+        /// </summary>
         public static decimal DefaultDensity(string group, string material)
         {
+            CatalogMaterial known = MaterialCatalog.Find(material);
+            if (known != null) return known.Density;
             string s = ((group ?? "") + " " + (material ?? "")).ToLowerInvariant();
             if (s.Contains("alu") || s.Contains("en aw") || s.Contains("3.3") || s.Contains("almg")) return 2.75m;
             return 8.0m;
