@@ -10,9 +10,11 @@ Windows-Programm für den Blechbestand im Lager. Es ersetzt die Excel-Liste „B
 
 ## Starten
 
-`Blechbestand.exe` doppelklicken, eine Installation ist nicht nötig. Das Programm braucht nur das .NET Framework 4.8, und das ist in Windows 10 und 11 schon enthalten.
+Die fertige Version gibt es unter [Releases](https://github.com/VanillaIce1983/Claude/releases) als `Blechbestand-<Version>.zip`: entpacken, z. B. nach `C:\Blechbestand`, und `Blechbestand.exe` doppelklicken. Eine Installation ist nicht nötig. Das Programm braucht nur das .NET Framework 4.8, und das ist in Windows 10 und 11 schon enthalten.
 
-Beim ersten Start meldet Windows SmartScreen eventuell „Der Computer wurde durch Windows geschützt“, weil die Datei nicht signiert ist. Dann auf **Weitere Informationen → Trotzdem ausführen** klicken.
+Beim ersten Start meldet Windows SmartScreen eventuell „Der Computer wurde durch Windows geschützt“, weil die Datei nicht signiert ist. Dann auf **Weitere Informationen → Trotzdem ausführen** klicken. Meldet ein Virenschutz wie G DATA einen Fehlalarm, trägt die IT den Programmordner als Ausnahme ein. Die Prüfsumme der Exe steht beim Release (`SHA256.txt`).
+
+Zum Aktualisieren nur die `Blechbestand.exe` ersetzen. Bestand, Historie und Einstellungen bleiben erhalten.
 
 Beim allerersten Start legt das Programm die Bestandsdatei an und füllt sie mit den Daten aus der Excel-Liste (Stand 02.11.2026, 35 Positionen).
 
@@ -67,7 +69,7 @@ Beim Lieferanten wiegt ein Paket höchstens **2.500 kg**, die Tafelzahl wird abg
 - Damit haben Pakete ein Gewicht: in der Bestell-Mail („1 Paket (17 Tafeln)“), in der Summe im Reiter „Bestellung“ und in der Bestellhistorie. Im Reiter „Bestand“ zeigt der Tooltip über der Paket-Zelle „1 Paket = 17 Tafeln ≈ 2.448 kg“.
 - Das Paketgewicht steht unter **Einstellungen** und gilt für alle Rechner (es wird in der Bestandsdatei gespeichert). 0 = keine Paketgewichte.
 - Wird ein Material anders gepackt: **Bearbeiten → Tafeln pro Paket** eintragen. Leer = automatisch.
-- In der Historie wird die Tafelzahl beim Buchen festgehalten, spätere Änderungen am Paketgewicht verändern alte Einträge nicht. Pakete, die vor Version 1.5 gebucht wurden, haben dort kein Gewicht.
+- In der Historie wird die Tafelzahl beim Buchen festgehalten, spätere Änderungen am Paketgewicht verändern alte Einträge nicht. Lieferungen, die gebucht wurden, bevor es das Paketgewicht gab, haben bei Paketen kein Gewicht.
 
 ## Reiter „Bestellhistorie“
 
@@ -109,7 +111,7 @@ Persönliche Einstellungen (Empfänger, Fenstergröße, Schriftgröße) liegen u
 - Alle 35 Positionen mit Paketen, Tafeln, Eulandanummer und Gewicht pro Tafel. „gebürstet“ (bisher in Spalte H neben der Tabelle) steht jetzt in der Spalte **Bemerkung**.
 - **Mindestbestände** kommen aus der bedingten Formatierung der Excel-Liste. Die Regel ist jetzt überall gleich: rot = darunter, gelb = genau erreicht. Alle 13 bisher roten und alle 5 bisher gelben Positionen bleiben rot bzw. gelb. Vier Positionen, die genau auf ihrem Mindestbestand stehen, sind jetzt zusätzlich gelb: 1.0330 2 mm, 1.0332 6 mm, 1.0332 8 mm, 1.4301 10 mm.
 - Die „3“ in der Überschriftszeile „Aluminium NOX“ wurde nicht übernommen, die Position EN AW-5005A 2 mm mit 5 Tafeln schon.
-- Die Notiz „Blechbestellung 27.10.2026“ ist als offene Bestellung eingetragen: „1 Paket T4ST“ bei 1.0332 4 mm, „10 Tafeln T2ALNOX“ bei EN AW-5005A 2 mm. Bitte prüfen, ob das stimmt.
+- Die Notiz „Blechbestellung 27.10.2026“ ist als offene Bestellung eingetragen: „1 Paket T4ST“ bei 1.0332 4 mm, „10 Tafeln T2ALNOX“ bei EN AW-5005A 2 mm.
 - Fehlende Eulandanummern (1.4301 6 mm und 10 mm, 3.3535 5/6/8 mm) bleiben leer und können über **Bearbeiten** nachgetragen werden.
 
 ## Aus dem Quelltext bauen
@@ -122,7 +124,9 @@ dotnet run -c Release --project tests/Blechbestand.Tests.csproj   # Tests der Da
 dotnet build -c Release src/Blechbestand.csproj                   # → src/bin/Release/net48/Blechbestand.exe
 ```
 
-Der Workflow `.github/workflows/blechbestand-windows.yml` baut und testet auf Windows, startet das Programm einmal, macht einen Screenshot und stellt `Blechbestand.exe` als Artefakt bereit.
+Der Workflow `.github/workflows/blechbestand-windows.yml` baut und testet auf Windows, startet das Programm einmal, macht einen Screenshot und stellt `Blechbestand.exe` und das Download-Paket als Artefakt bereit.
+
+**Release:** Version in `src/Blechbestand.csproj` setzen, `RELEASE.md` anpassen und den Tag `blechbestand-v<Version>` pushen (z. B. `blechbestand-v1.0.0`). Der Workflow veröffentlicht dann `Blechbestand-<Version>.zip` (Exe, `LIESMICH.txt`, Logo) und `SHA256.txt` als GitHub-Release. Alternativ den Workflow von Hand mit „Als Release veröffentlichen“ starten.
 
 | Ordner | Inhalt |
 | --- | --- |

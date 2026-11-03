@@ -1,0 +1,67 @@
+BLECHBESTAND 1.0 – Kurzanleitung
+================================
+
+Starten
+-------
+Blechbestand.exe doppelklicken. Keine Installation nötig (Windows 10/11).
+Falls Windows „Der Computer wurde durch Windows geschützt“ meldet:
+„Weitere Informationen“ -> „Trotzdem ausführen“ (die Datei ist nicht signiert).
+Meldet ein Virenschutz (z. B. G DATA) einen Fehlalarm: die IT bitten, den
+Programmordner (z. B. C:\Blechbestand) als Ausnahme einzutragen.
+
+Beim ersten Start wird die Bestandsdatei angelegt und mit den Daten aus
+Blechbestand.xlsx gefüllt (35 Positionen):
+    Dokumente\Blechbestand\bestand.xml
+
+Reiter „Bestand“ (für die Lasermaschine)
+-----------------------------------------
+- In der Spalte Pakete oder Tafeln auf die Zelle klicken, neue Menge tippen, Enter.
+  Gespeichert wird sofort. Leer oder „-“ = keine.
+- -1 / +1 unten rechts ändern die markierte Menge um eins.
+- Rot = unter Mindestbestand, Gelb = Mindestbestand erreicht.
+- „+ Neues Material“ legt neue Bleche an, auch neue Materialgruppen.
+  Den Werkstoff aus der Liste wählen (gängige Laser-Werkstoffe: Baustahl,
+  hochfest/Hardox, verzinkt, Edelstahl, Aluminium, Kupfer/Messing) oder frei
+  eintragen; Gruppe und Dichte werden vorgeschlagen.
+- Lieferung da: Rechtsklick (oder Doppelklick) auf „Offene Bestellung“ ->
+  „Geliefert – Menge zum Bestand addieren“. Menge prüfen (Teillieferung geht
+  auch, der Rest bleibt als offene Bestellung stehen), „Zum Bestand addieren“.
+- Rechtsklick auf eine Zeile außerdem: Bearbeiten, Löschen, zur Bestellung
+  vormerken, Bestellvermerk entfernen, alle Bestellvermerke entfernen.
+
+Reiter „Bestellung / Einkauf“
+-----------------------------
+- Positionen anhaken (oder „Knappe Positionen vorschlagen“), Menge prüfen.
+- Sonderfall, der nicht im Bestand ist: „+ Sonderposition“ -> Werkstoff, Dicke,
+  Format, Menge. Steht oben in der Liste und kommt mit Gewicht in die Mail.
+  Haken „Dauerhaft in den Bestand aufnehmen“ legt es gleich im Bestand an.
+- Rechts Empfänger eintragen, dann „In Outlook öffnen“.
+  Klassisches Outlook zeigt eine fertige Mail mit Tabelle; gesendet wird erst mit „Senden“.
+- Neues Outlook: Es öffnet sich eine neue Mail mit Empfänger und Betreff, die
+  Bestellliste ist in der Zwischenablage -> in die Mail klicken und Strg+V drücken.
+- Danach erscheint oben ein grüner Balken: „Als bestellt vermerken“ trägt
+  „bestellt am …“ ein und leert die Auswahl. „Nicht vermerken“ lässt alles stehen.
+
+Reiter „Bestellhistorie“
+------------------------
+- Jede gebuchte Lieferung wird hier abgelegt. Oben links umschalten:
+  „Zusammenfassen nach Lieferdatum“ oder „nach Bestelldatum“.
+- Nach Bestelldatum stehen auch die noch offenen Positionen derselben
+  Bestellung; Rechtsklick/Doppelklick bucht sie als geliefert.
+- Filter nach Zeitraum und Materialgruppe, Suche, Export für Excel.
+- „Eintrag löschen“ für versehentliche Buchungen (Bestand bleibt unverändert).
+
+Paketgewicht
+------------
+1 Paket = höchstens 2.500 kg, Tafelzahl abgerundet (4 mm Stahl: 17 Tafeln
+≈ 2.448 kg). Damit stehen Pakete mit Tafelzahl und Gewicht in der Bestell-Mail
+und in der Historie. Ändern unter „Einstellungen“; abweichend gepacktes
+Material unter „Bearbeiten“ -> „Tafeln pro Paket“.
+
+Laser-PC und Büro mit denselben Daten
+-------------------------------------
+Einstellungen -> „Andere Datei wählen …“ -> an jedem Rechner dieselbe Datei auf
+dem Netzlaufwerk wählen (z. B. \\server\lager\bestand.xml).
+Mehrere Rechner können gleichzeitig arbeiten. Tägliche Sicherungen liegen im
+Ordner „Sicherungen“ neben der Datei, das Änderungsprotokoll in
+bestand_verlauf.csv (Knopf „Verlauf“).

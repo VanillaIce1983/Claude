@@ -1,10 +1,14 @@
 # Blechbestand (Windows-Programm, .NET Framework 4.8) bauen, Datenlogik testen, die Exe auf Windows einmal starten
 # und mit einem Screenshot als Artefakt bereitstellen.
+# Tags blechbestand-v* (z. B. blechbestand-v1.0.0, passend zur <Version> in src/Blechbestand.csproj) werden zusätzlich
+# als GitHub-Release veröffentlicht: Blechbestand-<Version>.zip (Exe, LIESMICH.txt, Logo) und SHA256.txt, Text aus RELEASE.md.
+# Ohne eigenen Tag: manuell starten mit „Als Release veröffentlichen“; dann legt der Lauf Tag und Release an.
 name: blechbestand-windows
 
 on:
   push:
     branches: ['**']
+    tags: ['blechbestand-v*']
     paths:
       - 'blechbestand/**'
       - '.github/workflows/blechbestand-windows.yml'
@@ -13,6 +17,11 @@ on:
       - 'blechbestand/**'
       - '.github/workflows/blechbestand-windows.yml'
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Als Release veröffentlichen (Tag blechbestand-v<Version aus Blechbestand.csproj>)'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -71,8 +80,84 @@ jobs:
           Write-Host "Bestandsdatei angelegt: $data"
           Copy-Item $exe ../blechbestand-out/
 
+      - name: Download-Paket schnüren
+        run: |
+          $version = ([xml](Get-Content src/Blechbestand.csproj -Raw)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if (-not $version) { throw "Keine <Version> in src/Blechbestand.csproj" }
+          $out = New-Item -ItemType Directory -Force -Path ../blechbestand-paket
+          $dir = New-Item -ItemType Directory -Force -Path (Join-Path $out 'Blechbestand')
+          Copy-Item src/bin/Release/net48/Blechbestand.exe $dir
+          Copy-Item LIESMICH.txt $dir
+          Copy-Item assets/logo-512.png (Join-Path $dir 'Logo.png')
+          $hash = (Get-FileHash (Join-Path $dir 'Blechbestand.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          Compress-Archive -Path $dir -DestinationPath (Join-Path $out "Blechbestand-$version.zip") -Force
+          "$hash  Blechbestand.exe" | Set-Content -Encoding ascii (Join-Path $out 'SHA256.txt')
+          Remove-Item -Recurse -Force $dir
+          Get-ChildItem $out
+          Write-Host "Blechbestand $version, SHA-256 $hash"
+
       - uses: actions/upload-artifact@v4
         with:
           name: Blechbestand
           path: blechbestand-out/
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blechbestand-Paket
+          path: blechbestand-paket/
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' && (startsWith(github.ref, 'refs/tags/blechbestand-v') || (github.event_name == 'workflow_dispatch' && inputs.release)) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            blechbestand/src/Blechbestand.csproj
+            blechbestand/RELEASE.md
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: Blechbestand-Paket
+          path: paket
+
+      - name: Version und Release-Text
+        id: version
+        shell: bash
+        run: |
+          csproj=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' blechbestand/src/Blechbestand.csproj | head -1)
+          if [[ "$GITHUB_REF" == refs/tags/blechbestand-v* ]]; then version="${GITHUB_REF_NAME#blechbestand-v}"; else version="$csproj"; fi
+          if [[ -z "$version" || "$version" != "$csproj" ]]; then
+            echo "::error::Version im Tag ($version) passt nicht zur <Version> in Blechbestand.csproj ($csproj)."
+            exit 1
+          fi
+          test -f "paket/Blechbestand-$version.zip"
+          {
+            cat blechbestand/RELEASE.md
+            echo
+            echo '**Prüfsumme (SHA-256) der Blechbestand.exe:**'
+            echo '```'
+            cat paket/SHA256.txt
+            echo '```'
+          } > notes.md
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          ls -la paket
+          cat notes.md
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: blechbestand-v${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Blechbestand ${{ steps.version.outputs.version }}
+          body_path: notes.md
+          files: |
+            paket/Blechbestand-${{ steps.version.outputs.version }}.zip
+            paket/SHA256.txt
+          fail_on_unmatched_files: true
