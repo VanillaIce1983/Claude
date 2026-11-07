@@ -155,17 +155,25 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   Blech-Feature des Körpers. `SketchBend` bleibt wie `OneBend` ein Teil „noch nicht“ (nie gesammelt). Das Tor B36 ist nicht erprobt; wie
   bei S1a und S3 sind die Typen trotzdem geöffnet – scheitert B36, wird die Kröpfung „nicht unterstützt“. Nicht in einer laufenden
   SOLIDWORKS-Sitzung erprobt.
+- Blech S4 geprüft (3 bestätigte Befunde, behoben in `ece2fa1`): der gespiegelte feste Punkt ist nur Zeuge, wenn er am Original
+  nach dem Feature noch auf einer Fläche seines Körpers liegt (`FixedPointStays`); Zeugen getrennt in eigene und vom Feature bewegte
+  Flächen anderer Features (`MovedWitnesses`, `BodyFeatures`, `SheetMetalBendRules.WitnessesFor`); die behaltene Variante wird nach
+  der Biegezugabe noch einmal gemessen (`SheetMetalBendRules.WitnessOutcome`). Nachgeprüft (3 bestätigte Befunde, behoben in
+  `88b232f`): bewegte Zeugen zählen nur, wenn jedes frühere Feature des Körpers in der Kopie ohne Fehler nachgebaut ist
+  (`BendSupport.Rebuilt`), und nicht, wenn die früheren Features nicht lesbar waren (`OwnWitnessesOnlyFor`). STOLPERSTEINE 225,
+  228, 231, Prüftabelle.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S3 stehen und sind geprüft, S4 (skizzierte Biegung, Kröpfung) steht (Zweig `feat-blech`) und ist noch nicht geprüft, als Nächstes seine Prüfung und S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung); S7a (Ersatzweg) wartet auf die Entscheidungen des Eigentümers (`blech-plan.md` §7); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | **pausiert** (7.11.2026, auf Wunsch des Eigentümers nach der Nachprüfung von S4); nach `blech-plan.md` in prüfbaren Schritten; S0 bis S4 stehen, sind geprüft und nachgeprüft und im Hauptzweig, als Nächstes S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung); S7a (Ersatzweg) wartet auf die Entscheidungen des Eigentümers (`blech-plan.md` §7); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S4 prüfen und gegenprüfen, dann S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung) und S6 (Normal Cut,
-   alte Biegungen einfügen) nach `blech-plan.md`; jeder Schritt mit Core-Tests, Prüfung und Gegenprüfung. S7a (Ersatzweg)
+1. Blech S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung) und S6 (Normal Cut, alte Biegungen einfügen) nach
+   `blech-plan.md`; jeder Schritt mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen. Der Zweig `feat-blech`
+   steht auf demselben Commit wie der Hauptzweig. S7a (Ersatzweg)
    erst nach den Entscheidungen des Eigentümers in `blech-plan.md` §7 (Ersatzweg überhaupt, Umgang mit gescheiterten
    Blättern, „Original löschen“), bei einem Nein stattdessen S7′; S8 und S9 hängen nicht davon ab.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
