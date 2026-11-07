@@ -163,8 +163,9 @@ namespace Spiegelwerk.Build.Builders
         /// (<see cref="FlangeProfiles.Assign"/>); where both are the whole edge – the default – the new
         /// one stays, otherwise the mirrored sketch is written into it (<see cref="SketchBuilder.ReplaceInto"/>).
         /// Each gets the original's name. If the new hem's sketches cannot be paired, or a mirrored one
-        /// does not fit before anything is cleared, they stay as SOLIDWORKS made them (note). One that
-        /// fails after clearing is saved empty or half-drawn: the note says so, and the hem is rebuilt.
+        /// does not fit or nothing of the sketch can be deleted, they stay as SOLIDWORKS made them (note).
+        /// One that fails once something is deleted is saved partly cleared, empty or half-drawn: the note
+        /// says so, and the hem is rebuilt.
         /// </summary>
         private static void WriteWidthSketches(BuildContext ctx, HemRecord r, List<Feature> native, List<EdgeSignature> targetEdges, List<string> notes, List<string> info)
         {
@@ -212,7 +213,7 @@ namespace Spiegelwerk.Build.Builders
                 {
                     ctx.Sketches.Remove(w.Name);
                     damaged++;
-                    notes.Add($"Breitenskizze „{w.Name}“ ist leer oder unvollständig: Sie wurde geleert und ließ sich nicht neu zeichnen ({ex.InnerException?.Message ?? ex.Message}). Saum prüfen.");
+                    notes.Add($"Breitenskizze „{w.Name}“ ist leer oder unvollständig: Sie ließ sich nicht vollständig leeren oder neu zeichnen ({ex.InnerException?.Message ?? ex.Message}). Saum prüfen.");
                 }
                 catch (Exception ex)
                 {

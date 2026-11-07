@@ -134,9 +134,11 @@ namespace Spiegelwerk.Build
         /// own (A2 P15). In the sketch the model shows the state before the feature, so the edges and
         /// vertices its relations name are looked up there.
         /// The mirror is computed before anything is deleted: if it does not fit the sketch's plane,
-        /// the sketch is left untouched. Leaving the sketch always keeps its edits (there is no exit
-        /// that discards them), so a failure after clearing – while clearing or drawing – leaves it
-        /// empty or half-drawn; that is a <see cref="SketchDamagedException"/>, not a plain failure.
+        /// the sketch is left untouched; so it is if clearing deletes none of its segments
+        /// (<see cref="NothingClearedException"/>, a plain failure). Leaving the sketch always keeps its
+        /// edits (there is no exit that discards them), so a failure once something is deleted – while
+        /// clearing or drawing – leaves it partly cleared, empty or half-drawn; that is a
+        /// <see cref="SketchDamagedException"/>, not a plain failure.
         /// </summary>
         public SketchMap ReplaceInto(SketchModel src, Feature existing, List<string> notes)
         {
@@ -158,7 +160,7 @@ namespace Spiegelwerk.Build
                     map = Draw(prepared, notes);
                     CheckConstrainedStatus(map, notes);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not NothingClearedException)
                 {
                     throw new SketchDamagedException(existing.Name, ex);
                 }
@@ -173,7 +175,12 @@ namespace Spiegelwerk.Build
             return map;
         }
 
-        /// <summary>Deletes everything drawn in the open sketch: segments (their relations go with them), then the points left.</summary>
+        /// <summary>
+        /// Deletes everything drawn in the open sketch: segments (their relations go with them), then the
+        /// points left. If not one of its segments goes, nothing has changed yet: the sketch is still the one
+        /// SOLIDWORKS made (<see cref="NothingClearedException"/>, and its points stay too). If only some go,
+        /// it is partly cleared.
+        /// </summary>
         private void Clear(Sketch sketch)
         {
             var segments = ((object)sketch.GetSketchSegments() as object[])?.OfType<SketchSegment>().ToList() ?? new List<SketchSegment>();
@@ -182,6 +189,9 @@ namespace Spiegelwerk.Build
                 SwSelect.Clear(_doc);
                 for (int i = 0; i < segments.Count; i++) SwSelect.Select(_doc, segments[i], 0, i > 0);
                 _doc.EditDelete();
+                SwSelect.Clear(_doc);
+                if ((((object)sketch.GetSketchSegments() as object[])?.Length ?? 0) >= segments.Count)
+                    throw new NothingClearedException();
             }
             foreach (SketchPoint p in ((object)sketch.GetUserPoints2() as object[])?.OfType<SketchPoint>().ToList() ?? new List<SketchPoint>())
             {
@@ -190,7 +200,16 @@ namespace Spiegelwerk.Build
             }
             SwSelect.Clear(_doc);
             if (((object)sketch.GetSketchSegments() as object[])?.Length > 0)
-                throw new InvalidOperationException("Die vorhandene Skizze ließ sich nicht leeren.");
+                throw new InvalidOperationException("Die vorhandene Skizze ließ sich nur teilweise leeren.");
+        }
+
+        /// <summary>
+        /// <see cref="Clear"/> deleted nothing: the sketch is unchanged, so <see cref="ReplaceInto"/> fails
+        /// plainly – the sketch stays as SOLIDWORKS made it – instead of reporting it damaged.
+        /// </summary>
+        private sealed class NothingClearedException : InvalidOperationException
+        {
+            public NothingClearedException() : base("Die vorhandene Skizze ließ sich nicht leeren.") { }
         }
 
         /// <summary>Mirrors the model into the open sketch: frame, geometry, relations, dimensions.</summary>
@@ -748,13 +767,14 @@ namespace Spiegelwerk.Build
     }
 
     /// <summary>
-    /// <see cref="SketchBuilder.ReplaceInto"/> failed after it began to clear the sketch: the sketch is
-    /// saved empty or half-drawn – its feature has to be checked, it does not keep what SOLIDWORKS made.
+    /// <see cref="SketchBuilder.ReplaceInto"/> failed after it had deleted something from the sketch: the
+    /// sketch is saved partly cleared, empty or half-drawn – its feature has to be checked, it does not
+    /// keep what SOLIDWORKS made.
     /// </summary>
     internal sealed class SketchDamagedException : InvalidOperationException
     {
         public SketchDamagedException(string sketch, Exception inner)
-            : base($"Skizze \"{sketch}\" wurde geleert und ließ sich nicht vollständig neu zeichnen: {inner.Message}", inner)
+            : base($"Skizze \"{sketch}\" ließ sich nicht vollständig leeren oder neu zeichnen: {inner.Message}", inner)
         {
             Sketch = sketch;
         }
