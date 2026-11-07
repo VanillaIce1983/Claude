@@ -69,8 +69,8 @@ namespace Spiegelwerk.Core.Planning
         public const string CornerTrimReason = "Ecke trimmen (abgewickelt): Freistellungsart und -größe sind über die API nicht lesbar – bitte im Ziel von Hand anlegen.";
 
         // S0: every entry NotYet. S1a: base flange, flat pattern and the template folders are
-        // decided, a user corner trim is not rebuilt. S2: hem and miter flange; everything else is
-        // still refused.
+        // decided, a user corner trim is not rebuilt. S2: hem and miter flange. S3: edge flange;
+        // everything else is still refused.
         private static readonly Dictionary<string, SheetMetalType> Table = new Dictionary<string, SheetMetalType>(StringComparer.Ordinal)
         {
             // Never collected; the new part gets its own with the first base flange.
@@ -92,7 +92,7 @@ namespace Spiegelwerk.Core.Planning
             // Meaning unknown: kept as a carrier, the cautious side.
             ["ToroidalBend"] = NotYet(SheetMetalRole.Carrier),
 
-            ["EdgeFlange"] = NotYet(SheetMetalRole.Leaf),
+            ["EdgeFlange"] = Rebuilt(SheetMetalRole.Leaf),
             ["SMMiteredFlange"] = Rebuilt(SheetMetalRole.Leaf),
             ["Hem"] = Rebuilt(SheetMetalRole.Leaf),
             ["Jog"] = NotYet(SheetMetalRole.Leaf),

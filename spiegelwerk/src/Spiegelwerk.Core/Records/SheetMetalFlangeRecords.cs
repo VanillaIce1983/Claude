@@ -5,16 +5,169 @@ using Spiegelwerk.Core.Sketch;
 
 namespace Spiegelwerk.Core.Records
 {
-    // Flanges on edges (A2, blech-plan S2): hem and miter flange. A reflection keeps every
-    // length, angle and radius and maps the edges, faces and profiles onto their mirror images,
-    // so the scalars go over unchanged; only the edge fingerprints and the profile sketches are
-    // mirrored. The bend sub-features are read for notes only – their own values cannot be
-    // written (B23).
+    // Flanges on edges (A2, blech-plan S2, S3): hem, miter flange and edge flange. A reflection
+    // keeps every length, angle and radius and maps the edges, faces and profiles onto their
+    // mirror images, so the scalars go over unchanged; only the edge fingerprints and the profile
+    // sketches are mirrored – and the edge flange's sketch angle, which is a rotation about the
+    // directed hinge (FlangeProfiles.AngleCandidates). The bend sub-features are read for notes
+    // only – their own values cannot be written (B23).
 
     /// <summary>Same numbers as swHemTypes_e.</summary>
     public static class HemTypes
     {
         public const int Open = 0, Closed = 1, TearDrop = 2, Rolled = 3, Double = 4;
+    }
+
+    /// <summary>
+    /// Same numbers as swFlangeOffsetTypes_e: how the length of an edge flange (and its position
+    /// offset) ends. Up to edge and merge exists only from the 2024 interop on.
+    /// </summary>
+    public static class FlangeOffsetTypes
+    {
+        public const int Blind = 1, UpToVertex = 2, UpToSurface = 3, FromSurface = 4, MidPlane = 5, UptoEdgeAndMerge = 6;
+    }
+
+    /// <summary>Same numbers as swFlangeDimTypes_e: where the length of an edge flange is measured.</summary>
+    public static class FlangeDimTypes
+    {
+        public const int OuterVirtualSharp = 1, InnerVirtualSharp = 2, BendTangentArc = 3;
+    }
+
+    /// <summary>Same numbers as swFlangePositionTypes_e: where the flange sits relative to its edge.</summary>
+    public static class FlangePositionTypes
+    {
+        public const int MaterialInside = 1, MaterialOutside = 2, BendOutside = 3, BendCenterLine = 4, BendSharp = 5, BendTangent = 6;
+    }
+
+    /// <summary>Same bits as swInsertEdgeFlangeOptions_e (InsertSheetMetalEdgeFlange and …2).</summary>
+    public static class EdgeFlangeOptions
+    {
+        public const int UseDefaultRadius = 1, FlipDir = 2, DoOffset = 4, ReverseOffsetDir = 8, TearClip = 16, TrimSideBend = 32,
+            UseReliefRatio = 64, UseDefaultRelief = 128;
+    }
+
+    /// <summary>Same numbers as swReliefTearTypes_e.</summary>
+    public static class ReliefTearTypes
+    {
+        public const int Rip = 1, Extend = 2;
+    }
+
+    /// <summary>
+    /// The profile sketch of one edge of an edge flange: made by the flange (a sub-feature,
+    /// „Laschenprofil bearbeiten“), or – the layout SOLIDWORKS sometimes shows – a sketch at the top
+    /// level before it (A2 P13). It belongs to the flange alone: the new flange makes its own on the
+    /// mirrored edge, and this one is written into it.
+    /// </summary>
+    public sealed class FlangeProfile
+    {
+        public FlangeProfile(string sketchName, SketchModel sketch, EdgeSignature hinge)
+        {
+            SketchName = sketchName;
+            Sketch = sketch;
+            Hinge = hinge;
+        }
+
+        /// <summary>Original name: the copy's profile gets it again.</summary>
+        public string SketchName { get; }
+
+        /// <summary>
+        /// Frame and content as the finished flange shows them – read without rollback, so a position
+        /// offset is included (A2 P2) –, with the relations and dimensions of the read in the state
+        /// before the flange, where the edges and vertices they name exist (<see cref="Planning.FlangeProfiles.Merge"/>).
+        /// </summary>
+        public SketchModel Sketch { get; }
+
+        /// <summary>The edge the profile stands on, read under AccessSelections (state before the flange).</summary>
+        public EdgeSignature Hinge { get; }
+    }
+
+    /// <summary>
+    /// Edge flange (IEdgeFlangeFeatureData, blech-plan S3). One profile per edge, in the order of
+    /// its edges; one bend per edge (OneBend), which carries faces. The bend angle is one value for
+    /// all edges. What the copy needs besides the values: the profiles and the edges they stand on.
+    /// </summary>
+    public sealed class EdgeFlangeRecord : FeatureRecord
+    {
+        public EdgeFlangeRecord(string name, string typeName) : base(name, typeName)
+        {
+        }
+
+        /// <summary>One per edge, in the order of IEdgeFlangeFeatureData.Edges.</summary>
+        public List<FlangeProfile> Profiles { get; } = new List<FlangeProfile>();
+
+        /// <summary>Radians, as read: a rotation about the directed hinge (θ or 2π − θ for the same bend).</summary>
+        public double BendAngle { get; set; }
+
+        public bool UseDefaultRadius { get; set; } = true;
+
+        /// <summary>Metres.</summary>
+        public double BendRadius { get; set; }
+
+        /// <summary>How the length ends (<see cref="FlangeOffsetTypes"/>).</summary>
+        public int OffsetType { get; set; } = FlangeOffsetTypes.Blind;
+
+        /// <summary>The flange length, metres (blind, mid plane, offset from surface).</summary>
+        public double OffsetDistance { get; set; }
+
+        /// <summary>Where the length is measured (<see cref="FlangeDimTypes"/>).</summary>
+        public int OffsetDimType { get; set; } = FlangeDimTypes.OuterVirtualSharp;
+
+        /// <summary>The flange direction: its reference is undocumented; the profile check decides it in the copy.</summary>
+        public bool ReverseOffset { get; set; }
+
+        /// <summary>The end of the length (vertex, face, plane; an edge for up to edge and merge).</summary>
+        public GeometryRef? OffsetReference { get; set; }
+
+        /// <summary><see cref="FlangePositionTypes"/>.</summary>
+        public int PositionType { get; set; } = FlangePositionTypes.MaterialInside;
+
+        public bool TrimSideBends { get; set; }
+
+        /// <summary>The flange stands off its edge by a position offset (the profile is moved along its normal).</summary>
+        public bool UsePositionOffset { get; set; }
+
+        /// <summary><see cref="FlangeOffsetTypes"/> of the position offset.</summary>
+        public int PositionOffsetType { get; set; } = FlangeOffsetTypes.Blind;
+
+        /// <summary>Metres.</summary>
+        public double PositionOffsetDistance { get; set; }
+
+        /// <summary>Its direction: decided in the copy by the profile check, like <see cref="ReverseOffset"/>.</summary>
+        public bool ReversePositionOffset { get; set; }
+
+        public GeometryRef? PositionOffsetReference { get; set; }
+
+        /// <summary>Gap between the flanges of neighbouring edges, metres.</summary>
+        public double GapDistance { get; set; }
+
+        /// <summary>The flange's own relief; null: the default.</summary>
+        public ReliefData? OwnRelief { get; set; }
+
+        /// <summary>The flange's own allowance; null: the default.</summary>
+        public BendAllowanceData? OwnAllowance { get; set; }
+
+        /// <summary>Newer versions only (late-bound); null where not readable.</summary>
+        public bool? LockAngle { get; set; }
+
+        /// <summary>Newer versions only (late-bound); null where not readable.</summary>
+        public bool? NormalToFlangePlane { get; set; }
+
+        /// <summary>Newer versions only (late-bound); null where not readable.</summary>
+        public bool? PerpendicularToFace { get; set; }
+
+        /// <summary>Newer versions only (late-bound): the face or edge the angle refers to; null without one.</summary>
+        public GeometryRef? AngleReference { get; set; }
+
+        /// <summary>Sub-features whose definition is IOneBendFeatureData.</summary>
+        public int BendCount { get; set; }
+
+        public List<BendValues> Bends { get; } = new List<BendValues>();
+        public List<BendOverride> BendOverrides { get; } = new List<BendOverride>();
+
+        public override IReadOnlyList<string> OwnedSketches => Profiles.Select(p => p.SketchName).ToList();
+
+        /// <summary>The bends carry faces of their own.</summary>
+        public override bool SampleSubFeatures => true;
     }
 
     /// <summary>One width sketch of a hem ("Edit Hem Width"): the sketch, the edge it belongs to (-1: not paired).</summary>

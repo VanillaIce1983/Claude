@@ -1,4 +1,4 @@
-# Zwischenstand (1.11.2026)
+# Zwischenstand (7.11.2026)
 
 Arbeitsstand von Spiegelwerk 0.11 im Hauptzweig `claude/cool-ritchie-ltfl07`. Diese Datei sagt, was
 erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
@@ -93,17 +93,40 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   verglichen (K25), eigene Werte der Biegungen der Kopie über das, was abweicht, nicht über Namen. `Assign` hat noch keinen
   Beleg über den Skizzenrahmen (kommt mit den Profilen der Kantenlasche in S3). Bei einer einzelnen Kante versucht die
   Gehrungslasche vor der Markierung 0 auch „Kette zuerst“. Nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+- Blech S3 (Zweig `feat-blech`): Kantenlasche. Core: `EdgeFlangeRecord` mit `FlangeProfile` und den swconst-Zahlen
+  (`FlangeOffsetTypes`, `FlangeDimTypes`, `FlangePositionTypes`, `EdgeFlangeOptions`, `ReliefTearTypes`), `FlangeProfiles` (`PredictedAngle`,
+  `AngleCandidates`, `CommonCandidate`, `Direction`, `FitsFrame`, `NormalOffset`, `Rebase`, `Merge`, `ProfilePoints`, `InPlaneDeviation`,
+  `Check`/`ProfileCheck`, `Assign` auch über den Rahmen), `EdgeFlangeRules` (Wege, Optionen, Zurücklesen nur des Genutzten,
+  Richtungssuche, Texte), Profile gehören der Kantenlasche (`SheetMetalTree`, `EdgeFlangeFacts`, A2 P13), `ReliefData.TearType`,
+  `EdgeFlange` „nachgebaut“; Tests `EdgeFlangeTests` (A2 #1, #2, #4–#9 und mehr), Ablehnung, Berichtstexte, swconst-Nummern. Add-In:
+  `CaptureEdgeFlange` (Kanten, Werte, Bezüge, Profile zweimal gelesen und vereint, Zuordnung, Biegungen),
+  `SwSheetMetal.ReadEdgeFlangeScalars`/`ReadBackEdgeFlange`/`SupportEdgeOf`, Baumfakten je Kantenlasche, `EdgeFlangeBuilder`
+  (Kandidaten mit Rahmenprüfung, `ReplaceInto`, Datenobjekt/`InsertSheetMetalEdgeFlange2`/Einzelkante mit Array-Formen, Werte, Richtungen
+  in eigener Bearbeitung, Profilprüfung mit Richtungssuche, Biegezugabe, Zurücklesen, Biegungen), `FeatureEdit.EdgeFlange`/`AllowanceInto`,
+  `FlangeSupport.BodyOf`. STOLPERSTEINE 212–223, Prüftabelle (B28–B35).
+  Abweichend vom Plan: Die Regeln der Kantenlasche stehen in einer eigenen Datei `EdgeFlangeRules` (der Plan nennt nur `FlangeProfiles`);
+  `Fold` gibt es schon (`SheetMetalCompare.Fold`). `FitsFrame` verlangt statt „n′ ⟂ R(d)“ die Ebene durch Kante und alle Punkte des
+  zurückgesetzten, gespiegelten Profils auf `Tol.Length` (strenger; sonst scheiterte `SketchMirror` an einer leicht gekippten Ebene); die
+  Parallelität der Ebenen in der Profilprüfung mit `Tol.Angle` (1e-8) statt 1e-9. `Merge` verlangt dieselben Segmente und Punkte an derselben
+  Stelle der Skizze (der Plan: dieselben Segmente) und nimmt Beziehungen und Bemaßungen aus der Lesung vor der Lasche. Jedes Profil wird mit
+  der Leiste hinter der Skizze gelesen, nicht nur bei Bezügen aufs Modell – die Kante, auf der es angelegt wurde, gibt es nur dort. Die
+  Zuordnung über den Rahmen nimmt von parallelen Kanten die nächste (der Entwurf: „die Kante liegt im Versatz der Ebene“, ohne Maß; B31).
+  Die Richtungssuche setzt feste Stände (wie der Drittanbieter) und gibt der Prüfung Varianten nur, wenn keiner passt; nach der Biegezugabe
+  wird noch einmal geprüft. Der Bezug des Winkels ist entbehrlich (Hinweis, der Winkel als Zahl), nicht wie die Bezüge der Länge ein Grund,
+  die Lasche nicht anzulegen. `ISketch.GetReferenceEntity` nimmt in der Interop `ref int` (A2 P15: `out`). Das Tor B29 ist nicht erprobt;
+  wie bei S1a sind die Typen trotzdem geöffnet – scheitert B29, kommt `EdgeFlange` auf „noch nicht“ zurück. Nicht in einer laufenden
+  SOLIDWORKS-Sitzung erprobt.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0, S1a und S1b stehen und sind geprüft, S2 (Saum, Gehrungslasche, Biegungen) steht (Zweig `feat-blech`), als Nächstes seine Prüfung und S3 (Kantenlasche) bzw. S4 (skizzierte Biegung, Kröpfung); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S2 stehen und sind geprüft, S3 (Kantenlasche) steht (Zweig `feat-blech`), als Nächstes seine Prüfung und S4 (skizzierte Biegung, Kröpfung); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S2 prüfen und gegenprüfen, dann S3 (Kantenlasche) und S4 (skizzierte Biegung, Kröpfung) usw. nach
-   `blech-plan.md`; jeder Schritt mit Core-Tests, Prüfung und Gegenprüfung.
+1. Blech S3 prüfen und gegenprüfen, dann S4 (skizzierte Biegung, Kröpfung) usw. nach `blech-plan.md`; jeder Schritt mit
+   Core-Tests, Prüfung und Gegenprüfung.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.
 3. Doku, Version, Regressionsprüfung, Release (Tag nur nach Rückfrage).

@@ -45,6 +45,21 @@ namespace Spiegelwerk.Core.Planning
         public IReadOnlyList<string> BodyFeatures { get; }
     }
 
+    /// <summary>What the add-in knows about an edge flange from its data (A2 P13).</summary>
+    public sealed class EdgeFlangeFacts
+    {
+        /// <param name="edgeCount">Its number of edges.</param>
+        /// <param name="parentsOnHinge">Top-level parent sketches whose support edge (ISketch.GetReferenceEntity) is one of its edges.</param>
+        public EdgeFlangeFacts(int edgeCount, IEnumerable<string>? parentsOnHinge = null)
+        {
+            EdgeCount = edgeCount;
+            ParentsOnHinge = parentsOnHinge?.ToList() ?? new List<string>();
+        }
+
+        public int EdgeCount { get; }
+        public IReadOnlyList<string> ParentsOnHinge { get; }
+    }
+
     /// <summary>
     /// Who in a sheet-metal part comes into being with whom (A1 §2, A3 P3), as pure name logic:
     ///  - a SheetMetal feature belongs to the first base flange (tree order) that has it as a parent;
@@ -56,7 +71,11 @@ namespace Spiegelwerk.Core.Planning
     ///    its parents lead to, or in a part with one flat pattern and one SheetMetal to that
     ///    SheetMetal's base flange;
     ///  - features after a flat pattern exist only in the flattened state;
-    ///  - the width sketches of a hem belong to it (S2): the new hem brings its own, they are written into those.
+    ///  - the width sketches of a hem belong to it (S2): the new hem brings its own, they are written into those;
+    ///  - the profile sketches of an edge flange belong to it (S3): its sketch sub-features and – the layout
+    ///    SOLIDWORKS sometimes shows (tbcphutai) – a top-level parent sketch, but only one that is absorbed by
+    ///    nothing, stands on one of its edges, is no other feature's parent, while the flange has fewer
+    ///    profile sub-sketches than edges (A2 P13: not an up-to reference, not a shared sketch).
     /// Template folders are system features: never collected, their flat patterns listed before them.
     /// </summary>
     public sealed class SheetMetalTree
@@ -79,7 +98,9 @@ namespace Spiegelwerk.Core.Planning
 
         /// <param name="topLevel">Top-level features in tree order; folders carry their contents as sub-features.</param>
         /// <param name="flatPatterns">Flat pattern name → what its data and body say.</param>
-        public static SheetMetalTree Of(IEnumerable<TreeFeature> topLevel, IReadOnlyDictionary<string, FlatPatternFacts>? flatPatterns = null)
+        /// <param name="edgeFlanges">Edge flange name → what its data say (only needed where a top-level parent sketch may be a profile).</param>
+        public static SheetMetalTree Of(IEnumerable<TreeFeature> topLevel, IReadOnlyDictionary<string, FlatPatternFacts>? flatPatterns = null,
+            IReadOnlyDictionary<string, EdgeFlangeFacts>? edgeFlanges = null)
         {
             var tree = new SheetMetalTree();
             List<TreeFeature> top = topLevel.ToList();
@@ -104,6 +125,17 @@ namespace Spiegelwerk.Core.Planning
             foreach (TreeFeature hem in all.Where(f => f.Type == "Hem"))
                 foreach (TreeFeature sub in hem.SubFeatures.Where(s => IsSketchType(s.Type)))
                     tree._owners[sub.Name] = (hem.Name, PartOwnerKind.Hem);
+
+            // An edge flange's sketches are its profiles; a top-level parent only under the P13 rule.
+            foreach (TreeFeature flange in all.Where(f => f.Type == "EdgeFlange"))
+            {
+                List<TreeFeature> profiles = flange.SubFeatures.Where(s => IsSketchType(s.Type)).ToList();
+                foreach (TreeFeature sub in profiles) tree._owners[sub.Name] = (flange.Name, PartOwnerKind.EdgeFlange);
+                if (edgeFlanges == null || !edgeFlanges.TryGetValue(flange.Name, out EdgeFlangeFacts facts) || profiles.Count >= facts.EdgeCount) continue;
+                foreach (string parent in flange.Parents.Where(facts.ParentsOnHinge.Contains))
+                    if (IsExternalProfile(parent, flange, top, all))
+                        tree._owners[parent] = (flange.Name, PartOwnerKind.EdgeFlange);
+            }
 
             foreach (TreeFeature fp in all.Where(f => f.Type == "FlatPattern"))
             {
@@ -136,6 +168,20 @@ namespace Spiegelwerk.Core.Planning
         }
 
         private static bool IsSketchType(string type) => type == "ProfileFeature" || type == "3DProfileFeature";
+
+        /// <summary>
+        /// A parent of an edge flange that is its profile at the top level (A2 P13): a sketch at the top
+        /// level, absorbed by no feature, and a parent of no feature but this flange and its own
+        /// sub-features (a shared sketch or an up-to reference of something else stays a sketch of its own).
+        /// </summary>
+        private static bool IsExternalProfile(string name, TreeFeature flange, List<TreeFeature> top, List<TreeFeature> all)
+        {
+            TreeFeature? sketch = top.FirstOrDefault(f => f.Name == name);
+            if (sketch == null || !IsSketchType(sketch.Type)) return false;
+            if (all.Any(f => f.SubFeatures.Any(s => s.Name == name))) return false;
+            var own = new HashSet<string>(flange.SubFeatures.Select(s => s.Name), StringComparer.Ordinal) { flange.Name };
+            return !all.Any(f => !own.Contains(f.Name) && f.Name != name && f.Parents.Contains(name));
+        }
 
         /// <summary>
         /// The owner of a flat pattern whose body names no base flange (B9 unconfirmed: a folded,
@@ -189,7 +235,7 @@ namespace Spiegelwerk.Core.Planning
             (ownerType == "TemplateFlatPattern" && subType == "FlatPattern") ||
             ownerType == "FlatPattern";
 
-        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem).</summary>
+        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem; profiles → edge flange).</summary>
         public IReadOnlyDictionary<string, (string owner, PartOwnerKind kind)> Owners => _owners;
 
         /// <summary>Flat pattern → the base flange of its body.</summary>

@@ -158,7 +158,8 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>
         /// Two reliefs; null is "uses the default". Kind and size count only with automatic
         /// relief, the size only for relief kinds that have one. Width and depth are readable
-        /// only in newer versions: compared only when both are known (non-zero).
+        /// only in newer versions: compared only when both are known (non-zero). The tear type
+        /// (rip or extend) of a tear relief likewise only when both are known.
         /// </summary>
         public static Deviations Relief(ReliefData? want, ReliefData? got, IFormatProvider? culture = null)
         {
@@ -171,7 +172,8 @@ namespace Spiegelwerk.Core.Planning
                     : $"Entlastung: erwartet eigene ({Describe(want, culture)}), gelesen Standard");
                 return d;
             }
-            if (want.UseAutoRelief != got.UseAutoRelief || (want.UseAutoRelief && want.Kind != got.Kind))
+            if (want.UseAutoRelief != got.UseAutoRelief || (want.UseAutoRelief && want.Kind != got.Kind) ||
+                (want.UseAutoRelief && want.Kind == ReliefKind.Tear && want.TearType > 0 && got.TearType > 0 && want.TearType != got.TearType))
             {
                 d.Differences.Add($"Entlastung: erwartet {Describe(want, culture)}, gelesen {Describe(got, culture)}");
                 return d;
@@ -260,7 +262,12 @@ namespace Spiegelwerk.Core.Planning
             string kind = r.Kind switch
             {
                 ReliefKind.Rectangular => "rechteckig",
-                ReliefKind.Tear => "ausreißen",
+                ReliefKind.Tear => r.TearType switch
+                {
+                    1 => "ausreißen (aufreißen)",
+                    2 => "ausreißen (strecken)",
+                    _ => "ausreißen",
+                },
                 ReliefKind.Obround => "Langloch",
                 ReliefKind.None => "keine",
                 _ => "ausreißen (Biegung)",

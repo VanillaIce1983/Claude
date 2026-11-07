@@ -96,6 +96,21 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Edge_flange_numbers()
+        {
+            // The record carries these numbers through unchanged; the builder passes them to SOLIDWORKS (blech-plan S3).
+            SameConstants<swFlangeOffsetTypes_e>(typeof(FlangeOffsetTypes), "swFlangeOffset");
+            SameConstants<swFlangeDimTypes_e>(typeof(FlangeDimTypes), "swFlangeDimType");
+            SameConstants<swFlangePositionTypes_e>(typeof(FlangePositionTypes), "swFlangePositionType");
+            SameConstants<swInsertEdgeFlangeOptions_e>(typeof(EdgeFlangeOptions), "swInsertEdgeFlange");
+            SameConstants<swReliefTearTypes_e>(typeof(ReliefTearTypes), "swReliefTearType");
+            Assert.Equal((int)swFeatureNameID_e.swFmEdgeFlange, Spiegelwerk.Core.Planning.EdgeFlangeRules.FeatureId);
+            // Every error AddEdges can return has a text of its own.
+            foreach (swEdgeFlangeError_e e in Enum.GetValues(typeof(swEdgeFlangeError_e)))
+                Assert.DoesNotContain("Fehler " + (int)e, Spiegelwerk.Core.Planning.EdgeFlangeRules.AddEdgesError((int)e));
+        }
+
+        [Fact]
         public void Hem_and_miter_flange_numbers()
         {
             // HemRecord.Position and MiterFlangeRecord.PositionType carry these numbers through unchanged (blech-plan S2).

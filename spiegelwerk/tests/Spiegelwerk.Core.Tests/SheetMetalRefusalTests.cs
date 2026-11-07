@@ -10,7 +10,7 @@ namespace Spiegelwerk.Core.Tests
     /// Refusal (blech-plan §1.5): before capture by type, after capture by position in the body.
     /// S0 was inert; S1a opens base flange, flat pattern and the template folders, decides the user
     /// corner trim as not rebuilt and refuses every other sheet-metal type as before; S1b opens the
-    /// same types in the same part; S2 opens hem and miter flange.
+    /// same types in the same part; S2 opens hem and miter flange, S3 the edge flange.
     /// </summary>
     public class SheetMetalRefusalTests
     {
@@ -23,11 +23,11 @@ namespace Spiegelwerk.Core.Tests
             "TemplateSheetMetal", "TemplateFlatPattern",
         };
 
-        /// <summary>What S1a and S2 decide.</summary>
-        private static readonly string[] OpenedSoFar = { "SMBaseFlange", "FlatPattern", "CornerTrim", "TemplateSheetMetal", "TemplateFlatPattern", "Hem", "SMMiteredFlange" };
+        /// <summary>What S1a, S2 and S3 decide.</summary>
+        private static readonly string[] OpenedSoFar = { "SMBaseFlange", "FlatPattern", "CornerTrim", "TemplateSheetMetal", "TemplateFlatPattern", "Hem", "SMMiteredFlange", "EdgeFlange" };
 
         [Fact]
-        public void Every_type_not_decided_by_S2_is_still_refused()
+        public void Every_type_not_decided_by_S3_is_still_refused()
         {
             foreach (string type in OldSet)
             {
@@ -40,13 +40,13 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
-        public void The_table_has_the_S2_states_and_lists_the_closed_corner_too()
+        public void The_table_has_the_S3_states_and_lists_the_closed_corner_too()
         {
             foreach (string type in SheetMetalTypes.Names)
             {
                 SheetMetalState expected = type switch
                 {
-                    "SMBaseFlange" or "FlatPattern" or "TemplateSheetMetal" or "TemplateFlatPattern" or "Hem" or "SMMiteredFlange" => SheetMetalState.Rebuilt,
+                    "SMBaseFlange" or "FlatPattern" or "TemplateSheetMetal" or "TemplateFlatPattern" or "Hem" or "SMMiteredFlange" or "EdgeFlange" => SheetMetalState.Rebuilt,
                     "CornerTrim" => SheetMetalState.Unsupported,
                     _ => SheetMetalState.NotYet,
                 };
@@ -75,9 +75,13 @@ namespace Spiegelwerk.Core.Tests
             Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(collected, owners, fallbackOn: false));
             // Its base flange not collected: the SheetMetal stands alone and is refused.
             Assert.NotNull(UnsupportedFeatures.RefusalBeforeCapture(collected.Where(c => c.Item1 != "Base-Flange1").ToList(), owners, false));
-            // An edge flange later in the part still refuses the run.
+            // An edge flange later in the part goes on since S3 (its profile a part of it); a jog still refuses the run.
+            collected.Add(("Sketch2", "ProfileFeature"));
             collected.Add(("Edge-Flange1", "EdgeFlange"));
-            Assert.Equal("Blech-Feature „Edge-Flange1“ (EdgeFlange) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.",
+            owners["Sketch2"] = ("Edge-Flange1", PartOwnerKind.EdgeFlange);
+            Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(collected, owners, false));
+            collected.Add(("Jog1", "Jog"));
+            Assert.Equal("Blech-Feature „Jog1“ (Jog) wird noch nicht nachgebaut. Es wurde nichts gespiegelt.",
                 UnsupportedFeatures.RefusalBeforeCapture(collected, owners, false));
         }
 

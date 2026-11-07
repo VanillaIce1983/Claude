@@ -59,6 +59,7 @@ namespace Spiegelwerk.Build
             new FlatPatternBuilder(),
             new HemBuilder(),
             new MiterFlangeBuilder(),
+            new EdgeFlangeBuilder(),
         };
 
         /// <summary>

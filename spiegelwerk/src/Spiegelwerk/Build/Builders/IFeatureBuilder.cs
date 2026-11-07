@@ -267,12 +267,18 @@ namespace Spiegelwerk.Build.Builders
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
+        public static bool EdgeFlange(ModelDoc2 doc, Feature f, Action<EdgeFlangeFeatureData> change)
+        {
+            var d = (EdgeFlangeFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
         /// <summary>
         /// A feature's own bend allowance in an edit of its own (blech-plan §1.4, A2 P7) – never
         /// together with the geometric values, so a refused allowance costs only itself. Order of
         /// <see cref="AllowanceRules.WriteOrder"/>: UseDefaultBendAllowance = false first (otherwise
         /// the values silently revert), the value of its kind, Type last, SetCustomBendAllowance;
-        /// null: back to the default. Typed for hem and miter flange; any other sheet-metal data
+        /// null: back to the default. Typed for hem, miter and edge flange; any other sheet-metal data
         /// late-bound (the same members, static on every bend data interface since 2019). Only the
         /// read-back tells whether it took.
         /// </summary>
@@ -289,6 +295,10 @@ namespace Spiegelwerk.Build.Builders
                     return Edit(doc, f, m, () => m.AccessSelections(doc, null),
                         () => WriteAllowance(own, v => m.UseDefaultBendAllowance = v, () => (object)m.GetCustomBendAllowance(), m.SetCustomBendAllowance),
                         m.ReleaseSelectionAccess);
+                case EdgeFlangeFeatureData e:
+                    return Edit(doc, f, e, () => e.AccessSelections(doc, null),
+                        () => WriteAllowance(own, v => e.UseDefaultBendAllowance = v, () => (object)e.GetCustomBendAllowance(), e.SetCustomBendAllowance),
+                        e.ReleaseSelectionAccess);
                 case null:
                     return false;
                 default:
@@ -307,6 +317,13 @@ namespace Spiegelwerk.Build.Builders
                         () => SwLate.Call(def, "ReleaseSelectionAccess"));
             }
         }
+
+        /// <summary>
+        /// The allowance into an edge flange's data object before CreateFeature (blech-plan §1.4: at
+        /// creation where the call takes it) – the same writes as <see cref="Allowance"/>, without an edit.
+        /// </summary>
+        public static void AllowanceInto(EdgeFlangeFeatureData d, BendAllowanceData? own) =>
+            WriteAllowance(own, v => d.UseDefaultBendAllowance = v, () => (object)d.GetCustomBendAllowance(), d.SetCustomBendAllowance);
 
         private static void WriteAllowance(BendAllowanceData? own, Action<bool> useDefault, Func<object?> get, Action<CustomBendAllowance> set)
         {

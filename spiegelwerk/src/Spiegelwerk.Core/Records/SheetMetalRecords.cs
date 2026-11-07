@@ -71,6 +71,12 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>Metres; only readable in 2022 and later.</summary>
         public double Depth { get; set; }
+
+        /// <summary>
+        /// Whether a tear relief rips or extends (swReliefTearTypes_e: 1 rip, 2 extend); 0 where the
+        /// data interface does not have it (of the flanges only the edge flange reads it).
+        /// </summary>
+        public int TearType { get; set; }
     }
 
     /// <summary>Gauge table of a base flange or a converted body.</summary>

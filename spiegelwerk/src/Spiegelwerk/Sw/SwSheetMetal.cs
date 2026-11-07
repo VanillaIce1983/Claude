@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
+using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 
@@ -98,11 +99,15 @@ namespace Spiegelwerk.Sw
             if (!HasSheetMetal(doc)) return SheetMetalTree.Empty;
             var top = new List<TreeFeature>();
             var facts = new Dictionary<string, FlatPatternFacts>(StringComparer.Ordinal);
+            var flanges = new Dictionary<string, EdgeFlangeFacts>(StringComparer.Ordinal);
             TreeFeature Node(Feature f, IEnumerable<Feature> subs)
             {
                 if (f.GetTypeName2() == "FlatPattern" && !facts.ContainsKey(f.Name)) facts[f.Name] = Facts(doc, f);
-                List<string> parents = f.GetParents() is object[] ps ? ps.OfType<Feature>().Select(p => p.Name).ToList() : new List<string>();
-                return new TreeFeature(f.Name, f.GetTypeName2(), parents, subs.Select(s => Node(s, SwDoc.SubFeatures(s))).ToList());
+                List<Feature> parentFeatures = f.GetParents() is object[] ps ? ps.OfType<Feature>().ToList() : new List<Feature>();
+                List<Feature> subList = subs.ToList();
+                if (f.GetTypeName2() == "EdgeFlange" && !flanges.ContainsKey(f.Name) && EdgeFlangeFactsOf(doc, f, parentFeatures, subList) is EdgeFlangeFacts ef)
+                    flanges[f.Name] = ef;
+                return new TreeFeature(f.Name, f.GetTypeName2(), parentFeatures.Select(p => p.Name), subList.Select(s => Node(s, SwDoc.SubFeatures(s))).ToList());
             }
             foreach (Feature f in SwDoc.TopLevelFeatures(doc))
             {
@@ -111,7 +116,63 @@ namespace Spiegelwerk.Sw
                     if (subs.All(s => s.Name != c.Name)) subs.Add(c);
                 top.Add(Node(f, subs));
             }
-            return SheetMetalTree.Of(top, facts);
+            return SheetMetalTree.Of(top, facts, flanges);
+        }
+
+        /// <summary>
+        /// What decides whether a top-level parent sketch is a profile of an edge flange (A2 P13): its
+        /// number of edges and which of its parent sketches – those it does not absorb – stand on one of
+        /// them (ISketch.GetReferenceEntity, read under the flange's AccessSelections, where both the
+        /// edges and the sketch are in the state before the flange). Null if the flange has a profile
+        /// sub-sketch for every edge – nothing is missing – or nothing of it reads.
+        /// </summary>
+        private static EdgeFlangeFacts? EdgeFlangeFactsOf(ModelDoc2 doc, Feature flange, List<Feature> parents, List<Feature> subs)
+        {
+            var subNames = new HashSet<string>(subs.Select(s => s.Name), StringComparer.Ordinal);
+            List<Feature> candidates = parents.Where(p => SwDoc.IsSketch(p) && !subNames.Contains(p.Name)).ToList();
+            if (candidates.Count == 0) return null;
+            int profiles = subs.Count(SwDoc.IsSketch);
+            EdgeFlangeFeatureData? d = null;
+            bool access = false;
+            try
+            {
+                d = (object)flange.GetDefinition() as EdgeFlangeFeatureData;
+                if (d == null) return null;
+                access = d.AccessSelections(doc, null);
+                if (!access) return null;
+                List<EdgeSignature> edges = ((object)d.Edges as object[] ?? Array.Empty<object>()).OfType<Edge>().Select(Capture.TopologyCapture.Edge).ToList();
+                if (profiles >= edges.Count) return null;
+                var onHinge = new List<string>();
+                foreach (Feature p in candidates)
+                    if (SupportEdgeOf(p) is EdgeSignature support && edges.Any(e => !double.IsPositiveInfinity(e.DistanceTo(support))))
+                        onHinge.Add(p.Name);
+                return new EdgeFlangeFacts(edges.Count, onHinge);
+            }
+            catch (Exception)
+            {
+                // Then only its sub-sketches are its profiles; a missing one makes the flange unsupported at capture.
+                return null;
+            }
+            finally
+            {
+                if (access) d!.ReleaseSelectionAccess();
+            }
+        }
+
+        /// <summary>The edge a sketch was made on (ISketch.GetReferenceEntity), as a fingerprint; null if it has none or it does not read.</summary>
+        public static EdgeSignature? SupportEdgeOf(Feature sketchFeature)
+        {
+            try
+            {
+                if (!((object)sketchFeature.GetSpecificFeature2() is Sketch sketch)) return null;
+                // ref in the interop, though the API only writes it (A2 P15 says out).
+                int kind = 0;
+                return (object)sketch.GetReferenceEntity(ref kind) is Edge e ? Capture.TopologyCapture.Edge(e) : null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -639,6 +700,66 @@ namespace Spiegelwerk.Sw
                 };
             r.OwnAllowance = OwnAllowanceOf(d.UseDefaultBendAllowance, () => (object)d.GetCustomBendAllowance(), out bool unreadable);
             return unreadable;
+        }
+
+        /// <summary>
+        /// The scalars of an edge flange into a record (as <see cref="ReadHemScalars"/>): the values,
+        /// both direction flags, the relief with its tear type, the allowance, and late-bound what only
+        /// newer versions have (lock angle, normal to the flange plane, perpendicular to the face).
+        /// Edges and references are the caller's. Returns whether an own allowance did not read.
+        /// </summary>
+        public static bool ReadEdgeFlangeScalars(EdgeFlangeFeatureData d, EdgeFlangeRecord r)
+        {
+            r.BendAngle = d.BendAngle;
+            r.UseDefaultRadius = d.UseDefaultBendRadius;
+            r.BendRadius = d.BendRadius;
+            r.OffsetType = d.OffsetType;
+            r.OffsetDistance = d.OffsetDistance;
+            r.OffsetDimType = d.OffsetDimType;
+            r.ReverseOffset = d.ReverseOffset;
+            r.PositionType = d.PositionType;
+            r.TrimSideBends = d.UsePositionTrimSideBends;
+            r.UsePositionOffset = d.UsePositionOffset;
+            r.PositionOffsetType = d.PositionOffsetType;
+            r.PositionOffsetDistance = d.PositionOffsetDistance;
+            r.ReversePositionOffset = d.ReversePositionOffset;
+            r.GapDistance = d.GapDistance;
+            r.OwnRelief = d.UseDefaultBendRelief
+                ? null
+                : new ReliefData
+                {
+                    UseAutoRelief = true,
+                    Kind = (ReliefKind)d.AutoReliefType,
+                    UseRatio = d.UseReliefRatio,
+                    Ratio = d.ReliefRatio,
+                    Width = d.ReliefWidth,
+                    Depth = d.ReliefDepth,
+                    TearType = d.ReliefTearType,
+                };
+            r.LockAngle = SwLate.Get(d, "LockAngle") is bool lockAngle ? lockAngle : (bool?)null;
+            r.NormalToFlangePlane = SwLate.Get(d, "NormalToFlangePlane") is bool normal ? normal : (bool?)null;
+            r.PerpendicularToFace = SwLate.Get(d, "PerpendicularToFace") is bool perpendicular ? perpendicular : (bool?)null;
+            r.OwnAllowance = OwnAllowanceOf(d.UseDefaultBendAllowance, () => (object)d.GetCustomBendAllowance(), out bool unreadable);
+            return unreadable;
+        }
+
+        /// <summary>The edge flange as it is now (as <see cref="ReadBackHem"/>); null if its data do not open.</summary>
+        public static EdgeFlangeRecord? ReadBackEdgeFlange(ModelDoc2 doc, Feature f, out int edges)
+        {
+            edges = -1;
+            var d = (object)f.GetDefinition() as EdgeFlangeFeatureData;
+            if (d == null || !d.AccessSelections(doc, null)) return null;
+            try
+            {
+                var r = new EdgeFlangeRecord(f.Name, "EdgeFlange");
+                ReadEdgeFlangeScalars(d, r);
+                edges = d.GetEdgeCount();
+                return r;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
         }
 
         /// <summary>The hem as it is now, read back under its own AccessSelections (no capture, no rollback); null if its data do not open.</summary>

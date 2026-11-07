@@ -47,15 +47,27 @@ namespace Spiegelwerk.Build.Builders
             return result;
         }
 
-        private static bool OnOwnBody(BuildContext ctx, Edge e)
+        private static bool OnOwnBody(BuildContext ctx, Edge e) => BodyOf(e) is Body2 b && ctx.IsOwnBody(b);
+
+        /// <summary>
+        /// The body a face, edge or vertex lies on; null for anything without one (plane, axis, sketch
+        /// point) or if it does not read.
+        /// </summary>
+        public static Body2? BodyOf(object? entity)
         {
             try
             {
-                return (object)e.GetBody() is Body2 b && ctx.IsOwnBody(b);
+                return entity switch
+                {
+                    Face2 face => (object)face.GetBody() as Body2,
+                    Edge edge => (object)edge.GetBody() as Body2,
+                    Vertex vertex => ((object)vertex.GetEdges() as object[])?.OfType<Edge>().Select(e => (object)e.GetBody() as Body2).FirstOrDefault(b => b != null),
+                    _ => null,
+                };
             }
             catch (Exception)
             {
-                return false;
+                return null;
             }
         }
 

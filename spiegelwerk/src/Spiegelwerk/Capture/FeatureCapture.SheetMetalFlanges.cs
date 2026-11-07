@@ -12,8 +12,8 @@ using Spiegelwerk.Sw;
 namespace Spiegelwerk.Capture
 {
     /// <summary>
-    /// Flanges on edges (A2, blech-plan S2): hem and miter flange. Both go through the safe
-    /// sheet-metal dispatch (<see cref="CaptureSheetMetal"/>), so a call that throws makes this
+    /// Flanges on edges (A2, blech-plan S2, S3): hem, miter flange and edge flange. All go through the
+    /// safe sheet-metal dispatch (<see cref="CaptureSheetMetal"/>), so a call that throws makes this
     /// feature unsupported, not the run fail. Edges and values are read under AccessSelections
     /// (the state before the feature), sketches outside it; the bend sub-features are read for
     /// notes (A2 P5).
@@ -63,6 +63,120 @@ namespace Spiegelwerk.Capture
             ReadBendsInto(f, MiterRules.Parent(r), r.Bends, r.BendOverrides, r.Notes, out int count);
             r.BendCount = count;
             return r;
+        }
+
+        /// <summary>
+        /// Edge flange (A2 phase 2b, blech-plan S3). Under AccessSelections: the edges – straight ones
+        /// only –, the values (<see cref="SwSheetMetal.ReadEdgeFlangeScalars"/>, the same reader as the
+        /// read-back) and the references of the length and the position offset where their type has
+        /// one (a straight edge stays an edge, A2 P12; one that does not read makes the flange
+        /// unsupported – the copy would end elsewhere), late-bound the angle's reference. Outside it:
+        /// one profile per edge (<see cref="ReadFlangeProfiles"/>), then the bends.
+        /// </summary>
+        private EdgeFlangeRecord CaptureEdgeFlange(Feature f, string type, EdgeFlangeFeatureData d)
+        {
+            var r = new EdgeFlangeRecord(f.Name, type);
+            var edges = new List<EdgeSignature>();
+            if (!d.AccessSelections(_doc, null))
+                throw new NotSupportedException("Feature-Definition der Kantenlasche konnte nicht gelesen werden (AccessSelections).");
+            try
+            {
+                if (SwSheetMetal.ReadEdgeFlangeScalars(d, r)) r.Notes.Add(OwnAllowanceUnreadable);
+                edges.AddRange(EdgesOf((object)d.Edges, "Kantenlasche"));
+                if (edges.Any(e => e.Kind != CurveKind.Line)) throw new NotSupportedException(EdgeFlangeRules.CurvedEdge);
+                if (EdgeFlangeRules.UsesReference(r.OffsetType))
+                    r.OffsetReference = FlangeReference((object)d.OffsetReference)
+                                        ?? throw new NotSupportedException("Bezug der Laschenlänge nicht lesbar.");
+                if (r.UsePositionOffset && EdgeFlangeRules.UsesReference(r.PositionOffsetType))
+                    r.PositionOffsetReference = FlangeReference((object)d.PositionOffsetReference)
+                                                ?? throw new NotSupportedException("Bezug des Versatzes der Kantenlasche nicht lesbar.");
+                // Newer versions only: an angle given by a face or edge. Its value is the bend angle anyway: without it the copy keeps the number.
+                if (SwLate.Get(d, "AngleReference") is object angle && !(angle is DBNull))
+                {
+                    r.AngleReference = FlangeReference(angle);
+                    if (r.AngleReference == null) r.Notes.Add(AngleReferenceLost);
+                }
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+            if (edges.Count == 0) throw new NotSupportedException("Kantenlasche ohne lesbare Kanten.");
+            ReadFlangeProfiles(f, r, edges);
+            ReadBendsInto(f, EdgeFlangeRules.Parent(r), r.Bends, r.BendOverrides, r.Notes, out int count);
+            r.BendCount = count;
+            return r;
+        }
+
+        /// <summary>
+        /// A reference of an edge flange: a straight edge stays an edge (the general reading makes an
+        /// axis of it), anything else as usual; null for none and for one that cannot be found again.
+        /// </summary>
+        private GeometryRef? FlangeReference(object? o)
+        {
+            if (o is Edge e) return GeometryRef.ToEdge(TopologyCapture.Edge(e));
+            GeometryRef? g = o == null ? null : ToGeometryRef(o);
+            return g == null || g.Kind == GeometryRefKind.Unknown ? null : g;
+        }
+
+        /// <summary>The note when the angle's reference is not carried over (capture or build).</summary>
+        internal const string AngleReferenceLost = "Bezug des Laschenwinkels nicht übertragbar; die Kopie hat den Winkel als Zahl.";
+
+        /// <summary>
+        /// The profiles of an edge flange (A2 P2, P13): its sketch sub-features and the top-level parent
+        /// sketches the tree gives it (<see cref="SheetMetalTree"/>), each read twice – as the finished
+        /// part shows it and in the state before the flange – and merged (<see cref="FlangeProfiles.Merge"/>);
+        /// paired with the edges by the edge it was made on, a line on an edge, or its frame
+        /// (<see cref="FlangeProfiles.Assign"/>). Every edge needs exactly one: anything else makes the
+        /// flange unsupported – a guessed pairing would build the wrong flange.
+        /// </summary>
+        private void ReadFlangeProfiles(Feature flange, EdgeFlangeRecord r, List<EdgeSignature> edges)
+        {
+            List<Feature> sketches = SwDoc.SubFeatures(flange).Where(SwDoc.IsSketch).ToList();
+            foreach (var owned in _sheetMetal.Owners.Where(o => o.Value.owner == flange.Name && o.Value.kind == PartOwnerKind.EdgeFlange))
+                if (sketches.All(s => s.Name != owned.Key) && SwDoc.FeatureByName(_doc, owned.Key) is Feature parent)
+                    sketches.Add(parent);
+            var candidates = new List<ProfileCandidate>();
+            foreach (Feature s in sketches)
+            {
+                if (s.GetTypeName2() != "ProfileFeature") throw new NotSupportedException($"Profilskizze „{s.Name}“ der Kantenlasche ist eine 3D-Skizze.");
+                candidates.Add(ReadFlangeProfile(s));
+            }
+            int[]? pairs = FlangeProfiles.Assign(edges, candidates, byFrame: true);
+            if (pairs == null)
+                throw new NotSupportedException("Die Profilskizzen der Kantenlasche lassen sich ihren Kanten nicht eindeutig zuordnen.");
+            for (int i = 0; i < edges.Count; i++)
+            {
+                int k = Array.IndexOf(pairs, i);
+                if (k < 0) throw new NotSupportedException($"Kante {i + 1} der Kantenlasche ohne Profilskizze.");
+                r.Profiles.Add(new FlangeProfile(candidates[k].Name, candidates[k].Sketch, edges[i]));
+            }
+        }
+
+        /// <summary>
+        /// One profile, read twice (A2 P2): without rollback for its frame and content (a position offset
+        /// included), and with the bar right after the sketch – the state before the flange, where the
+        /// edges and vertices its relations name exist – for the relations, dimensions and the edge it
+        /// was made on. If the bar does not move, both come from the finished part.
+        /// </summary>
+        private ProfileCandidate ReadFlangeProfile(Feature s)
+        {
+            SketchModel final = _sketches.Read(s);
+            SketchModel atFlange = final;
+            EdgeSignature? support;
+            bool rolled = RollBack((int)SolidWorks.Interop.swconst.swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, s.Name);
+            try
+            {
+                if (rolled) atFlange = _sketches.Read(s);
+                support = SwSheetMetal.SupportEdgeOf(s);
+            }
+            finally
+            {
+                if (rolled) _doc.FeatureManager.EditRollback((int)SolidWorks.Interop.swconst.swMoveRollbackBarTo_e.swMoveRollbackBarToEnd, "");
+            }
+            SketchModel merged = FlangeProfiles.Merge(final, atFlange, out string? why)
+                                 ?? throw new NotSupportedException($"Profilskizze „{s.Name}“ der Kantenlasche {why}.");
+            return new ProfileCandidate(s.Name, merged, support);
         }
 
         private const string OwnAllowanceUnreadable = "Eigene Biegezugabe nicht lesbar; die Kopie verwendet die Standard-Biegezugabe.";
