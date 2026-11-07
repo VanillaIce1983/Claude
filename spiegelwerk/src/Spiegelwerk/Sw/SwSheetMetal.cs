@@ -705,9 +705,9 @@ namespace Spiegelwerk.Sw
         /// <summary>
         /// The scalars of an edge flange into a record (as <see cref="ReadHemScalars"/>): the values,
         /// both direction flags, the relief with its tear type, the allowance, and late-bound what only
-        /// newer versions have (lock angle, normal to the flange plane, perpendicular to the face – the
-        /// last only with an angle reference). Edges and references are the caller's; under
-        /// AccessSelections. Returns whether an own allowance did not read.
+        /// newer versions have (lock angle, normal to the flange plane, whether there is an angle
+        /// reference, perpendicular to the face – the last only with one). Edges and references are the
+        /// caller's; under AccessSelections. Returns whether an own allowance did not read.
         /// </summary>
         public static bool ReadEdgeFlangeScalars(EdgeFlangeFeatureData d, EdgeFlangeRecord r)
         {
@@ -739,11 +739,9 @@ namespace Spiegelwerk.Sw
                 };
             r.LockAngle = SwLate.Get(d, "LockAngle") is bool lockAngle ? lockAngle : (bool?)null;
             r.NormalToFlangePlane = SwLate.Get(d, "NormalToFlangePlane") is bool normal ? normal : (bool?)null;
+            r.HasAngleReference = SwLate.Get(d, "AngleReference") is object angleReference && !(angleReference is DBNull);
             // Valid only with an angle reference (help); without one it can read as anything.
-            object? angleReference = SwLate.Get(d, "AngleReference");
-            r.PerpendicularToFace = angleReference != null && !(angleReference is DBNull) && SwLate.Get(d, "PerpendicularToFace") is bool perpendicular
-                ? perpendicular
-                : (bool?)null;
+            r.PerpendicularToFace = r.HasAngleReference && SwLate.Get(d, "PerpendicularToFace") is bool perpendicular ? perpendicular : (bool?)null;
             r.OwnAllowance = OwnAllowanceOf(d.UseDefaultBendAllowance, () => (object)d.GetCustomBendAllowance(), out bool unreadable);
             return unreadable;
         }

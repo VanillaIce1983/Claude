@@ -141,6 +141,13 @@ namespace Spiegelwerk.Core.Planning
         }
 
         /// <summary>
+        /// Whether an angle reference the build set (<paramref name="set"/>: resolved in the target and
+        /// written) is missing from the copy's read-back – <see cref="Differences"/> cannot show it, since
+        /// "perpendicular to the face" then reads as null and is not compared.
+        /// </summary>
+        public static bool AngleReferenceMissing(bool set, EdgeFlangeRecord got) => set && !got.HasAngleReference;
+
+        /// <summary>
         /// The direction states to try when the profile check fails with the chosen one (A2 P2, tbcphutai's
         /// search): the flange direction turned, and – only with a position offset – the offset direction
         /// turned and both. Absolute values (ReverseOffset, ReversePositionOffset), each set in an edit of
@@ -165,6 +172,14 @@ namespace Spiegelwerk.Core.Planning
             (false, true) => OffsetTurned,
             _ => "Richtungen wie gewählt",
         };
+
+        /// <summary>
+        /// The note when no direction state passed the profile check and the chosen one could not be
+        /// set again: the flange stays in the last state the search set (relative to the chosen one).
+        /// </summary>
+        public static string DirectionsNotRestored(bool offsetTurned, bool positionTurned) =>
+            "Die gewählten Richtungen der Kantenlasche ließen sich nach der Profilprüfung nicht wiederherstellen; " +
+            $"sie bleibt bei: {DescribeDirections(offsetTurned, positionTurned)}.";
 
         /// <summary>Alternative and report text: ReverseOffset turned.</summary>
         public const string FlangeTurned = "Laschenrichtung umgekehrt";

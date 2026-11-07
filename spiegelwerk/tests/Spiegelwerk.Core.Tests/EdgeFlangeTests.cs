@@ -176,6 +176,12 @@ namespace Spiegelwerk.Core.Tests
             Assert.True(EdgeFlangeRules.Differences(want, got).None);
             got.PerpendicularToFace = true;
 
+            // A reference the build set but the read-back does not have: Differences cannot see it, the check can.
+            Assert.True(EdgeFlangeRules.AngleReferenceMissing(true, got));
+            Assert.False(EdgeFlangeRules.AngleReferenceMissing(false, got));
+            got.HasAngleReference = true;
+            Assert.False(EdgeFlangeRules.AngleReferenceMissing(true, got));
+
             // Own relief with the tear type, compared where both know it.
             want.OwnRelief = new ReliefData { Kind = ReliefKind.Tear, TearType = ReliefTearTypes.Rip };
             got.OwnRelief = new ReliefData { Kind = ReliefKind.Tear, TearType = ReliefTearTypes.Extend };
@@ -453,6 +459,10 @@ namespace Spiegelwerk.Core.Tests
             // Without a position offset only the flange direction is searched; with one, all three.
             Assert.Equal(new[] { (true, false) }, EdgeFlangeRules.DirectionVariants(false, false, usePositionOffset: false));
             Assert.Equal(new[] { (false, true), (true, false), (false, false) }, EdgeFlangeRules.DirectionVariants(true, true, usePositionOffset: true));
+            // A restore after the search that did not take names the state the flange stays in.
+            Assert.Equal("Die gewählten Richtungen der Kantenlasche ließen sich nach der Profilprüfung nicht wiederherstellen; " +
+                         "sie bleibt bei: Laschenrichtung umgekehrt, Versatzrichtung der Lasche umgekehrt.", EdgeFlangeRules.DirectionsNotRestored(true, true));
+            Assert.EndsWith("sie bleibt bei: Versatzrichtung der Lasche umgekehrt.", EdgeFlangeRules.DirectionsNotRestored(false, true));
 
             Assert.True(EdgeFlangeRules.UsesReference(FlangeOffsetTypes.UptoEdgeAndMerge));
             Assert.False(EdgeFlangeRules.UsesReference(FlangeOffsetTypes.MidPlane));

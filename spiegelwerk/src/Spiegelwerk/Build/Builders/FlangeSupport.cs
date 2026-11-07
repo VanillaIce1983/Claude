@@ -103,16 +103,18 @@ namespace Spiegelwerk.Build.Builders
         }
 
         /// <summary>
-        /// A variant for the check whose edit may reset the custom allowance (B27): after the toggle
-        /// the allowance is read back and set again if it moved. Toggling twice restores the feature.
+        /// A variant for the check whose edit may reset the custom allowance (B27): after every toggle
+        /// call the allowance is read back and set again if it moved – also after one that returns
+        /// false, which can follow an edit that took (an edge flange's toggle-back whose profiles did
+        /// not come back); without an edit it only reads. Toggling twice restores the feature. The
+        /// toggle's result goes to the check unchanged.
         /// </summary>
         public static Func<bool> KeepingAllowance(BuildContext ctx, Feature f, string type, BendAllowanceData? want,
             Func<(bool ok, BendAllowanceData? own)> readBack, Func<bool> toggle) => () =>
         {
-            if (!toggle()) return false;
-            var notes = new List<string>();
-            SettleAllowance(ctx, f, type, want, readBack, "", notes);
-            return true;
+            bool toggled = toggle();
+            SettleAllowance(ctx, f, type, want, readBack, "", new List<string>());
+            return toggled;
         };
 
         /// <summary>

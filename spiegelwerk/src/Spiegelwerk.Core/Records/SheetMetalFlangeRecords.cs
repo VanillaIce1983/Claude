@@ -158,6 +158,13 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Newer versions only (late-bound): the face or edge the angle refers to; null without one.</summary>
         public GeometryRef? AngleReference { get; set; }
 
+        /// <summary>
+        /// Newer versions only (late-bound): the flange has an angle reference, as the reader sees it –
+        /// also in the copy's read-back, which does not resolve it into <see cref="AngleReference"/>.
+        /// False without one and where not readable.
+        /// </summary>
+        public bool HasAngleReference { get; set; }
+
         /// <summary>Sub-features whose definition is IOneBendFeatureData.</summary>
         public int BendCount { get; set; }
 

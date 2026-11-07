@@ -186,9 +186,12 @@ namespace Spiegelwerk.Build.Builders
             if (checks != null && !checks.All(c => c.Passed))
             {
                 bool found = false;
+                // The last state an edit of the search set: the flags stand there until the restore takes.
+                (bool reverse, bool position)? applied = null;
                 foreach (var (vr, vp) in EdgeFlangeRules.DirectionVariants(flip, r.ReversePositionOffset, r.UsePositionOffset))
                 {
                     if (!SetDirections(ctx, f, vr, vp)) continue;
+                    applied = (vr, vp);
                     List<ProfileCheck>? again = CheckProfiles(ctx, r, hinges, names);
                     if (again == null || !again.All(c => c.Passed)) continue;
                     reverse = vr;
@@ -197,8 +200,14 @@ namespace Spiegelwerk.Build.Builders
                     info.Add($"Richtung durch die Profilprüfung bestimmt: {EdgeFlangeRules.DescribeDirections(vr != flip, vp != r.ReversePositionOffset)}.");
                     break;
                 }
-                // None fits: back to the state the profile plane was chosen with.
-                if (!found) SetDirections(ctx, f, reverse, reversePosition);
+                // None fits: back to the state the profile plane was chosen with. If that edit fails, the
+                // flags stay at the last variant set – the stored state follows them (the direction
+                // alternatives work from it). No variant set: the search never moved them.
+                if (!found && !SetDirections(ctx, f, reverse, reversePosition) && applied != null)
+                {
+                    (reverse, reversePosition) = applied.Value;
+                    notes.Add(EdgeFlangeRules.DirectionsNotRestored(reverse != flip, reversePosition != r.ReversePositionOffset));
+                }
             }
 
             // ---- 7. allowance, read-back, bends, final profile check
@@ -215,6 +224,9 @@ namespace Spiegelwerk.Build.Builders
                 Deviations d = EdgeFlangeRules.Differences(r, now);
                 notes.AddRange(d.Differences.Select(x => $"Kantenlasche: {x}"));
                 notes.AddRange(d.Notes.Select(x => $"Kantenlasche: {x}"));
+                // A reference that did not take: "perpendicular to the face" then reads as null and is not compared.
+                if (EdgeFlangeRules.AngleReferenceMissing(refs.Angle != null, now))
+                    notes.Add($"Bezug des Laschenwinkels ließ sich nicht setzen. {FeatureCapture.AngleReferenceLost}");
             }
             FlangeSupport.CheckBends(ctx, f, r.BendCount, EdgeFlangeRules.Parent(r), r.Bends, r.BendOverrides, notes, info);
 
@@ -541,12 +553,10 @@ namespace Spiegelwerk.Build.Builders
                 }
             }
             if (r.NormalToFlangePlane.HasValue) SwLate.Set(d, "NormalToFlangePlane", r.NormalToFlangePlane.Value);
-            // Perpendicular to the face only with the reference it refers to (help: valid only then).
-            if (refs.Angle != null)
-            {
-                SwLate.Set(d, "AngleReference", refs.Angle);
-                if (r.PerpendicularToFace.HasValue) SwLate.Set(d, "PerpendicularToFace", r.PerpendicularToFace.Value);
-            }
+            // Perpendicular to the face only with the reference it refers to (help: valid only then) – not
+            // if the reference did not take; the read-back tells whether it is there (step 7).
+            if (refs.Angle != null && SwLate.Set(d, "AngleReference", refs.Angle) && r.PerpendicularToFace.HasValue)
+                SwLate.Set(d, "PerpendicularToFace", r.PerpendicularToFace.Value);
             if (r.LockAngle.HasValue && r.OffsetType == FlangeOffsetTypes.UptoEdgeAndMerge) SwLate.Set(d, "LockAngle", r.LockAngle.Value);
         }
 
