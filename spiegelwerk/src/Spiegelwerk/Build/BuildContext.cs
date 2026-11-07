@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
 using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Core.Sketch;
@@ -43,6 +44,15 @@ namespace Spiegelwerk.Build
 
         /// <summary>Model coordinates (target) of an original point, after mirroring.</summary>
         public Vec3 TargetModelPoint(string id) => Mirrored.Sketch.ToModel(Mirrored.Sketch.Point(id));
+
+        /// <summary>Opened on the mirrored face of the original's support face (<see cref="BuildContext.SketchSupportFaces"/>), not on a plane.</summary>
+        public bool OnSupportFace { get; set; }
+
+        /// <summary>
+        /// Why a sketch that should go on its mirrored support face went on a plane; null if it went on
+        /// the face or had none. The consumer decides whether a plane will do (blech-plan K7).
+        /// </summary>
+        public string? SupportFaceMissed { get; set; }
     }
 
     /// <summary>
@@ -169,6 +179,28 @@ namespace Spiegelwerk.Build
         /// sketches of sketch driven patterns: a stand-in there must not be a point of its own.
         /// </summary>
         public HashSet<string> PointSketches { get; } = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Original sketch name → the face it was drawn on (unmirrored, state right after the sketch;
+        /// blech-plan K7): <see cref="SketchBuilder.Build"/> opens the copy on the mirrored face where
+        /// it is found. Filled from the records of sketched bends and jogs (<see cref="NoteSupportFaces"/>).
+        /// </summary>
+        public Dictionary<string, FaceSignature> SketchSupportFaces { get; } = new Dictionary<string, FaceSignature>(StringComparer.Ordinal);
+
+        /// <summary>The support faces of the sketches that sketched bends and jogs are made from.</summary>
+        public void NoteSupportFaces(IEnumerable<FeatureRecord> records)
+        {
+            foreach (FeatureRecord r in records)
+                switch (r)
+                {
+                    case SketchedBendRecord b when b.SketchFace != null:
+                        SketchSupportFaces[b.SketchName] = b.SketchFace;
+                        break;
+                    case JogRecord j when j.SketchFace != null:
+                        SketchSupportFaces[j.SketchName] = j.SketchFace;
+                        break;
+                }
+        }
 
         /// <summary>Original feature name → new feature.</summary>
         public Dictionary<string, Feature> Created { get; } = new Dictionary<string, Feature>(StringComparer.Ordinal);

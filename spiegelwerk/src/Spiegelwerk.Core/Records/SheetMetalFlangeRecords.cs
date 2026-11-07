@@ -1,11 +1,12 @@
 using System.Collections.Generic;
 using System.Linq;
+using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Sketch;
 
 namespace Spiegelwerk.Core.Records
 {
-    // Flanges on edges (A2, blech-plan S2, S3): hem, miter flange and edge flange. A reflection
+    // Flanges on edges (A2, blech-plan S2, S3): hem, miter flange and edge flange; the jog (S4). A reflection
     // keeps every length, angle and radius and maps the edges, faces and profiles onto their
     // mirror images, so the scalars go over unchanged; only the edge fingerprints and the profile
     // sketches are mirrored – and the edge flange's sketch angle, which is a rotation about the
@@ -50,6 +51,24 @@ namespace Spiegelwerk.Core.Records
     public static class ReliefTearTypes
     {
         public const int Rip = 1, Extend = 2;
+    }
+
+    /// <summary>Same numbers as swJogOffsetTypes_e: how the offset of a jog ends.</summary>
+    public static class JogOffsetTypes
+    {
+        public const int Blind = 1, UpToVertex = 2, UpToSurface = 3, FromSurface = 4, MidPlane = 5;
+    }
+
+    /// <summary>Same numbers as swJogDimensionPositionType_e: what the offset of a jog measures.</summary>
+    public static class JogDimensionPositions
+    {
+        public const int InsideOffset = 1, OutsideOffset = 2, OverallPosition = 3;
+    }
+
+    /// <summary>Same numbers as swJogPositionType_e: where the jog's bends sit relative to its line.</summary>
+    public static class JogPositions
+    {
+        public const int BendCenterline = 1, MaterialInside = 2, MaterialOutside = 3, BendOutside = 4;
     }
 
     /// <summary>
@@ -308,6 +327,93 @@ namespace Spiegelwerk.Core.Records
         public List<BendOverride> BendOverrides { get; } = new List<BendOverride>();
 
         /// <summary>The bends carry faces of their own.</summary>
+        public override bool SampleSubFeatures => true;
+    }
+
+    /// <summary>
+    /// Jog (IJogFeatureData, A2 phase 2c, blech-plan S4): two bends along one sketch line that offset
+    /// one side of the sheet. Its sketch is an ordinary sketch record of its own, rebuilt on the
+    /// mirrored face it was drawn on (B36: on a plane it is not accepted); the line is selected with
+    /// the fixed face, picked at a point beside the line on the side that stays. Angle, radius,
+    /// offset, positions and allowance are unchanged; which way it goes the witnesses decide, as for
+    /// the sketched bend.
+    /// </summary>
+    public sealed class JogRecord : FeatureRecord
+    {
+        public JogRecord(string name, string typeName, string sketchName) : base(name, typeName)
+        {
+            SketchName = sketchName;
+        }
+
+        /// <summary>The sketch with the jog line.</summary>
+        public string SketchName { get; }
+
+        /// <summary>Id of the one non-construction line of the sketch.</summary>
+        public string LineId { get; set; } = "";
+
+        /// <summary>The jog line in model coordinates, through its midpoint; null in a read-back.</summary>
+        public Line3? Line { get; set; }
+
+        /// <summary>The face that stays (FixedFace), in the state before the jog; null only in a read-back.</summary>
+        public FaceSignature? FixedFace { get; set; }
+
+        /// <summary>A point on the side that stays, model coordinates; null if its space could not be decided.</summary>
+        public Vec3? FixedPoint { get; set; }
+
+        /// <summary>In which space FixedPoint was read (undocumented for the jog; model space first, A2's evidence).</summary>
+        public FixedPointSpace FixedPointSpace { get; set; }
+
+        /// <summary>Both readings lie on the face, in different regions: the side is treated as unknown.</summary>
+        public bool FixedPointAmbiguous { get; set; }
+
+        /// <summary>The face the sketch was drawn on, in the state right after the sketch; null if on a plane or not readable.</summary>
+        public FaceSignature? SketchFace { get; set; }
+
+        public bool UseDefaultRadius { get; set; } = true;
+
+        /// <summary>Metres.</summary>
+        public double Radius { get; set; }
+
+        /// <summary>Radians, as the data object reads it (the insert call wants degrees, B42).</summary>
+        public double Angle { get; set; }
+
+        /// <summary><see cref="JogOffsetTypes"/>.</summary>
+        public int OffsetType { get; set; } = JogOffsetTypes.Blind;
+
+        /// <summary>Metres.</summary>
+        public double OffsetDistance { get; set; }
+
+        /// <summary>The vertex, face or plane the offset goes up to or from (offset types 2–4).</summary>
+        public GeometryRef? OffsetReference { get; set; }
+
+        /// <summary>Relative to the offset reference, whose outward normal stays outward: carried over unchanged.</summary>
+        public bool ReverseOffset { get; set; }
+
+        /// <summary>ReverseDirection of the original: its reference is not documented – the witnesses decide the copy's.</summary>
+        public bool ReverseDirection { get; set; }
+
+        /// <summary><see cref="JogDimensionPositions"/>.</summary>
+        public int DimensionPosition { get; set; } = JogDimensionPositions.InsideOffset;
+
+        public bool FixProjectedLength { get; set; }
+
+        /// <summary><see cref="JogPositions"/>.</summary>
+        public int JogPosition { get; set; } = JogPositions.BendCenterline;
+
+        /// <summary>The jog's own allowance; null: the default. A bend table is not settable on a jog (B27).</summary>
+        public BendAllowanceData? OwnAllowance { get; set; }
+
+        /// <summary>Sheet thickness of the body, metres; 0 if not read.</summary>
+        public double Thickness { get; set; }
+
+        /// <summary>Points on faces the jog made or moved, state right after it (unmirrored); empty: not taken.</summary>
+        public List<Vec3> Witnesses { get; } = new List<Vec3>();
+
+        public int BendCount { get; set; }
+        public List<BendValues> Bends { get; } = new List<BendValues>();
+        public List<BendOverride> BendOverrides { get; } = new List<BendOverride>();
+
+        /// <summary>The bend faces belong to the bend sub-features.</summary>
         public override bool SampleSubFeatures => true;
     }
 }

@@ -80,6 +80,7 @@ namespace Spiegelwerk.Build.Builders
                 bodies ? new HashSet<string>(StringComparer.Ordinal) : ctx.OwnNames, m.Name);
             foreach (PartOfFeatureRecord part in records.OfType<PartOfFeatureRecord>()) child.PartOwners[part.Name] = part.Owner;
             foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) child.PointSketches.Add(pattern.SketchName);
+            child.NoteSupportFaces(records);
             foreach (FeatureRecord r in records)
                 MirrorFeatureRules.Patch(r, ctx.Shared.Built.TryGetValue(r.Name, out BuiltFeature first) ? first : null, secondHalf.Plane);
             child.Check = ChooseCheck(ctx, m, records, secondHalf);

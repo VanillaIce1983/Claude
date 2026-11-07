@@ -214,6 +214,8 @@ namespace Spiegelwerk.Build
             }
             foreach (PartOfFeatureRecord part in records.OfType<PartOfFeatureRecord>()) ctx.PartOwners[part.Name] = part.Owner;
             foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) ctx.PointSketches.Add(pattern.SketchName);
+            // The sketches of sketched bends and jogs go on the mirrored faces they were drawn on (K7).
+            ctx.NoteSupportFaces(records);
             // The copies' flat patterns get the state of their originals (flattened or folded) – once, also after an unexpected error.
             List<string> FlatStates() => session == null ? new List<string>()
                 : session.ApplyTo(target, records.OfType<FlatPatternRecord>().Where(fp => ctx.Created.ContainsKey(fp.Name)).Select(fp => (fp.Name, ctx.Created[fp.Name])));

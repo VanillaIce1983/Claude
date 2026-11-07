@@ -746,6 +746,78 @@ namespace Spiegelwerk.Sw
             return unreadable;
         }
 
+        /// <summary>
+        /// The scalars of a sketched bend into a record (as <see cref="ReadHemScalars"/>): angle, radius,
+        /// position, direction, allowance. Fixed face and point are the caller's. Returns whether an own
+        /// allowance did not read.
+        /// </summary>
+        public static bool ReadSketchedBendScalars(SketchedBendFeatureData d, SketchedBendRecord r)
+        {
+            r.Angle = d.BendAngle;
+            r.UseDefaultRadius = d.UseDefaultBendRadius;
+            r.Radius = d.BendRadius;
+            r.PositionType = d.PositionType;
+            r.Reverse = d.ReverseDirection;
+            r.OwnAllowance = OwnAllowanceOf(d.UseDefaultBendAllowance, () => (object)d.GetCustomBendAllowance(), out bool unreadable);
+            return unreadable;
+        }
+
+        /// <summary>The sketched bend as it is now (as <see cref="ReadBackHem"/>); null if its data do not open.</summary>
+        public static SketchedBendRecord? ReadBackSketchedBend(ModelDoc2 doc, Feature f)
+        {
+            var d = (object)f.GetDefinition() as SketchedBendFeatureData;
+            if (d == null || !d.AccessSelections(doc, null)) return null;
+            try
+            {
+                var r = new SketchedBendRecord(f.Name, "SM3dBend", "");
+                ReadSketchedBendScalars(d, r);
+                return r;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+        }
+
+        /// <summary>
+        /// The scalars of a jog into a record (as <see cref="ReadHemScalars"/>): radius, angle, offset (type,
+        /// distance, ReverseOffset), direction, dimension and jog position, fixed projected length,
+        /// allowance. Line, fixed face and point and the offset reference are the caller's. Returns
+        /// whether an own allowance did not read.
+        /// </summary>
+        public static bool ReadJogScalars(JogFeatureData d, JogRecord r)
+        {
+            r.UseDefaultRadius = d.UseDefaultBendRadius;
+            r.Radius = d.BendRadius;
+            r.Angle = d.JogAngle;
+            r.OffsetType = d.OffsetType;
+            r.OffsetDistance = d.OffsetDistance;
+            r.ReverseOffset = d.ReverseOffset;
+            r.ReverseDirection = d.ReverseDirection;
+            r.DimensionPosition = d.DimensionPositionType;
+            r.FixProjectedLength = d.FixProjectedLength;
+            r.JogPosition = d.JogPositionType;
+            r.OwnAllowance = OwnAllowanceOf(d.UseDefaultBendAllowance, () => (object)d.GetCustomBendAllowance(), out bool unreadable);
+            return unreadable;
+        }
+
+        /// <summary>The jog as it is now (as <see cref="ReadBackHem"/>); null if its data do not open.</summary>
+        public static JogRecord? ReadBackJog(ModelDoc2 doc, Feature f)
+        {
+            var d = (object)f.GetDefinition() as JogFeatureData;
+            if (d == null || !d.AccessSelections(doc, null)) return null;
+            try
+            {
+                var r = new JogRecord(f.Name, "Jog", "");
+                ReadJogScalars(d, r);
+                return r;
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+        }
+
         /// <summary>The edge flange as it is now (as <see cref="ReadBackHem"/>); null if its data do not open.</summary>
         public static EdgeFlangeRecord? ReadBackEdgeFlange(ModelDoc2 doc, Feature f, out int edges)
         {

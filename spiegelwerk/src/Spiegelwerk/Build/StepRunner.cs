@@ -60,6 +60,8 @@ namespace Spiegelwerk.Build
             new HemBuilder(),
             new MiterFlangeBuilder(),
             new EdgeFlangeBuilder(),
+            new SketchedBendBuilder(),
+            new JogBuilder(),
         };
 
         /// <summary>

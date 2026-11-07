@@ -105,6 +105,9 @@ namespace Spiegelwerk.Core.Planning
 
         internal static string Mm(double metres, IFormatProvider? culture) => ReportText.Number(metres * 1000, 6, culture) + " mm";
 
+        /// <summary>Radians written in degrees, „90°“.</summary>
+        internal static string Deg(double radians, IFormatProvider? culture) => ReportText.Number(radians * 180 / Math.PI, 4, culture) + "°";
+
         private static (string, double, double, ScalarKind) Flag(string name, bool want, bool got) => (name, want ? 1 : 0, got ? 1 : 0, ScalarKind.Flag);
 
         /// <summary>

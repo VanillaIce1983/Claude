@@ -15,6 +15,7 @@ namespace Spiegelwerk.Capture
     /// reader keeps ReleaseSelectionAccess and EditRollback(End) in its own finally.
     /// S1a: base flange (and tab) with its SheetMetal and the part's defaults, flat pattern.
     /// S2: hem and miter flange, S3: edge flange (<c>FeatureCapture.SheetMetalFlanges.cs</c>).
+    /// S4: sketched bend (<c>FeatureCapture.SheetMetalBends.cs</c>) and jog.
     /// </summary>
     internal sealed partial class FeatureCapture
     {
@@ -70,6 +71,8 @@ namespace Spiegelwerk.Capture
             HemFeatureData hm => CaptureHem(f, type, hm),
             MiterFlangeFeatureData mf => CaptureMiterFlange(f, type, mf),
             EdgeFlangeFeatureData ef => CaptureEdgeFlange(f, type, ef),
+            SketchedBendFeatureData sb => CaptureSketchedBend(f, type, sb),
+            JogFeatureData jg => CaptureJog(f, type, jg),
             _ => null,
         };
 

@@ -144,6 +144,47 @@ namespace Spiegelwerk.Build.Builders
             return SwSelect.Select(doc, face, mark, false);
         }
 
+        /// <summary>How far the point SOLIDWORKS reports for a ray pick may lie from the wanted one (10 µm, as the face samples): the side is what counts, and every pick point keeps at least a millimetre from the lines.</summary>
+        public const double RayPickTolerance = 1e-5;
+
+        /// <summary>
+        /// A face picked at a point (A3 P1, blech-plan K8): a ray from just outside the face at
+        /// <paramref name="p"/> along its inward normal (radius 0.1 mm). Accepted only if SOLIDWORKS
+        /// selected this very face – separate body: on a mirrored body – and reports the pick point at
+        /// <paramref name="p"/>: the point is what tells a bend or jog which side stays. There is no
+        /// selection without a point: on false the selection is cleared and the caller selects again.
+        /// </summary>
+        public static bool SelectFaceByRay(BuildContext ctx, Face2 face, Vec3 p, int mark, bool append)
+        {
+            ModelDoc2 doc = ctx.Doc;
+            try
+            {
+                FaceSignature sig = TopologyCapture.Face(face);
+                if (sig.Kind != SurfaceKind.Plane) return Cleared(doc);
+                Vec3 n = sig.Normal.Normalized();
+                Vec3 start = p + n * 1e-5;
+                if (!doc.Extension.SelectByRay(start.X, start.Y, start.Z, -n.X, -n.Y, -n.Z, 1e-4, (int)swSelectType_e.swSelFACES, append, mark,
+                        (int)swSelectOption_e.swSelectOptionDefault))
+                    return Cleared(doc);
+                var sm = (SelectionMgr)(object)doc.SelectionManager;
+                int count = sm.GetSelectedObjectCount2(-1);
+                if (count < 1 || !((object)sm.GetSelectedObject6(count, -1) is Face2 picked) || !IsSameFace(ctx, picked, face)) return Cleared(doc);
+                if (!((object)sm.GetSelectionPoint2(count, -1) is double[] at) || at.Length < 3 || Vec3.FromArray(at).DistanceTo(p) > RayPickTolerance)
+                    return Cleared(doc);
+                return true;
+            }
+            catch (Exception)
+            {
+                return Cleared(doc);
+            }
+        }
+
+        private static bool Cleared(ModelDoc2 doc)
+        {
+            SwSelect.Clear(doc);
+            return false;
+        }
+
         private static bool IsSameFace(BuildContext ctx, Face2 picked, Face2 target)
         {
             FaceSignature a = TopologyCapture.Face(picked), b = TopologyCapture.Face(target);

@@ -116,17 +116,39 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   die Lasche nicht anzulegen. `ISketch.GetReferenceEntity` nimmt in der Interop `ref int` (A2 P15: `out`). Das Tor B29 ist nicht erprobt;
   wie bei S1a sind die Typen trotzdem geöffnet – scheitert B29, kommt `EdgeFlange` auf „noch nicht“ zurück. Nicht in einer laufenden
   SOLIDWORKS-Sitzung erprobt.
+- Blech S4 (Zweig `feat-blech`): skizzierte Biegung und Kröpfung. Core: `SketchedBendRecord` (`SheetMetalBendRecords.cs`, mit
+  `FixedPointSpace`), `JogRecord` mit den swconst-Zahlen (`JogOffsetTypes`, `JogDimensionPositions`, `JogPositions`), `BendSide` (Bereiche,
+  Wahlpunkte je Bereich, `PointBeside`, `PickOrder`, `ChooseFixedPoint`, Abstand), `SheetMetalBendRules` (Code der Biegeposition, erste
+  Vermutung der Richtung, Biegelinien, Zeugenauswahl, Vergleich der Varianten, Zurücklesen, Texte), `JogRules` (Codes, Grad, Versatz beim
+  Anlegen, eine Linie, Zurücklesen, Texte), `Jog` und `SM3dBend` „nachgebaut“; Tests `SheetMetalBendTests` (A3 #1–#3, #14 und mehr),
+  `BendSideTests` (A3 #4–#6, A2 #11/#12), Ablehnung, Berichtstexte, swconst-Nummern. Add-In: `CaptureSupportFace` und `CaptureWitnesses`
+  (`FeatureCapture`), Leser in `FeatureCapture.SheetMetalBends` und `.SheetMetalFlanges`, `SwSheetMetal.ReadSketchedBendScalars`/
+  `ReadJogScalars`/`ReadBack…`, `FeatureEdit.SketchedBend`/`Jog` (Biegezugabe typisiert), `BuildContext.SketchSupportFaces`/`NoteSupportFaces`,
+  `SketchBuilder.Build` auf der Fläche (`SketchMap.OnSupportFace`, `SupportFaceMissed`), `BuilderSupport.SelectFaceByRay`, `SwShape.Misses`,
+  `BendSupport` (feste Fläche, Suche), `SketchedBendBuilder`, `JogBuilder`. STOLPERSTEINE 224–230, Prüftabelle (B36–B43).
+  Abweichend vom Plan: Zeugen sind nach den Flächen des Features und seiner Biegungen die Flächen seines Körpers, die es gemacht oder bewegt
+  hat (Fingerabdruck davor nicht vorhanden); die um mehr als 1° gedrehten nur, wenn die Flächen davor nicht lesbar sind. Der Treffpunkt der
+  Strahlauswahl darf 10 µm vom Wahlpunkt liegen (der Plan: `Tol.Length`). `SideCandidates` sucht auf einem Gitter um den Flächenpunkt mit
+  Punkten neben jeder Linie, bevorzugt bis zu einem Viertel der Fläche Abstand und fragt den Kern (`onFace`), statt nur Punkte neben der
+  Linienmitte zu nehmen; die Reihenfolge der Punkte (`PickOrder`) steht in Core. `FixedPointSpace` ist eine Aufzählung in den Datensätzen,
+  die Wahl `BendSide.ChooseFixedPoint`. Die Kröpfung sucht nach `ReverseDirection` auch `ReverseOffset` ab (der Plan: unverändert, nur als
+  Variante); die Variante „feste Seite gewechselt“ gibt es nicht – die Zeugen entscheiden die Seite, ohne sie sagt es ein Hinweis; `FixedPoint`
+  wird nicht gesetzt. Ohne Zeugen gibt es den Hinweis nur, wenn keine Prüfung die Richtung bestätigen kann (sonst Prüfvariante und Hinweis
+  bei Abweichung, wie die Entlastung des Saums). `ctx.Bends` kommt mit S5 (K25). Die Dicke für den Abstand liest die Erfassung vom
+  Blech-Feature des Körpers. `SketchBend` bleibt wie `OneBend` ein Teil „noch nicht“ (nie gesammelt). Das Tor B36 ist nicht erprobt; wie
+  bei S1a und S3 sind die Typen trotzdem geöffnet – scheitert B36, wird die Kröpfung „nicht unterstützt“. Nicht in einer laufenden
+  SOLIDWORKS-Sitzung erprobt.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S2 stehen und sind geprüft, S3 (Kantenlasche) steht (Zweig `feat-blech`), als Nächstes seine Prüfung und S4 (skizzierte Biegung, Kröpfung); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S3 stehen und sind geprüft, S4 (skizzierte Biegung, Kröpfung) steht (Zweig `feat-blech`), als Nächstes seine Prüfung und S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S3 prüfen und gegenprüfen, dann S4 (skizzierte Biegung, Kröpfung) usw. nach `blech-plan.md`; jeder Schritt mit
-   Core-Tests, Prüfung und Gegenprüfung.
+1. Blech S4 prüfen und gegenprüfen, dann S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung) usw. nach `blech-plan.md`;
+   jeder Schritt mit Core-Tests, Prüfung und Gegenprüfung.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.
 3. Doku, Version, Regressionsprüfung, Release (Tag nur nach Rückfrage).

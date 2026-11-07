@@ -4,6 +4,7 @@ using System.Linq;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Planning;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Core.Sketch;
@@ -188,6 +189,116 @@ namespace Spiegelwerk.Capture
             finally
             {
                 _doc.FeatureManager.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToEnd, "");
+            }
+        }
+
+        /// <summary>
+        /// The face a sketch was drawn on (blech-plan §1.6, K7), read with the bar right after the sketch –
+        /// for a sketch a feature absorbs that is the state just before the feature, before a bend split
+        /// the face or moved part of it. Null for a sketch on a plane (no rollback then), if the bar does
+        /// not move, or if the reference is no face.
+        /// </summary>
+        private FaceSignature? CaptureSupportFace(Feature sketchFeature)
+        {
+            bool onPlane = false;
+            try
+            {
+                if (!((object)sketchFeature.GetSpecificFeature2() is Sketch sketch)) return null;
+                int kind = 0;
+                object? reference = (object)sketch.GetReferenceEntity(ref kind);
+                onPlane = reference is RefPlane || (reference is Feature plane && (object)plane.GetSpecificFeature2() is RefPlane);
+            }
+            catch (Exception)
+            {
+                // Not readable in the finished part (the face may be split): asked again before the feature.
+            }
+            if (onPlane) return null;
+            if (!RollBack((int)swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, sketchFeature.Name)) return null;
+            try
+            {
+                if (!((object)sketchFeature.GetSpecificFeature2() is Sketch sketch)) return null;
+                int kind = 0;
+                return (object)sketch.GetReferenceEntity(ref kind) is Face2 face ? TopologyCapture.Face(face) : null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+            finally
+            {
+                _doc.FeatureManager.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToEnd, "");
+            }
+        }
+
+        /// <summary>A face turned against the fixed face by more than this counts as moved by a bend (A3 P2).</summary>
+        private static readonly double TurnedAngle = Math.PI / 180;
+
+        /// <summary>
+        /// Witnesses of a sketched bend or jog (A3 P2, blech-plan K10): with the bar right after the
+        /// feature, at most <see cref="SheetMetalBendRules.MaxWitnesses"/> points on its own faces and
+        /// those of its bend sub-features, then on the faces of its body it made or moved – those whose
+        /// fingerprint none of <paramref name="before"/> (the body's faces before it) has; without
+        /// those, the planar faces turned more than 1° against the fixed face. The mirrored points must
+        /// lie on the copy's faces. Null if the bar does not move or the faces do not read.
+        /// </summary>
+        private List<Vec3>? CaptureWitnesses(Feature f, FaceSignature fixedFace, IReadOnlyList<FaceSignature> before)
+        {
+            if (!RollBack((int)swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, f.Name)) return null;
+            try
+            {
+                List<Face2> ownFaces = new[] { f }.Concat(SwDoc.SubFeatures(f).Where(s => !SwDoc.IsSketch(s))).SelectMany(FacesOf).ToList();
+                var own = new List<Vec3>();
+                foreach (Face2 face in ownFaces) own.Add(TopologyCapture.Face(face).Sample);
+                List<Body2> bodies = SwDoc.SolidBodies(_doc).Where(b => b.GetFeatures() is object[] fs && fs.OfType<Feature>().Any(x => x.Name == f.Name)).ToList();
+                if (bodies.Count == 0)
+                    bodies = ownFaces.Select(x => (object)x.GetBody() as Body2).Where(b => b != null).Select(b => b!).GroupBy(b => b.Name).Select(g => g.First()).ToList();
+                var moved = new List<Vec3>();
+                foreach (Face2 face in bodies.SelectMany(b => ((object)b.GetFaces() as object[])?.OfType<Face2>() ?? Enumerable.Empty<Face2>()))
+                {
+                    FaceSignature sig = TopologyCapture.Face(face);
+                    if (before.Count > 0)
+                    {
+                        if (!before.Any(b => b.CouldBe(sig) && b.Sample.AlmostEquals(sig.Sample, Tol.Length))) moved.Add(sig.Sample);
+                    }
+                    else if (sig.Kind == SurfaceKind.Plane && Math.Acos(Math.Max(-1, Math.Min(1, sig.Normal.Dot(fixedFace.Normal)))) > TurnedAngle)
+                        moved.Add(sig.Sample);
+                }
+                return SheetMetalBendRules.PickWitnesses(new IReadOnlyList<Vec3>[] { own, moved });
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+            finally
+            {
+                _doc.FeatureManager.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToEnd, "");
+            }
+        }
+
+        /// <summary>The faces of a feature; none for one the kernel does not list.</summary>
+        private static List<Face2> FacesOf(Feature f)
+        {
+            try
+            {
+                return ((object)f.GetFaces() as object[])?.OfType<Face2>().ToList() ?? new List<Face2>();
+            }
+            catch (Exception)
+            {
+                return new List<Face2>();
+            }
+        }
+
+        /// <summary>The fingerprints of every face of the body a face lies on; empty if it does not read.</summary>
+        private static List<FaceSignature> BodyFaces(Face2 face)
+        {
+            try
+            {
+                if (!((object)face.GetBody() is Body2 body)) return new List<FaceSignature>();
+                return (((object)body.GetFaces() as object[])?.OfType<Face2>() ?? Enumerable.Empty<Face2>()).Select(TopologyCapture.Face).ToList();
+            }
+            catch (Exception)
+            {
+                return new List<FaceSignature>();
             }
         }
 

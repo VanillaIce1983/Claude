@@ -68,7 +68,7 @@ namespace Spiegelwerk.Core.Tests
 
         [Theory]
         [InlineData("SheetMetal")]
-        [InlineData("Jog")]
+        [InlineData("UnFold")]
         [InlineData("SketchBend")]
         [InlineData("FlattenBends")]
         [InlineData("ProcessBends")]
@@ -84,6 +84,8 @@ namespace Spiegelwerk.Core.Tests
         [InlineData("SMMiteredFlange")]
         [InlineData("Hem")]
         [InlineData("EdgeFlange")]
+        [InlineData("Jog")]
+        [InlineData("SM3dBend")]
         [InlineData("FlatPattern")]
         [InlineData("TemplateSheetMetal")]
         public void Rebuilt_sheet_metal_types_are_reported_as_unreadable_not_as_unsupported(string type)
@@ -97,7 +99,9 @@ namespace Spiegelwerk.Core.Tests
         {
             // The first of them carries the body: nothing after it could be built.
             Assert.True(UnsupportedFeatures.RefusesRun("SheetMetal"));
-            Assert.True(UnsupportedFeatures.RefusesRun("Jog"));
+            Assert.True(UnsupportedFeatures.RefusesRun("UnFold"));
+            // Decided by blech-plan S4: jog and sketched bend are rebuilt.
+            Assert.False(UnsupportedFeatures.RefusesRun("Jog"));
             Assert.True(UnsupportedFeatures.RefusesRun("MirrorStock"));
             // Decided by blech-plan S1a: the base flange is rebuilt.
             Assert.False(UnsupportedFeatures.RefusesRun("SMBaseFlange"));

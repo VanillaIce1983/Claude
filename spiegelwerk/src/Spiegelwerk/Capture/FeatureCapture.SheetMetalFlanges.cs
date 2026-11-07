@@ -12,7 +12,7 @@ using Spiegelwerk.Sw;
 namespace Spiegelwerk.Capture
 {
     /// <summary>
-    /// Flanges on edges (A2, blech-plan S2, S3): hem, miter flange and edge flange. All go through the
+    /// Flanges on edges (A2, blech-plan S2, S3): hem, miter flange and edge flange; the jog (S4). All go through the
     /// safe sheet-metal dispatch (<see cref="CaptureSheetMetal"/>), so a call that throws makes this
     /// feature unsupported, not the run fail. Edges and values are read under AccessSelections
     /// (the state before the feature), sketches outside it; the bend sub-features are read for
@@ -105,6 +105,63 @@ namespace Spiegelwerk.Capture
             ReadFlangeProfiles(f, r, edges);
             ReadBendsInto(f, EdgeFlangeRules.Parent(r), r.Bends, r.BendOverrides, r.Notes, out int count);
             r.BendCount = count;
+            return r;
+        }
+
+        /// <summary>
+        /// Jog (A2 phase 2c, P6, blech-plan S4). Its sketch must hold exactly one line (anything else makes
+        /// it unsupported). Under AccessSelections (the state before the jog): the values (<see cref="SwSheetMetal.ReadJogScalars"/>,
+        /// the same reader as the read-back), the offset's reference where its type has one, the fixed face
+        /// and point – the point's space is undocumented: read both ways, model space preferred (K9) –, the
+        /// faces of its body. Outside it: the face its sketch was drawn on, its bends, the witnesses.
+        /// </summary>
+        private JogRecord CaptureJog(Feature f, string type, JogFeatureData d)
+        {
+            Feature sketchFeature = SketchOf(f);
+            var r = new JogRecord(f.Name, type, sketchFeature.Name);
+            SketchModel sketch = _sketches.Read(sketchFeature);
+            r.LineId = JogRules.JogLine(sketch, out string? why) ?? throw new NotSupportedException(why);
+            List<Line3> lines = SheetMetalBendRules.BendLines(sketch);
+            if (lines.Count != 1) throw new NotSupportedException("Die Linie der Kröpfung hat keine Länge.");
+            Line3 line = lines[0];
+            r.Line = line;
+
+            var before = new List<FaceSignature>();
+            string? sheetMetal = null;
+            if (!d.AccessSelections(_doc, null))
+                throw new NotSupportedException("Feature-Definition der Kröpfung konnte nicht gelesen werden (AccessSelections).");
+            try
+            {
+                if (SwSheetMetal.ReadJogScalars(d, r)) r.Notes.Add(OwnAllowanceUnreadable);
+                if (JogRules.DimPos(r.DimensionPosition) == null || JogRules.BendPos(r.JogPosition) == null)
+                    throw new NotSupportedException($"Bemaßungs- oder Kröpfungsposition der Kröpfung ({r.DimensionPosition}/{r.JogPosition}) lässt sich über die API nicht anlegen.");
+                if (JogRules.UsesReference(r.OffsetType))
+                    r.OffsetReference = FlangeReference((object)d.OffsetReference) ?? throw new NotSupportedException("Bezug des Versatzes der Kröpfung nicht lesbar.");
+                var face = (object)d.FixedFace as Face2 ?? throw new NotSupportedException(JogRules.FixedFaceUnreadable);
+                r.FixedFace = TopologyCapture.Face(face);
+                if (r.FixedFace.Kind != SurfaceKind.Plane) throw new NotSupportedException("Feste Fläche der Kröpfung ist nicht eben.");
+                if ((object)d.FixedPoint is double[] raw && raw.Length >= 3)
+                {
+                    Frame3 frame = _math.SketchFrame((Sketch)(object)sketchFeature.GetSpecificFeature2());
+                    FixedPointChoice choice = ChooseFixedPoint(FixedPointSpace.Model, face, frame, Vec3.FromArray(raw), new[] { line }, r.FixedFace.Normal);
+                    // Both readings on the face but on different sides: the side is not known (K9).
+                    r.FixedPointAmbiguous = choice.Ambiguous;
+                    r.FixedPoint = choice.Ambiguous ? null : choice.Point;
+                    r.FixedPointSpace = choice.Ambiguous ? FixedPointSpace.Unknown : choice.Space;
+                }
+                before.AddRange(BodyFaces(face));
+                sheetMetal = SheetMetalOfBody(face);
+            }
+            finally
+            {
+                d.ReleaseSelectionAccess();
+            }
+            r.Thickness = ThicknessOf(sheetMetal);
+
+            r.SketchFace = CaptureSupportFace(sketchFeature);
+            ReadBendsInto(f, JogRules.Parent(r), r.Bends, r.BendOverrides, r.Notes, out int count);
+            r.BendCount = count;
+            r.Witnesses.AddRange(CaptureWitnesses(f, r.FixedFace!, before) ?? new List<Vec3>());
             return r;
         }
 

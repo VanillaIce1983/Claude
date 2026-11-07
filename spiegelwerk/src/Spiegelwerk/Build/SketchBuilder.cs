@@ -5,6 +5,7 @@ using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 using Spiegelwerk.Capture;
 using Spiegelwerk.Core.Geometry;
+using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Records;
 using Spiegelwerk.Core.Sketch;
 using Spiegelwerk.Sw;
@@ -48,15 +49,31 @@ namespace Spiegelwerk.Build
             _sm = ctx.Doc.SketchManager;
         }
 
+        /// <summary>
+        /// Opens a sketch on the mirrored plane of the original's and writes the mirror into it. A sketch
+        /// that a sketched bend or jog is made from (<see cref="BuildContext.SketchSupportFaces"/>) goes on
+        /// the mirrored face it was drawn on instead – if that is found, planar, in the mirrored sketch
+        /// plane and (separate body) on a mirrored body; otherwise on the plane, and the map says why
+        /// (<see cref="SketchMap.SupportFaceMissed"/>): the consumer decides whether a plane will do (K7).
+        /// The face is tried before a plane is resolved, so no helper plane stays behind for nothing.
+        /// </summary>
         public SketchMap Build(SketchRecord rec, List<string> notes)
         {
             SketchModel src = rec.Sketch;
-            Feature plane = _ctx.Planes.Resolve(_ctx.Mirror.Apply(src.Frame.Plane));
+            Plane3 mirroredPlane = _ctx.Mirror.Apply(src.Frame.Plane);
 
-            SwSelect.Clear(_doc);
-            SwSelect.Select(_doc, plane, 0, false);
-            _sm.InsertSketch(true);
-            Sketch sketch = _sm.ActiveSketch ?? throw new InvalidOperationException("Skizze konnte nicht geöffnet werden.");
+            Sketch? sketch = null;
+            string? missed = null;
+            bool wanted = _ctx.SketchSupportFaces.TryGetValue(src.Name, out FaceSignature support);
+            if (wanted) sketch = OpenOnFace(support, mirroredPlane, out missed);
+            if (sketch == null)
+            {
+                Feature plane = _ctx.Planes.Resolve(mirroredPlane);
+                SwSelect.Clear(_doc);
+                SwSelect.Select(_doc, plane, 0, false);
+                _sm.InsertSketch(true);
+                sketch = _sm.ActiveSketch ?? throw new InvalidOperationException("Skizze konnte nicht geöffnet werden.");
+            }
 
             SketchMap map;
             _everyPointCounts = _ctx.PointSketches.Contains(src.Name);
@@ -68,13 +85,7 @@ namespace Spiegelwerk.Build
             catch
             {
                 // Leave no half-written sketch behind: close it and delete it.
-                SwSelect.Clear(_doc);
-                _sm.InsertSketch(true);
-                if (_doc.Extension.GetLastFeatureAdded() is Feature broken && SwDoc.IsSketch(broken))
-                {
-                    SwSelect.Select(_doc, broken, 0, false);
-                    _doc.Extension.DeleteSelection2((int)swDeleteSelectionOptions_e.swDelete_Absorbed);
-                }
+                CloseAndDelete();
                 throw;
             }
             finally
@@ -84,8 +95,76 @@ namespace Spiegelwerk.Build
 
             SwSelect.Clear(_doc);
             _sm.InsertSketch(true);
+            map.OnSupportFace = wanted && missed == null;
+            map.SupportFaceMissed = missed;
             _ctx.Sketches[src.Name] = map;
             return map;
+        }
+
+        /// <summary>Closes the open sketch and deletes it (a sketch this builder just opened).</summary>
+        private void CloseAndDelete()
+        {
+            SwSelect.Clear(_doc);
+            if (_sm.ActiveSketch != null) _sm.InsertSketch(true);
+            if (_doc.Extension.GetLastFeatureAdded() is Feature broken && SwDoc.IsSketch(broken))
+            {
+                SwSelect.Select(_doc, broken, 0, false);
+                _doc.Extension.DeleteSelection2((int)swDeleteSelectionOptions_e.swDelete_Absorbed);
+            }
+            SwSelect.Clear(_doc);
+        }
+
+        /// <summary>
+        /// A sketch opened on the mirrored support face; null with the reason if the face is not
+        /// usable or SOLIDWORKS gives the sketch a frame off the mirrored plane (then it is deleted again).
+        /// </summary>
+        private Sketch? OpenOnFace(FaceSignature support, Plane3 mirroredPlane, out string? missed)
+        {
+            Face2? face = SupportFace(support, mirroredPlane, out missed);
+            if (face == null) return null;
+            SwSelect.Clear(_doc);
+            Sketch? sketch = null;
+            if (SwSelect.Select(_doc, face, 0, false))
+            {
+                _sm.InsertSketch(true);
+                sketch = _sm.ActiveSketch;
+            }
+            SwSelect.Clear(_doc);
+            if (sketch == null)
+            {
+                missed = "auf der Fläche ließ sich keine Skizze öffnen";
+                return null;
+            }
+            // The mirror needs the sketch's frame in the mirrored plane; anything else would throw later.
+            if (!_ctx.Math.SketchFrame(sketch).Plane.IsCoplanarWith(mirroredPlane))
+            {
+                missed = "die Skizze auf der Fläche liegt nicht in der gespiegelten Skizzenebene";
+                CloseAndDelete();
+                return null;
+            }
+            return sketch;
+        }
+
+        /// <summary>
+        /// The mirrored support face, if it is found, planar, coplanar with the mirrored sketch plane and –
+        /// separate body – on a mirrored body; null and why otherwise.
+        /// </summary>
+        private Face2? SupportFace(FaceSignature support, Plane3 mirroredPlane, out string? missed)
+        {
+            missed = null;
+            var ignored = new List<string>();
+            Face2? face = _ctx.Topology.FindFace(support.Mirror(_ctx.Mirror), ignored);
+            if (face == null)
+            {
+                missed = "gespiegelte Fläche nicht gefunden";
+                return null;
+            }
+            FaceSignature actual = TopologyCapture.Face(face);
+            if (actual.Kind != SurfaceKind.Plane) missed = "die gespiegelte Fläche ist nicht eben";
+            else if (!new Plane3(actual.Sample, actual.Normal).IsCoplanarWith(mirroredPlane)) missed = "die gespiegelte Fläche liegt nicht in der gespiegelten Skizzenebene";
+            else if (_ctx.SeparateBody && !((object)face.GetBody() is Body2 body && _ctx.IsOwnBody(body)))
+                missed = "die gespiegelte Fläche liegt nicht auf einem gespiegelten Körper";
+            return missed == null ? face : null;
         }
 
         /// <summary>

@@ -19,6 +19,9 @@ namespace Spiegelwerk.Build.Builders
                 (map.Sigma > 0 ? " (Skizze gespiegelt)" : " (Skizze gedreht, Normale umgekehrt)"));
             result.Notes.AddRange(notes);
             if (segments < wanted || notes.Count > 0) result.Status = ReportStatus.Warning;
+            // The sketch of a sketched bend or jog: on the mirrored face it was drawn on, or why not – the bend or jog decides what that means.
+            if (map.OnSupportFace) result.Info.Add("Auf der gespiegelten Fläche skizziert, auf der das Original liegt.");
+            else if (map.SupportFaceMissed != null) result.Info.Add($"Nicht auf der gespiegelten Fläche skizziert ({map.SupportFaceMissed}), sondern auf einer Ebene.");
             return result;
         }
     }

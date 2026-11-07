@@ -111,6 +111,21 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Jog_and_sketched_bend_numbers()
+        {
+            // The jog record carries these through unchanged; JogRules turns two of them into the insert call's codes (blech-plan S4).
+            SameConstants<swJogOffsetTypes_e>(typeof(JogOffsetTypes), "swJogOffset");
+            SameConstants<swJogDimensionPositionType_e>(typeof(JogDimensionPositions), "swJogDimensionPosition");
+            SameConstants<swJogPositionType_e>(typeof(JogPositions), "swJogPosition");
+            Assert.Equal((int)swFeatureNameID_e.swFmSketchBend, Spiegelwerk.Core.Planning.SheetMetalBendRules.SketchBendId);
+            Assert.Equal((int)swFeatureNameID_e.swFmSM3dBend, Spiegelwerk.Core.Planning.SheetMetalBendRules.SM3dBendId);
+            // The sketched bend's PositionType is swFlangePositionTypes_e; only the creation code counts the centre line as 0.
+            Assert.Equal((short)0, Spiegelwerk.Core.Planning.SheetMetalBendRules.BendPosForCreation((int)swFlangePositionTypes_e.swFlangePositionTypeBendCenterLine));
+            Assert.Equal((short)3, Spiegelwerk.Core.Planning.SheetMetalBendRules.BendPosForCreation((int)swFlangePositionTypes_e.swFlangePositionTypeBendOutside));
+            Assert.Equal(2, (int)swSelectType_e.swSelFACES);
+        }
+
+        [Fact]
         public void Hem_and_miter_flange_numbers()
         {
             // HemRecord.Position and MiterFlangeRecord.PositionType carry these numbers through unchanged (blech-plan S2).
