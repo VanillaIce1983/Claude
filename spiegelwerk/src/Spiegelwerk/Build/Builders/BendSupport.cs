@@ -6,6 +6,7 @@ using Spiegelwerk.Capture;
 using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Matching;
 using Spiegelwerk.Core.Planning;
+using Spiegelwerk.Core.Records;
 using Spiegelwerk.Sw;
 
 namespace Spiegelwerk.Build.Builders
@@ -140,6 +141,26 @@ namespace Spiegelwerk.Build.Builders
             catch (Exception)
             {
                 return true;
+            }
+        }
+
+        /// <summary>
+        /// The copy has what an earlier feature of the body made (K10, STOLPERSTEINE 231): it has counterparts
+        /// (sketches aside), and none of them shows a rebuild error or was reported failed – a step with a
+        /// rebuild error stays registered (StepRunner.CheckRebuildError), as do the members in error of a
+        /// mirror feature's second half, but what they make is missing. Unreadable: not rebuilt.
+        /// </summary>
+        public static bool Rebuilt(BuildContext ctx, string original)
+        {
+            try
+            {
+                List<Feature> found = ctx.Counterparts(original, false).Where(f => !SwDoc.IsSketch(f)).ToList();
+                return found.Count > 0 && found.All(f => !InError(f) &&
+                    !(ctx.Shared.Built.TryGetValue(f.Name, out BuiltFeature b) && b.Status == ReportStatus.Failed));
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 

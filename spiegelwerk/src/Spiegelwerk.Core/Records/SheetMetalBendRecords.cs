@@ -93,7 +93,7 @@ namespace Spiegelwerk.Core.Records
         /// </summary>
         public List<Vec3> MovedWitnesses { get; } = new List<Vec3>();
 
-        /// <summary>The features that made its body before it (no sketches, reference geometry, folders, SheetMetal).</summary>
+        /// <summary>The features that made its body before it (no sketches, reference geometry, folders, SheetMetal); empty: not read.</summary>
         public List<string> BodyFeatures { get; } = new List<string>();
 
         /// <summary>

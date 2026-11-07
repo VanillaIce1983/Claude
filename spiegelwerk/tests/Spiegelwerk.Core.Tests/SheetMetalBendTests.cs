@@ -132,10 +132,17 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal(own, ownOnly);
             Assert.True(leftOut);
 
-            // Nothing moved: nothing is left out; a body without earlier features keeps the moved ones.
+            // Nothing moved: nothing is left out.
             SheetMetalBendRules.WitnessesFor(own, Array.Empty<Vec3>(), body, _ => false, out leftOut);
             Assert.False(leftOut);
-            Assert.Equal(4, SheetMetalBendRules.WitnessesFor(own, moved, Array.Empty<string>(), _ => false, out leftOut).Count);
+            Assert.Equal(SheetMetalBendRules.OwnWitnessesOnly, SheetMetalBendRules.OwnWitnessesOnlyFor(body));
+
+            // No earlier feature listed: not read (a sheet-metal body has its base flange before any bend) – the
+            // moved ones are left out as if one were missing, and the information says why.
+            Assert.Equal(own, SheetMetalBendRules.WitnessesFor(own, moved, Array.Empty<string>(), _ => true, out leftOut));
+            Assert.True(leftOut);
+            Assert.Equal(SheetMetalBendRules.EarlierFeaturesUnread, SheetMetalBendRules.OwnWitnessesOnlyFor(Array.Empty<string>()));
+            SheetMetalBendRules.WitnessesFor(own, Array.Empty<Vec3>(), Array.Empty<string>(), _ => true, out leftOut);
             Assert.False(leftOut);
 
             // Never more than the maximum, the own ones represented.

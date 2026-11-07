@@ -69,10 +69,10 @@ namespace Spiegelwerk.Build.Builders
             Face2 onFace = face;
             List<Vec3> picks = BendSide.PickOrder(fixedPoint, lines, n, fixedSig.Sample, clearance, BendSupport.Reach(face), p => BendSupport.OnFace(onFace, p));
             if (picks.Count == 0) return Fail("Auf der festen Fläche fand sich kein Punkt abseits der Kröpfungslinie, an dem sie sich wählen ließe.", notes);
-            // The moved faces only if the copy has every earlier feature of the body (K10).
-            List<Vec3> witnesses = SheetMetalBendRules.WitnessesFor(r.Witnesses, r.MovedWitnesses, r.BodyFeatures, x => ctx.Counterparts(x, false).Count > 0,
+            // The moved faces only if the copy has every earlier feature of the body, without a rebuild error (K10).
+            List<Vec3> witnesses = SheetMetalBendRules.WitnessesFor(r.Witnesses, r.MovedWitnesses, r.BodyFeatures, x => BendSupport.Rebuilt(ctx, x),
                 out bool movedLeftOut).Select(ctx.Mirror.Apply).ToList();
-            if (movedLeftOut) info.Add(SheetMetalBendRules.OwnWitnessesOnly);
+            if (movedLeftOut) info.Add(SheetMetalBendRules.OwnWitnessesOnlyFor(r.BodyFeatures));
             bool witnessed = witnesses.Count > 0;
             // The fixed point only where it stayed on a face of the original after the jog (K10).
             if (fixedPoint.HasValue && r.FixedPointStays) witnesses.Add(fixedPoint.Value);

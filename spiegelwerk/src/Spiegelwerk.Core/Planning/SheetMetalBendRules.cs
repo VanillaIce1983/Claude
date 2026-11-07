@@ -112,14 +112,17 @@ namespace Spiegelwerk.Core.Planning
         /// The witnesses a build measures (K10), unmirrored: the points on the feature's own faces and those
         /// of its bends, and the points on the other faces of its body it moved – these only if every feature
         /// that made the body before it has its counterpart in the copy (<paramref name="rebuilt"/>): a hole
-        /// the run does not rebuild, or one that failed, is missing there in every variant. At most
-        /// <see cref="MaxWitnesses"/>; <paramref name="movedLeftOut"/> says whether moved ones were dropped.
-        /// The fixed point is not among them: the builder adds it where it stayed on the original.
+        /// the run does not rebuild, or one that failed, is missing there in every variant. No such features
+        /// means they were not read (a sheet-metal body has its base feature before any bend): the moved ones
+        /// are left out then too. At most <see cref="MaxWitnesses"/>; <paramref name="movedLeftOut"/> says
+        /// whether moved ones were dropped. The fixed point is not among them: the builder adds it where it
+        /// stayed on the original.
         /// </summary>
         public static List<Vec3> WitnessesFor(IReadOnlyList<Vec3> own, IReadOnlyList<Vec3> moved, IEnumerable<string> bodyFeatures, Func<string, bool> rebuilt,
             out bool movedLeftOut)
         {
-            bool count = bodyFeatures.All(rebuilt);
+            List<string> earlier = bodyFeatures.ToList();
+            bool count = earlier.Count > 0 && earlier.All(rebuilt);
             movedLeftOut = !count && moved.Count > 0;
             return PickWitnesses(new[] { own, count ? moved : Array.Empty<Vec3>() });
         }
@@ -241,6 +244,14 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>The moved faces were left out of the witnesses: not every earlier feature of the body is in the copy.</summary>
         public const string OwnWitnessesOnly =
             "Zeugenpunkte nur auf den eigenen Flächen und denen der Biegungen: Nicht jedes frühere Feature des Körpers ist in der Kopie nachgebaut.";
+
+        /// <summary>The moved witnesses left out because the body's earlier features could not be read (none listed).</summary>
+        public const string EarlierFeaturesUnread =
+            "Zeugenpunkte nur auf den eigenen Flächen und denen der Biegungen: Die früheren Features des Körpers ließen sich nicht lesen.";
+
+        /// <summary>Why the moved witnesses were left out (<see cref="WitnessesFor"/>): unread if no earlier feature is listed.</summary>
+        public static string OwnWitnessesOnlyFor(IReadOnlyCollection<string> bodyFeatures) =>
+            bodyFeatures.Count == 0 ? EarlierFeaturesUnread : OwnWitnessesOnly;
 
         /// <summary>The allowance came back reset after a change of direction (A3 P5).</summary>
         public const string AllowanceReset = "Biegezugabe ließ sich nicht zusammen mit der Biegerichtung setzen (SOLIDWORKS setzt sie beim Ändern zurück).";

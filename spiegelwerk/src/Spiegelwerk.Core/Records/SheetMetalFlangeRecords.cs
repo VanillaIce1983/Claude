@@ -412,7 +412,7 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Points on the other faces of its body it made or moved: counted only if the copy has every feature of <see cref="BodyFeatures"/>.</summary>
         public List<Vec3> MovedWitnesses { get; } = new List<Vec3>();
 
-        /// <summary>The features that made its body before it (no sketches, reference geometry, folders, SheetMetal).</summary>
+        /// <summary>The features that made its body before it (no sketches, reference geometry, folders, SheetMetal); empty: not read.</summary>
         public List<string> BodyFeatures { get; } = new List<string>();
 
         /// <summary><see cref="FixedPoint"/> still lies on a face of the original's body right after the jog (10 µm): only then it is a witness (K10).</summary>
