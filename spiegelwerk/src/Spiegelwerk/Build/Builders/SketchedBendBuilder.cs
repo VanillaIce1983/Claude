@@ -19,12 +19,14 @@ namespace Spiegelwerk.Build.Builders
     /// allowance (PCBA; A3 P5). Which side stays and which way the bend goes is decided by the
     /// witnesses, always on (A3 P2, K10): for each pick point – the mirrored fixed point's region first,
     /// then one point per other region – the first guess for ReverseDirection, then the other; the first
-    /// variant that puts every mirrored witness on the copy is kept, otherwise the best is made again
-    /// with a warning. FlipDir may be ignored (B40): the direction is set by an edit and read back;
-    /// every edit can reset the allowance (B27), so it is read back and set again after each, and if it
-    /// stays reset after the direction edit, the bend is made once more with the direction passed at
-    /// creation (the opposite order, A3 P5). Without witnesses the direction is the rule's guess, offered
-    /// to the check as „Biegerichtung umgekehrt“.
+    /// variant that puts every mirrored witness on the copy is kept, otherwise the best is made again;
+    /// the bend that is kept – after the allowance step – is measured once more for the report. The
+    /// moved faces witness only where the copy has every earlier feature of the body, the fixed point
+    /// only where it stayed on the original. FlipDir may be ignored (B40): the direction is set by an
+    /// edit and read back; every edit can reset the allowance (B27), so it is read back and set again
+    /// after each, and if it stays reset after the direction edit, the bend is made once more with the
+    /// direction passed at creation (the opposite order, A3 P5). Without witnesses the direction is the
+    /// rule's guess, offered to the check as „Biegerichtung umgekehrt“.
     /// </summary>
     internal sealed class SketchedBendBuilder : IFeatureBuilder
     {
@@ -54,10 +56,13 @@ namespace Spiegelwerk.Build.Builders
             Face2 onFace = face;
             List<Vec3> picks = BendSide.PickOrder(fixedPoint, lines, n, fixedSig.Sample, clearance, BendSupport.Reach(face), p => BendSupport.OnFace(onFace, p));
             if (picks.Count == 0) return Fail("Auf der festen Fläche fand sich kein Punkt abseits der Biegelinien, an dem sie sich wählen ließe.", notes);
-            List<Vec3> witnesses = r.Witnesses.Select(ctx.Mirror.Apply).ToList();
+            // The moved faces only if the copy has every earlier feature of the body (K10).
+            List<Vec3> witnesses = SheetMetalBendRules.WitnessesFor(r.Witnesses, r.MovedWitnesses, r.BodyFeatures, x => ctx.Counterparts(x, false).Count > 0,
+                out bool movedLeftOut).Select(ctx.Mirror.Apply).ToList();
+            if (movedLeftOut) info.Add(SheetMetalBendRules.OwnWitnessesOnly);
             bool witnessed = witnesses.Count > 0;
-            if (fixedPoint.HasValue && !r.FixedPointAmbiguous && SheetMetalBendRules.FixedPointWitnesses(fixedPoint.Value, lines, n, clearance))
-                witnesses.Add(fixedPoint.Value);
+            // The fixed point only where it stayed on a face of the original after the bend (K10) – whichever reading it is.
+            if (fixedPoint.HasValue && r.FixedPointStays) witnesses.Add(fixedPoint.Value);
 
             // ---- 3. the search: per pick point the first guess, then – if witnesses can tell – the other direction
             bool rev0 = SheetMetalBendRules.FirstReverseGuess(r.Reverse, BendSupport.SigmaSheet(ctx, face), map.Sigma);
@@ -86,7 +91,8 @@ namespace Spiegelwerk.Build.Builders
                     return Fail("SOLIDWORKS hat die skizzierte Biegung nicht passend erzeugt.", notes);
                 }
                 if (best == null) return Fail("SOLIDWORKS hat die skizzierte Biegung nicht erzeugt.", notes);
-                // None put every witness on the copy: the best again, with a warning.
+                // None put every witness on the copy: the best again – made by another path than the one measured
+                // (the direction at creation), so what it misses is measured on it below.
                 bend = Make(best.Pick, best.State.Reverse);
                 if (bend == null || !Apply(bend, best.State))
                 {
@@ -95,12 +101,9 @@ namespace Spiegelwerk.Build.Builders
                     return Fail("Die beste Variante der skizzierten Biegung ließ sich nicht wieder anlegen.", notes);
                 }
                 chosen = best;
-                notes.Add(SheetMetalBendRules.Deviates(best.Missed, witnesses.Count));
             }
             else
             {
-                if (witnessed) info.Add(SheetMetalBendRules.Confirmed(witnesses.Count, chosen!.State.Reverse != rev0, chosen.Pick > 0 && fixedPoint.HasValue));
-                else if (witnesses.Count > 0) info.Add(SheetMetalBendRules.SideConfirmed);
                 // Attempts that did not work before one did: information.
                 info.AddRange(tried);
             }
@@ -113,6 +116,11 @@ namespace Spiegelwerk.Build.Builders
                 if (rest.Count > 0) notes.Add(FlangeSupport.LeftBehind(rest));
                 return Fail("Die skizzierte Biegung ließ sich nach dem Setzen der Biegezugabe nicht wieder anlegen.", notes);
             }
+            // The witnesses on the bend that is kept: the best was made again, the allowance step may have made it once more.
+            var (off, confirmed) = SheetMetalBendRules.WitnessOutcome(witnesses.Count, SwShape.Misses(ctx, witnesses, ctx.SeparateBody), BendSupport.InError(bend),
+                witnessed, chosen!.State.Reverse != rev0, chosen.Pick > 0 && fixedPoint.HasValue, SheetMetalBendRules.Deviates);
+            if (off != null) notes.Add(off);
+            if (confirmed != null) info.Insert(0, confirmed);
 
             // ---- 5. read-back, bends, side and direction notes
             SketchedBendRecord? got = SwSheetMetal.ReadBackSketchedBend(doc, bend);
@@ -128,7 +136,8 @@ namespace Spiegelwerk.Build.Builders
                 r.ExpectedChange != null && r.OtherBodies.Count == 0);
             if (r.FixedPointAmbiguous) (witnessed ? info : notes).Add(SheetMetalBendRules.AmbiguousFixedPoint);
             if (r.FixedPoint == null) (witnessed ? info : notes).Add(SheetMetalBendRules.FixedPointUnknown);
-            if (!witnessed && (r.FixedPoint == null || r.FixedPointAmbiguous)) notes.Add(SheetMetalBendRules.SideUnchecked);
+            // An ambiguous point that stayed on the original witnesses the side all the same.
+            if (witnesses.Count == 0 && (r.FixedPoint == null || r.FixedPointAmbiguous)) notes.Add(SheetMetalBendRules.SideUnchecked);
             if (!witnessed && !checkable) notes.Add(SheetMetalBendRules.NoWitnesses);
 
             ctx.Register(r.Name, bend);

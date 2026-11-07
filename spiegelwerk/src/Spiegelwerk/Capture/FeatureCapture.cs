@@ -233,29 +233,61 @@ namespace Spiegelwerk.Capture
         /// <summary>A face turned against the fixed face by more than this counts as moved by a bend (A3 P2).</summary>
         private static readonly double TurnedAngle = Math.PI / 180;
 
+        /// <summary>What <see cref="CaptureWitnesses"/> took, unmirrored, in the state right after the feature.</summary>
+        private sealed class WitnessCapture
+        {
+            /// <summary>Points on the feature's own faces and those of its bend sub-features.</summary>
+            public List<Vec3> Own { get; } = new List<Vec3>();
+
+            /// <summary>Points on the other faces of its body it made or moved.</summary>
+            public List<Vec3> Moved { get; } = new List<Vec3>();
+
+            /// <summary>The features that made its body before it: the moved faces lie on the copy only if it has them all.</summary>
+            public List<string> BodyFeatures { get; } = new List<string>();
+
+            /// <summary>The fixed point still lies on a face of the body.</summary>
+            public bool FixedPointStays { get; set; }
+        }
+
         /// <summary>
         /// Witnesses of a sketched bend or jog (A3 P2, blech-plan K10): with the bar right after the
         /// feature, at most <see cref="SheetMetalBendRules.MaxWitnesses"/> points on its own faces and
-        /// those of its bend sub-features, then on the faces of its body it made or moved – those whose
-        /// fingerprint none of <paramref name="before"/> (the body's faces before it) has; without
-        /// those, the planar faces turned more than 1° against the fixed face. The mirrored points must
-        /// lie on the copy's faces. Null if the bar does not move or the faces do not read.
+        /// those of its bend sub-features (made by them, not shared with an older feature), as many on the
+        /// other faces of its body it made or moved –
+        /// those whose fingerprint none of <paramref name="before"/> (the body's faces before it) has;
+        /// without those, the planar faces turned more than 1° against the fixed face –, the features
+        /// that made the body before it (a moved face of a hole the copy lacks lies nowhere there: the
+        /// build counts the moved ones only if the copy has them all, <see cref="SheetMetalBendRules.WitnessesFor"/>),
+        /// and whether <paramref name="fixedPoint"/> still lies on a face of the body (10 µm): in the bend
+        /// zone it lies on none afterwards, and then it is no witness. Null if the bar does not move or the
+        /// faces do not read.
         /// </summary>
-        private List<Vec3>? CaptureWitnesses(Feature f, FaceSignature fixedFace, IReadOnlyList<FaceSignature> before)
+        private WitnessCapture? CaptureWitnesses(Feature f, FaceSignature fixedFace, IReadOnlyList<FaceSignature> before, Vec3? fixedPoint)
         {
+            // Read with the bar at the end: rolled back, the tree walk would miss what lies after the bar.
+            Dictionary<string, int> order = CreationOrderIndex();
             if (!RollBack((int)swMoveRollbackBarTo_e.swMoveRollbackBarToAfterFeature, f.Name)) return null;
             try
             {
-                List<Face2> ownFaces = new[] { f }.Concat(SwDoc.SubFeatures(f).Where(s => !SwDoc.IsSketch(s))).SelectMany(FacesOf).ToList();
+                List<Feature> ownFeatures = new[] { f }.Concat(SwDoc.SubFeatures(f).Where(s => !SwDoc.IsSketch(s))).ToList();
+                var ownNames = new HashSet<string>(ownFeatures.Select(x => x.Name), StringComparer.Ordinal);
+                List<Face2> ownFaces = ownFeatures.SelectMany(FacesOf).ToList();
                 var own = new List<Vec3>();
-                foreach (Face2 face in ownFaces) own.Add(TopologyCapture.Face(face).Sample);
+                // GetFaces may list faces it shares with older features (a moved hole wall): by the feature that made
+                // them (Face2.GetFeature, the oldest) they go with the moved ones; unreadable, they stay its own.
+                foreach (Face2 face in ownFaces)
+                    if (!(MadeBy(face) is string maker) || ownNames.Contains(maker))
+                        own.Add(TopologyCapture.Face(face).Sample);
                 List<Body2> bodies = SwDoc.SolidBodies(_doc).Where(b => b.GetFeatures() is object[] fs && fs.OfType<Feature>().Any(x => x.Name == f.Name)).ToList();
                 if (bodies.Count == 0)
                     bodies = ownFaces.Select(x => (object)x.GetBody() as Body2).Where(b => b != null).Select(b => b!).GroupBy(b => b.Name).Select(g => g.First()).ToList();
+                List<Face2> bodyFaces = bodies.SelectMany(b => ((object)b.GetFaces() as object[])?.OfType<Face2>() ?? Enumerable.Empty<Face2>()).ToList();
                 var moved = new List<Vec3>();
-                foreach (Face2 face in bodies.SelectMany(b => ((object)b.GetFaces() as object[])?.OfType<Face2>() ?? Enumerable.Empty<Face2>()))
+                foreach (Face2 face in bodyFaces)
                 {
                     FaceSignature sig = TopologyCapture.Face(face);
+                    // Its own faces are in the other group (they need no earlier feature in the copy).
+                    if (own.Any(o => o.AlmostEquals(sig.Sample, Tol.Length))) continue;
                     if (before.Count > 0)
                     {
                         if (!before.Any(b => b.CouldBe(sig) && b.Sample.AlmostEquals(sig.Sample, Tol.Length))) moved.Add(sig.Sample);
@@ -263,7 +295,21 @@ namespace Spiegelwerk.Capture
                     else if (sig.Kind == SurfaceKind.Plane && Math.Acos(Math.Max(-1, Math.Min(1, sig.Normal.Dot(fixedFace.Normal)))) > TurnedAngle)
                         moved.Add(sig.Sample);
                 }
-                return SheetMetalBendRules.PickWitnesses(new IReadOnlyList<Vec3>[] { own, moved });
+                var result = new WitnessCapture { FixedPointStays = fixedPoint is Vec3 p && bodyFaces.Any(x => OnFace(x, p)) };
+                result.Own.AddRange(SheetMetalBendRules.PickWitnesses(new IReadOnlyList<Vec3>[] { own }));
+                result.Moved.AddRange(SheetMetalBendRules.PickWitnesses(new IReadOnlyList<Vec3>[] { moved }));
+                // The features before it in the tree walk (no sub-features of others, not the flat pattern at the
+                // end); if its place is unknown, every other one – the cautious side: the moved ones then rarely count.
+                bool placed = order.TryGetValue(f.Name, out int at);
+                foreach (Feature x in bodies.SelectMany(b => b.GetFeatures() is object[] fs ? fs.OfType<Feature>() : Enumerable.Empty<Feature>()))
+                {
+                    if (ownNames.Contains(x.Name) || SwDoc.IsSketch(x) || FeatureCollector.IsDatum(x) || SwDoc.IsSystemFeature(x)) continue;
+                    // No faces of their own in the folded body.
+                    if (x.GetTypeName2() is "SheetMetal" or "FlatPattern") continue;
+                    if (placed && !(order.TryGetValue(x.Name, out int i) && i < at)) continue;
+                    if (!result.BodyFeatures.Contains(x.Name)) result.BodyFeatures.Add(x.Name);
+                }
+                return result;
             }
             catch (Exception)
             {
@@ -272,6 +318,51 @@ namespace Spiegelwerk.Capture
             finally
             {
                 _doc.FeatureManager.EditRollback((int)swMoveRollbackBarTo_e.swMoveRollbackBarToEnd, "");
+            }
+        }
+
+        /// <summary>Name of the feature that made a face (Face2.GetFeature); null if it does not read.</summary>
+        private static string? MadeBy(Face2 face)
+        {
+            try
+            {
+                return ((object)face.GetFeature() as Feature)?.Name;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Position of every feature in creation order, read once (the capture changes no tree); empty if it does not read.</summary>
+        private Dictionary<string, int> CreationOrderIndex()
+        {
+            if (_creationOrder != null) return _creationOrder;
+            var order = new Dictionary<string, int>(StringComparer.Ordinal);
+            try
+            {
+                List<Feature> all = SwDoc.FeaturesInCreationOrder(_doc);
+                for (int i = 0; i < all.Count; i++) order[all[i].Name] = i;
+            }
+            catch (Exception)
+            {
+                order.Clear();
+            }
+            return _creationOrder = order;
+        }
+
+        private Dictionary<string, int>? _creationOrder;
+
+        /// <summary>The point lies on the face by the kernel's distance (as the witness check measures, <see cref="SwShape.Tolerance"/>).</summary>
+        private static bool OnFace(Face2 face, Vec3 p)
+        {
+            try
+            {
+                return TopologyCapture.DistanceToFace(face, p) <= SwShape.Tolerance;
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 

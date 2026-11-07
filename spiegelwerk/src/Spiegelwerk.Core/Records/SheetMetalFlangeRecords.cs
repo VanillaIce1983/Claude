@@ -406,8 +406,17 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Sheet thickness of the body, metres; 0 if not read.</summary>
         public double Thickness { get; set; }
 
-        /// <summary>Points on faces the jog made or moved, state right after it (unmirrored); empty: not taken.</summary>
+        /// <summary>Points on its own faces and those of its bend sub-features, state right after it (unmirrored); empty: not taken.</summary>
         public List<Vec3> Witnesses { get; } = new List<Vec3>();
+
+        /// <summary>Points on the other faces of its body it made or moved: counted only if the copy has every feature of <see cref="BodyFeatures"/>.</summary>
+        public List<Vec3> MovedWitnesses { get; } = new List<Vec3>();
+
+        /// <summary>The features that made its body before it (no sketches, reference geometry, folders, SheetMetal).</summary>
+        public List<string> BodyFeatures { get; } = new List<string>();
+
+        /// <summary><see cref="FixedPoint"/> still lies on a face of the original's body right after the jog (10 µm): only then it is a witness (K10).</summary>
+        public bool FixedPointStays { get; set; }
 
         public int BendCount { get; set; }
         public List<BendValues> Bends { get; } = new List<BendValues>();

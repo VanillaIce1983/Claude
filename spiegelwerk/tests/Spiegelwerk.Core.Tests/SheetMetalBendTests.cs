@@ -116,11 +116,55 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
-        public void The_fixed_point_witnesses_only_off_the_bend_zone()
+        public void Moved_faces_witness_only_where_every_earlier_feature_of_the_body_is_rebuilt()
         {
-            var lines = new[] { new Line3(new Vec3(0.05, 0, 0), Vec3.UnitY) };
-            Assert.True(SheetMetalBendRules.FixedPointWitnesses(new Vec3(0.02, 0, 0), lines, Vec3.UnitZ, 0.004));
-            Assert.False(SheetMetalBendRules.FixedPointWitnesses(new Vec3(0.048, 0, 0), lines, Vec3.UnitZ, 0.004));
+            var own = new[] { new Vec3(0.05, 0, 0), new Vec3(0.05, 0.01, 0) };
+            var moved = new[] { new Vec3(0.08, 0, 0.03), new Vec3(0.09, 0.02, 0.04) };
+            var body = new[] { "Basis-Lasche1", "Schnitt-Extrusion1" };
+
+            // The whole part: the copy has the hole the bend moved – its faces witness too.
+            List<Vec3> all = SheetMetalBendRules.WitnessesFor(own, moved, body, _ => true, out bool leftOut);
+            Assert.Equal(4, all.Count);
+            Assert.False(leftOut);
+
+            // Only the bend chosen, or the cut failed in the copy: its moved faces are nowhere there – left out.
+            List<Vec3> ownOnly = SheetMetalBendRules.WitnessesFor(own, moved, body, n => n == "Basis-Lasche1", out leftOut);
+            Assert.Equal(own, ownOnly);
+            Assert.True(leftOut);
+
+            // Nothing moved: nothing is left out; a body without earlier features keeps the moved ones.
+            SheetMetalBendRules.WitnessesFor(own, Array.Empty<Vec3>(), body, _ => false, out leftOut);
+            Assert.False(leftOut);
+            Assert.Equal(4, SheetMetalBendRules.WitnessesFor(own, moved, Array.Empty<string>(), _ => false, out leftOut).Count);
+            Assert.False(leftOut);
+
+            // Never more than the maximum, the own ones represented.
+            var many = Enumerable.Range(0, 20).Select(i => new Vec3(i * 0.001, 0, 0)).ToList();
+            var manyMoved = Enumerable.Range(0, 20).Select(i => new Vec3(0, i * 0.001 + 0.01, 0)).ToList();
+            List<Vec3> capped = SheetMetalBendRules.WitnessesFor(many, manyMoved, body, _ => true, out _);
+            Assert.Equal(SheetMetalBendRules.MaxWitnesses, capped.Count);
+            Assert.Contains(capped, p => p.Y == 0);
+        }
+
+        [Fact]
+        public void The_witnesses_judge_the_variant_that_is_kept()
+        {
+            // Measured on the kept bend: what it misses now is reported, not what the search measured.
+            var (note, info) = SheetMetalBendRules.WitnessOutcome(12, 3, false, true, false, false, SheetMetalBendRules.Deviates);
+            Assert.Equal(SheetMetalBendRules.Deviates(3, 12), note);
+            Assert.Null(info);
+            (note, info) = SheetMetalBendRules.WitnessOutcome(12, 0, false, true, true, false, SheetMetalBendRules.Deviates);
+            Assert.Null(note);
+            Assert.Equal(SheetMetalBendRules.Confirmed(12, true, false), info);
+            // Only the fixed point: the side, not the direction.
+            (note, info) = SheetMetalBendRules.WitnessOutcome(1, 0, false, false, false, false, SheetMetalBendRules.Deviates);
+            Assert.Null(note);
+            Assert.Equal(SheetMetalBendRules.SideConfirmed, info);
+            // A rebuild error is the step's to report; no witnesses, nothing to say.
+            Assert.Equal((null, null), SheetMetalBendRules.WitnessOutcome(12, 0, true, true, false, false, SheetMetalBendRules.Deviates));
+            Assert.Equal((null, null), SheetMetalBendRules.WitnessOutcome(0, 0, false, false, false, false, SheetMetalBendRules.Deviates));
+            // The jog's own text.
+            Assert.Equal(JogRules.Deviates(2, 5), SheetMetalBendRules.WitnessOutcome(5, 2, true, true, false, false, JogRules.Deviates).note);
         }
 
         [Fact]

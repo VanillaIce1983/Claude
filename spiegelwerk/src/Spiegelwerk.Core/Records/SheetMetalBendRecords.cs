@@ -82,10 +82,25 @@ namespace Spiegelwerk.Core.Records
         public double Thickness { get; set; }
 
         /// <summary>
-        /// Points on faces the bend made or moved, in the state right after it (model coordinates,
-        /// unmirrored); empty if they could not be taken – then the direction is the rule's guess.
+        /// Points on its own faces and those of its bend sub-features, in the state right after it (model
+        /// coordinates, unmirrored); empty if they could not be taken – then the direction is the rule's guess.
         /// </summary>
         public List<Vec3> Witnesses { get; } = new List<Vec3>();
+
+        /// <summary>
+        /// Points on the other faces of its body it made or moved (same state): they lie on the copy only
+        /// if the copy has every feature of <see cref="BodyFeatures"/> – the build leaves them out otherwise.
+        /// </summary>
+        public List<Vec3> MovedWitnesses { get; } = new List<Vec3>();
+
+        /// <summary>The features that made its body before it (no sketches, reference geometry, folders, SheetMetal).</summary>
+        public List<string> BodyFeatures { get; } = new List<string>();
+
+        /// <summary>
+        /// <see cref="FixedPoint"/> still lies on a face of the original's body right after the bend
+        /// (10 µm) – off the bend zone, on the side that stays: only then it is a witness (K10).
+        /// </summary>
+        public bool FixedPointStays { get; set; }
 
         /// <summary>Sub-features whose definition is IOneBendFeatureData (SketchBend).</summary>
         public int BendCount { get; set; }

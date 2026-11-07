@@ -161,7 +161,13 @@ namespace Spiegelwerk.Capture
             r.SketchFace = CaptureSupportFace(sketchFeature);
             ReadBendsInto(f, JogRules.Parent(r), r.Bends, r.BendOverrides, r.Notes, out int count);
             r.BendCount = count;
-            r.Witnesses.AddRange(CaptureWitnesses(f, r.FixedFace!, before) ?? new List<Vec3>());
+            if (CaptureWitnesses(f, r.FixedFace!, before, r.FixedPoint) is WitnessCapture w)
+            {
+                r.Witnesses.AddRange(w.Own);
+                r.MovedWitnesses.AddRange(w.Moved);
+                r.BodyFeatures.AddRange(w.BodyFeatures);
+                r.FixedPointStays = w.FixedPointStays;
+            }
             return r;
         }
 

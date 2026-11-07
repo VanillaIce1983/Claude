@@ -21,7 +21,8 @@ namespace Spiegelwerk.Build.Builders
     /// and the other values come with one edit, the allowance with one of its own (a bend table is not
     /// settable on a jog, P7), and both flags with their own. Side and direction are decided by the
     /// witnesses as for the sketched bend (K10): per side the first guess for ReverseDirection, the
-    /// other, then the same with ReverseOffset turned. Without witnesses the check gets the flags as variants.
+    /// other, then the same with ReverseOffset turned; the jog that is kept is measured once more, with its
+    /// allowance, for the report. Without witnesses the check gets the flags as variants.
     /// </summary>
     internal sealed class JogBuilder : IFeatureBuilder
     {
@@ -68,9 +69,13 @@ namespace Spiegelwerk.Build.Builders
             Face2 onFace = face;
             List<Vec3> picks = BendSide.PickOrder(fixedPoint, lines, n, fixedSig.Sample, clearance, BendSupport.Reach(face), p => BendSupport.OnFace(onFace, p));
             if (picks.Count == 0) return Fail("Auf der festen Fläche fand sich kein Punkt abseits der Kröpfungslinie, an dem sie sich wählen ließe.", notes);
-            List<Vec3> witnesses = r.Witnesses.Select(ctx.Mirror.Apply).ToList();
+            // The moved faces only if the copy has every earlier feature of the body (K10).
+            List<Vec3> witnesses = SheetMetalBendRules.WitnessesFor(r.Witnesses, r.MovedWitnesses, r.BodyFeatures, x => ctx.Counterparts(x, false).Count > 0,
+                out bool movedLeftOut).Select(ctx.Mirror.Apply).ToList();
+            if (movedLeftOut) info.Add(SheetMetalBendRules.OwnWitnessesOnly);
             bool witnessed = witnesses.Count > 0;
-            if (fixedPoint.HasValue && SheetMetalBendRules.FixedPointWitnesses(fixedPoint.Value, lines, n, clearance)) witnesses.Add(fixedPoint.Value);
+            // The fixed point only where it stayed on a face of the original after the jog (K10).
+            if (fixedPoint.HasValue && r.FixedPointStays) witnesses.Add(fixedPoint.Value);
 
             // ---- 3. the search
             bool rev0 = SheetMetalBendRules.FirstReverseGuess(r.ReverseDirection, BendSupport.SigmaSheet(ctx, face), map.Sigma);
@@ -112,20 +117,19 @@ namespace Spiegelwerk.Build.Builders
                     if (rest.Count > 0) notes.Add(FlangeSupport.LeftBehind(rest));
                     return Fail("Die beste Variante der Kröpfung ließ sich nicht wieder anlegen.", notes);
                 }
+                // Made by another path than the one measured (the direction at creation): what it misses is measured on it below.
                 chosen = best;
-                notes.Add(JogRules.Deviates(best.Missed, witnesses.Count));
             }
-            else
-            {
-                if (witnessed)
-                    info.Add(SheetMetalBendRules.Confirmed(witnesses.Count, chosen!.State.Reverse != rev0 || chosen.State.ReverseOffset != off0, chosen.Pick > 0 && fixedPoint.HasValue));
-                else if (witnesses.Count > 0) info.Add(SheetMetalBendRules.SideConfirmed);
-                info.AddRange(tried);
-            }
+            else info.AddRange(tried);
             info.Add($"Angelegt über InsertSheetMetalJog ({Attempts[working].name}).");
 
             // ---- 4. allowance (an edit of its own; a table is not attempted), read-back, bends
             Settle(ctx, r, jog, notes);
+            // The witnesses on the jog that is kept, with its allowance: the best may have been made again.
+            var (off, confirmed) = SheetMetalBendRules.WitnessOutcome(witnesses.Count, SwShape.Misses(ctx, witnesses, ctx.SeparateBody), BendSupport.InError(jog),
+                witnessed, chosen!.State.Reverse != rev0 || chosen.State.ReverseOffset != off0, chosen.Pick > 0 && fixedPoint.HasValue, JogRules.Deviates);
+            if (off != null) notes.Add(off);
+            if (confirmed != null) info.Insert(0, confirmed);
             JogRecord? got = SwSheetMetal.ReadBackJog(doc, jog);
             if (got == null) notes.Add("Die Kröpfung ließ sich nicht zurücklesen.");
             else

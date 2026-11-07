@@ -109,11 +109,37 @@ namespace Spiegelwerk.Core.Planning
         }
 
         /// <summary>
-        /// The fixed point is a witness too (A2 P6, K10): after the bend it still lies on the face that
-        /// stays – unless it lies in the bend zone, so only if it keeps the clearance from every line.
+        /// The witnesses a build measures (K10), unmirrored: the points on the feature's own faces and those
+        /// of its bends, and the points on the other faces of its body it moved – these only if every feature
+        /// that made the body before it has its counterpart in the copy (<paramref name="rebuilt"/>): a hole
+        /// the run does not rebuild, or one that failed, is missing there in every variant. At most
+        /// <see cref="MaxWitnesses"/>; <paramref name="movedLeftOut"/> says whether moved ones were dropped.
+        /// The fixed point is not among them: the builder adds it where it stayed on the original.
         /// </summary>
-        public static bool FixedPointWitnesses(Vec3 fixedPoint, IReadOnlyList<Line3> lines, Vec3 n, double clearance) =>
-            BendSide.DistanceToLines(fixedPoint, lines, n) >= clearance;
+        public static List<Vec3> WitnessesFor(IReadOnlyList<Vec3> own, IReadOnlyList<Vec3> moved, IEnumerable<string> bodyFeatures, Func<string, bool> rebuilt,
+            out bool movedLeftOut)
+        {
+            bool count = bodyFeatures.All(rebuilt);
+            movedLeftOut = !count && moved.Count > 0;
+            return PickWitnesses(new[] { own, count ? moved : Array.Empty<Vec3>() });
+        }
+
+        /// <summary>
+        /// What the witnesses say about the variant that is kept, measured on it after the allowance is
+        /// settled – the best may have been made again, the allowance step may have made it once more, so
+        /// the count from the search is not its count: a note (<paramref name="deviates"/>) if it misses
+        /// any; nothing if it shows a rebuild error (the step reports that) or there are no witnesses;
+        /// otherwise the confirmation – direction and side if the feature's own witnesses were there
+        /// (<paramref name="decided"/>), only the side if the fixed point was the only one.
+        /// </summary>
+        public static (string? note, string? info) WitnessOutcome(int witnesses, int missed, bool error, bool decided, bool turned, bool otherSide,
+            Func<int, int, string> deviates)
+        {
+            if (witnesses == 0) return (null, null);
+            if (missed > 0) return (deviates(missed, witnesses), null);
+            if (error) return (null, null);
+            return (null, decided ? Confirmed(witnesses, turned, otherSide) : SideConfirmed);
+        }
 
         /// <summary>
         /// How two variants compare by their witnesses (A3 §3): negative if A is better, positive if B
@@ -211,6 +237,10 @@ namespace Spiegelwerk.Core.Planning
 
         /// <summary>Only the mirrored fixed point was a witness: the side is confirmed, the direction is the rule's.</summary>
         public const string SideConfirmed = "Feste Seite durch den gespiegelten festen Punkt bestätigt; die Richtung folgt der Regel.";
+
+        /// <summary>The moved faces were left out of the witnesses: not every earlier feature of the body is in the copy.</summary>
+        public const string OwnWitnessesOnly =
+            "Zeugenpunkte nur auf den eigenen Flächen und denen der Biegungen: Nicht jedes frühere Feature des Körpers ist in der Kopie nachgebaut.";
 
         /// <summary>The allowance came back reset after a change of direction (A3 P5).</summary>
         public const string AllowanceReset = "Biegezugabe ließ sich nicht zusammen mit der Biegerichtung setzen (SOLIDWORKS setzt sie beim Ändern zurück).";

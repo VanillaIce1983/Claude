@@ -16,7 +16,8 @@ namespace Spiegelwerk.Capture
     /// dispatch (<see cref="CaptureSheetMetal"/>), so a call that throws makes this feature
     /// unsupported, not the run fail. Under AccessSelections (the state before the bend): the values,
     /// the fixed face and the point it was picked at, the faces of its body; outside it: the face its
-    /// sketch was drawn on (bar after the sketch), its bends, and the witnesses (bar after the bend).
+    /// sketch was drawn on (bar after the sketch), its bends, and – with the bar after the bend – the
+    /// witnesses and whether the fixed point still lies on the body then.
     /// </summary>
     internal sealed partial class FeatureCapture
     {
@@ -63,7 +64,14 @@ namespace Spiegelwerk.Capture
             ReadBendsInto(f, SheetMetalBendRules.Parent(r), r.Bends, r.BendOverrides, r.Notes, out int count);
             r.BendCount = count;
             // None: the builder says so – a note unless the check can confirm the direction.
-            r.Witnesses.AddRange(CaptureWitnesses(f, r.FixedFace!, before) ?? new List<Vec3>());
+            if (CaptureWitnesses(f, r.FixedFace!, before, r.FixedPoint) is WitnessCapture w)
+            {
+                r.Witnesses.AddRange(w.Own);
+                r.MovedWitnesses.AddRange(w.Moved);
+                r.BodyFeatures.AddRange(w.BodyFeatures);
+                // Measured on the original: a reading on the side that moves, or in the bend zone, lies on no face now.
+                r.FixedPointStays = w.FixedPointStays;
+            }
             return r;
         }
 
