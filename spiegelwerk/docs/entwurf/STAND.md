@@ -72,6 +72,11 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   gewählten Features darf eine Lasche am Körper des Originals anschließen (A1 §11 nennt nur den eigenen Körper; A2/A3 §8
   erlauben Bezüge auf das Original). Scheitert B14 im Live-Test, kommt die Ablehnung im selben Teil zurück.
   Nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+- Blech S1b geprüft (`539a70b`) und nachgeprüft (`8b37462`), Befunde behoben: Der Wächter schreibt nur abweichende
+  Standardwerte und Blech-Features zurück und gibt „Blechparameter aus dem Werkstoff“ ihren alten Zustand zurück; die Sitzung
+  prüft die abgewickelten Kopien nach dem Abwickeln der Originale noch einmal; Hinweise der Abwicklung für Flächen nur am
+  Original; im selben Teil folgt die Kopie mit den geteilten Standardwerten dem Werkstoff (`MaterialNoteFor`).
+  STOLPERSTEINE 196, 199–200.
 - Blech S2 (Zweig `feat-blech`): Saum und Gehrungslasche samt Bausteinen für alle Laschen und Biegungen. Core:
   `SheetMetalFlangeRecords` (`HemRecord` mit `HemWidthSketch`, `MiterFlangeRecord`), `FlangeProfiles` (`Assign`,
   `IsFullEdgeLine`, `LiesOn`), `MiterRules` (`Variants`, `Marks`, `OffersSwap`, `Differences`, `Parent`), `HemRules` (Werte
@@ -93,6 +98,11 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   verglichen (K25), eigene Werte der Biegungen der Kopie über das, was abweicht, nicht über Namen. `Assign` hat noch keinen
   Beleg über den Skizzenrahmen (kommt mit den Profilen der Kantenlasche in S3). Bei einer einzelnen Kante versucht die
   Gehrungslasche vor der Markierung 0 auch „Kette zuerst“. Nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+- Blech S2 geprüft, Befunde behoben (`483eb03`): Saumwinkel nur mod 2π verglichen (`ScalarKind.PlainAngle`), Breitenskizzen
+  erst gespiegelt, dann geleert (`SketchBuilder.ReplaceInto`, `SketchDamagedException`). Die Nachprüfung fand noch einen Fehler,
+  behoben in `71d7c0c`: Lässt sich keine Linie der vorhandenen Breitenskizze löschen, ist das ein gewöhnlicher Fehlschlag
+  (`NothingClearedException`), und die Texte nennen eine nur teilweise geleerte Skizze nicht mehr „geleert“. STOLPERSTEINE 170,
+  201, 203, 211.
 - Blech S3 (Zweig `feat-blech`): Kantenlasche. Core: `EdgeFlangeRecord` mit `FlangeProfile` und den swconst-Zahlen
   (`FlangeOffsetTypes`, `FlangeDimTypes`, `FlangePositionTypes`, `EdgeFlangeOptions`, `ReliefTearTypes`), `FlangeProfiles` (`PredictedAngle`,
   `AngleCandidates`, `CommonCandidate`, `Direction`, `FitsFrame`, `NormalOffset`, `Rebase`, `Merge`, `ProfilePoints`, `InPlaneDeviation`,
@@ -116,6 +126,13 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   die Lasche nicht anzulegen. `ISketch.GetReferenceEntity` nimmt in der Interop `ref int` (A2 P15: `out`). Das Tor B29 ist nicht erprobt;
   wie bei S1a sind die Typen trotzdem geöffnet – scheitert B29, kommt `EdgeFlange` auf „noch nicht“ zurück. Nicht in einer laufenden
   SOLIDWORKS-Sitzung erprobt.
+- Blech S3 geprüft (5 bestätigte Befunde, behoben in `8a567ee`): Richtungsvarianten suchen die Profilskizzen unter ihren
+  registrierten Namen, der Richtungsstand gilt erst nach gelungener Bearbeitung, „senkrecht zur Fläche“ nur mit Bezug des Winkels,
+  Messart der Länge auch bei „bis Kante und verschmelzen“. Nachgeprüft (3 bestätigte Befunde, behoben in `5aa8995`): Biegezugabe
+  auch nach einem Umschalten, das false meldet; nicht wiederhergestellte Richtungen mit Hinweis
+  (`EdgeFlangeRules.DirectionsNotRestored`); ein gesetzter, aber nicht zurückgelesener Bezug des Winkels mit Hinweis
+  (`EdgeFlangeRecord.HasAngleReference`, `EdgeFlangeRules.AngleReferenceMissing`). STOLPERSTEINE 208, 215, 221, 222,
+  Prüftabelle (B27, B34, B35).
 - Blech S4 (Zweig `feat-blech`): skizzierte Biegung und Kröpfung. Core: `SketchedBendRecord` (`SheetMetalBendRecords.cs`, mit
   `FixedPointSpace`), `JogRecord` mit den swconst-Zahlen (`JogOffsetTypes`, `JogDimensionPositions`, `JogPositions`), `BendSide` (Bereiche,
   Wahlpunkte je Bereich, `PointBeside`, `PickOrder`, `ChooseFixedPoint`, Abstand), `SheetMetalBendRules` (Code der Biegeposition, erste
@@ -143,12 +160,14 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S3 stehen und sind geprüft, S4 (skizzierte Biegung, Kröpfung) steht (Zweig `feat-blech`), als Nächstes seine Prüfung und S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S3 stehen und sind geprüft, S4 (skizzierte Biegung, Kröpfung) steht (Zweig `feat-blech`) und ist noch nicht geprüft, als Nächstes seine Prüfung und S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung); S7a (Ersatzweg) wartet auf die Entscheidungen des Eigentümers (`blech-plan.md` §7); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S4 prüfen und gegenprüfen, dann S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung) usw. nach `blech-plan.md`;
-   jeder Schritt mit Core-Tests, Prüfung und Gegenprüfung.
+1. Blech S4 prüfen und gegenprüfen, dann S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung) und S6 (Normal Cut,
+   alte Biegungen einfügen) nach `blech-plan.md`; jeder Schritt mit Core-Tests, Prüfung und Gegenprüfung. S7a (Ersatzweg)
+   erst nach den Entscheidungen des Eigentümers in `blech-plan.md` §7 (Ersatzweg überhaupt, Umgang mit gescheiterten
+   Blättern, „Original löschen“), bei einem Nein stattdessen S7′; S8 und S9 hängen nicht davon ab.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.
 3. Doku, Version, Regressionsprüfung, Release (Tag nur nach Rückfrage).
