@@ -47,8 +47,14 @@ namespace Spiegelwerk.Core.Planning
         public static bool UsesDistance(int offsetType) =>
             offsetType == FlangeOffsetTypes.Blind || offsetType == FlangeOffsetTypes.MidPlane || offsetType == FlangeOffsetTypes.FromSurface;
 
-        /// <summary>Where the length is measured matters only for a length of its own given as a number: blind and mid plane.</summary>
-        public static bool UsesDimType(int offsetType) => offsetType == FlangeOffsetTypes.Blind || offsetType == FlangeOffsetTypes.MidPlane;
+        /// <summary>
+        /// Where the length is measured (outer or inner virtual sharp, tangent to the bend) matters for a
+        /// blind or mid-plane length and for up to edge and merge – swFlangeDimTypes_e names "Blind or Up
+        /// To Edge And Merge", OffsetDimType is valid for all but up to a vertex; not for the surfaces,
+        /// where the two help pages disagree.
+        /// </summary>
+        public static bool UsesDimType(int offsetType) =>
+            offsetType == FlangeOffsetTypes.Blind || offsetType == FlangeOffsetTypes.MidPlane || offsetType == FlangeOffsetTypes.UptoEdgeAndMerge;
 
         /// <summary>The length (or position offset) ends at a reference: vertex, surface, offset from a surface, edge.</summary>
         public static bool UsesReference(int offsetType) =>
@@ -93,8 +99,9 @@ namespace Spiegelwerk.Core.Planning
         /// flange uses is compared – a value SOLIDWORKS does not use can come back as anything
         /// (tbcphutai): the length and where it is measured only where it is a number, the position
         /// offset's type and distance only with a position offset, the late-bound flags only where both
-        /// read them and where they apply. The bend angle is compared folded: θ and 2π − θ are the same
-        /// bend about an edge that runs the other way (A2 P1).
+        /// read them and where they apply – "perpendicular to the face" only with an angle reference (the
+        /// help: valid only then; the readers give null without one). The bend angle is compared folded:
+        /// θ and 2π − θ are the same bend about an edge that runs the other way (A2 P1).
         /// </summary>
         public static Deviations Differences(EdgeFlangeRecord want, EdgeFlangeRecord got, IFormatProvider? culture = null)
         {
@@ -125,7 +132,7 @@ namespace Spiegelwerk.Core.Planning
                 if (want.PositionOffsetType == got.PositionOffsetType && UsesDistance(want.PositionOffsetType))
                     values.Add(("Versatzabstand", want.PositionOffsetDistance, got.PositionOffsetDistance, ScalarKind.Length));
             }
-            if (want.PerpendicularToFace.HasValue && got.PerpendicularToFace.HasValue)
+            if (want.AngleReference != null && want.PerpendicularToFace.HasValue && got.PerpendicularToFace.HasValue)
                 values.Add(("Senkrecht zur Fläche", F(want.PerpendicularToFace.Value), F(got.PerpendicularToFace.Value), ScalarKind.Flag));
             var d = new Deviations();
             d.Differences.AddRange(SheetMetalCompare.Scalars(values, culture));

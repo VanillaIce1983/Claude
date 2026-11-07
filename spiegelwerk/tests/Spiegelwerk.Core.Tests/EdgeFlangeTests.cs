@@ -145,7 +145,19 @@ namespace Spiegelwerk.Core.Tests
             want.OffsetType = got.OffsetType = FlangeOffsetTypes.Blind;
             Assert.Equal(2, EdgeFlangeRules.Differences(want, got).Differences.Count);
             got.OffsetDistance = 0.02;
+
+            // Up to edge and merge: no length of its own, but where it is measured (swFlangeDimTypes_e).
+            Assert.True(EdgeFlangeRules.UsesDimType(FlangeOffsetTypes.UptoEdgeAndMerge));
+            Assert.False(EdgeFlangeRules.UsesDimType(FlangeOffsetTypes.UpToVertex));
+            want.OffsetType = got.OffsetType = FlangeOffsetTypes.UptoEdgeAndMerge;
+            want.OffsetDimType = FlangeDimTypes.OuterVirtualSharp;
+            got.OffsetDimType = FlangeDimTypes.InnerVirtualSharp;
+            got.OffsetDistance = 0.5;
+            Assert.Equal(new[] { "Bemaßung der Laschenlänge" }, EdgeFlangeRules.Differences(want, got).Differences.Select(x => x.Split(':')[0]));
             got.OffsetDimType = want.OffsetDimType;
+            Assert.True(EdgeFlangeRules.Differences(want, got).None);
+            want.OffsetType = got.OffsetType = FlangeOffsetTypes.Blind;
+            got.OffsetDistance = 0.02;
 
             // A position offset's type and distance only with a position offset; late-bound flags only where both read them.
             got.PositionOffsetDistance = 0.003;
@@ -155,8 +167,13 @@ namespace Spiegelwerk.Core.Tests
             want.PositionOffsetDistance = 0.003;
             want.PerpendicularToFace = true;
             Assert.True(EdgeFlangeRules.Differences(want, got).None);
+            // Perpendicular to the face applies only with an angle reference (help).
             got.PerpendicularToFace = false;
-            Assert.Single(EdgeFlangeRules.Differences(want, got).Differences);
+            Assert.True(EdgeFlangeRules.Differences(want, got).None);
+            want.AngleReference = GeometryRef.ToEdge(Line(new Vec3(0, 0, 0), new Vec3(0.1, 0, 0)));
+            Assert.Equal(new[] { "Senkrecht zur Fläche" }, EdgeFlangeRules.Differences(want, got).Differences.Select(x => x.Split(':')[0]));
+            got.PerpendicularToFace = null;
+            Assert.True(EdgeFlangeRules.Differences(want, got).None);
             got.PerpendicularToFace = true;
 
             // Own relief with the tear type, compared where both know it.

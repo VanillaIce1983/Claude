@@ -226,11 +226,12 @@ namespace Spiegelwerk.Build.Builders
 
             ctx.Register(r.Name, f);
             var natives = new List<Feature>();
+            // Register renames each profile: the direction alternatives below read them by the new name.
             for (int i = 0; i < names.Count; i++)
                 if (Live(doc, names[i]) is Feature live)
                 {
                     natives.Add(live);
-                    ctx.Register(r.Profiles[i].SketchName, live);
+                    names[i] = ctx.Register(r.Profiles[i].SketchName, live);
                 }
             BuildResult result = Ok(f, EdgeFlangeRules.Describe(r), notes);
             result.Info.AddRange(info);
@@ -540,8 +541,12 @@ namespace Spiegelwerk.Build.Builders
                 }
             }
             if (r.NormalToFlangePlane.HasValue) SwLate.Set(d, "NormalToFlangePlane", r.NormalToFlangePlane.Value);
-            if (r.PerpendicularToFace.HasValue) SwLate.Set(d, "PerpendicularToFace", r.PerpendicularToFace.Value);
-            if (refs.Angle != null) SwLate.Set(d, "AngleReference", refs.Angle);
+            // Perpendicular to the face only with the reference it refers to (help: valid only then).
+            if (refs.Angle != null)
+            {
+                SwLate.Set(d, "AngleReference", refs.Angle);
+                if (r.PerpendicularToFace.HasValue) SwLate.Set(d, "PerpendicularToFace", r.PerpendicularToFace.Value);
+            }
             if (r.LockAngle.HasValue && r.OffsetType == FlangeOffsetTypes.UptoEdgeAndMerge) SwLate.Set(d, "LockAngle", r.LockAngle.Value);
         }
 
@@ -625,6 +630,8 @@ namespace Spiegelwerk.Build.Builders
         /// A direction alternative for the check (A2 §7): the first call turns the flags, the second turns
         /// them back and is true only if the profiles are where they were – ModifyDefinition on a
         /// regenerated profile was not idempotent (tbcphutai); a toggle that does not restore says so.
+        /// The shared direction state changes only with an edit that took. <paramref name="names"/> are
+        /// the profiles' names as registered (Register renames them).
         /// </summary>
         private static Func<bool> DirectionToggle(BuildContext ctx, EdgeFlangeRecord r, List<(Edge edge, EdgeSignature signature)> hinges, List<string> names,
             Feature f, Func<(bool, bool)> state, Action<bool, bool> setState, bool turnReverse, bool turnPosition)
@@ -636,15 +643,17 @@ namespace Spiegelwerk.Build.Builders
                 var (reverse, position) = state();
                 reverse ^= turnReverse;
                 position ^= turnPosition;
-                setState(reverse, position);
                 if (!applied)
                 {
                     baseline = ProfileState(ctx, names);
+                    if (!SetDirections(ctx, f, reverse, position)) return false;
+                    setState(reverse, position);
                     applied = true;
-                    return SetDirections(ctx, f, reverse, position);
+                    return true;
                 }
                 applied = false;
                 if (!SetDirections(ctx, f, reverse, position)) return false;
+                setState(reverse, position);
                 List<Vec3>? back = ProfileState(ctx, names);
                 return baseline != null && back != null && FlangeProfiles.InPlaneDeviation(baseline, back) <= Tol.Length;
             };
