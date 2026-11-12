@@ -1,8 +1,10 @@
 # Blechbestand (Windows-Programm, .NET Framework 4.8) bauen, Datenlogik testen, die Exe auf Windows einmal starten
 # und mit einem Screenshot als Artefakt bereitstellen.
 # Tags blechbestand-v* (z. B. blechbestand-v1.0.0, passend zur <Version> in src/Blechbestand.csproj) werden zusätzlich
-# als GitHub-Release veröffentlicht: Blechbestand-<Version>.zip (Exe, LIESMICH.txt, Logo) und SHA256.txt, Text aus RELEASE.md.
-# Ohne eigenen Tag: manuell starten mit „Als Release veröffentlichen“; dann legt der Lauf Tag und Release an.
+# als GitHub-Release veröffentlicht: Blechbestand.exe einzeln, Blechbestand-<Version>.zip (Exe, LIESMICH.txt, Logo) und
+# SHA256.txt, Text aus RELEASE.md. Ohne eigenen Tag: manuell starten mit „Als Release veröffentlichen“; dann legt der Lauf
+# Tag und Release an. Gibt es das Release schon, bleibt das veröffentlichte Programm unverändert (gleiche Prüfsumme):
+# fehlende Dateien werden aus dem veröffentlichten ZIP ergänzt und der Text aus RELEASE.md erneuert.
 name: blechbestand-windows
 
 on:
@@ -87,11 +89,12 @@ jobs:
           $out = New-Item -ItemType Directory -Force -Path ../blechbestand-paket
           $dir = New-Item -ItemType Directory -Force -Path (Join-Path $out 'Blechbestand')
           Copy-Item src/bin/Release/net48/Blechbestand.exe $dir
+          Copy-Item src/bin/Release/net48/Blechbestand.exe $out
           Copy-Item LIESMICH.txt $dir
           Copy-Item assets/logo-512.png (Join-Path $dir 'Logo.png')
           $hash = (Get-FileHash (Join-Path $dir 'Blechbestand.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
           Compress-Archive -Path $dir -DestinationPath (Join-Path $out "Blechbestand-$version.zip") -Force
-          "$hash  Blechbestand.exe" | Set-Content -Encoding ascii (Join-Path $out 'SHA256.txt')
+          [IO.File]::WriteAllText((Join-Path $out 'SHA256.txt'), "$hash  Blechbestand.exe`n")
           Remove-Item -Recurse -Force $dir
           Get-ChildItem $out
           Write-Host "Blechbestand $version, SHA-256 $hash"
@@ -131,6 +134,9 @@ jobs:
       - name: Version und Release-Text
         id: version
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           csproj=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' blechbestand/src/Blechbestand.csproj | head -1)
           if [[ "$GITHUB_REF" == refs/tags/blechbestand-v* ]]; then version="${GITHUB_REF_NAME#blechbestand-v}"; else version="$csproj"; fi
@@ -138,26 +144,56 @@ jobs:
             echo "::error::Version im Tag ($version) passt nicht zur <Version> in Blechbestand.csproj ($csproj)."
             exit 1
           fi
+          tag="blechbestand-v$version"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            # Schon veröffentlicht: das Programm darin bleibt, wie es ist (gleiche Prüfsumme, keine neue Exe).
+            echo "Release $tag gibt es schon. Ergänzt werden nur fehlende Dateien aus dem veröffentlichten ZIP."
+            rm -rf paket
+            mkdir -p paket/x
+            gh release download "$tag" -p "Blechbestand-$version.zip" -p SHA256.txt -D paket
+            unzip -q "paket/Blechbestand-$version.zip" -d paket/x
+            cp paket/x/Blechbestand/Blechbestand.exe paket/
+            tr -d '\r' < paket/SHA256.txt > paket/pruefsumme.txt
+            (cd paket && sha256sum -c pruefsumme.txt)
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
           test -f "paket/Blechbestand-$version.zip"
+          test -f paket/Blechbestand.exe
           {
             cat blechbestand/RELEASE.md
             echo
             echo '**Prüfsumme (SHA-256) der Blechbestand.exe:**'
             echo '```'
-            cat paket/SHA256.txt
+            tr -d '\r' < paket/SHA256.txt
             echo '```'
           } > notes.md
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           ls -la paket
           cat notes.md
 
+      - name: Bestehendes Release ergänzen
+        if: steps.version.outputs.exists == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload "${{ steps.version.outputs.tag }}" paket/Blechbestand.exe --clobber
+          gh release edit "${{ steps.version.outputs.tag }}" --notes-file notes.md
+          gh release view "${{ steps.version.outputs.tag }}"
+
       - uses: softprops/action-gh-release@v3
+        if: steps.version.outputs.exists != 'true'
         with:
-          tag_name: blechbestand-v${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: Blechbestand ${{ steps.version.outputs.version }}
           body_path: notes.md
           files: |
+            paket/Blechbestand.exe
             paket/Blechbestand-${{ steps.version.outputs.version }}.zip
             paket/SHA256.txt
           fail_on_unmatched_files: true

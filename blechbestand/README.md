@@ -10,7 +10,7 @@ Windows-Programm für den Blechbestand im Lager. Es ersetzt die Excel-Liste „B
 
 ## Starten
 
-Die fertige Version gibt es unter [Releases](https://github.com/VanillaIce1983/Claude/releases) als `Blechbestand-<Version>.zip`: entpacken, z. B. nach `C:\Blechbestand`, und `Blechbestand.exe` doppelklicken. Eine Installation ist nicht nötig. Das Programm braucht nur das .NET Framework 4.8, und das ist in Windows 10 und 11 schon enthalten.
+Die fertige Version gibt es unter [Releases](https://github.com/VanillaIce1983/Claude/releases): `Blechbestand.exe` herunterladen, in einen eigenen Ordner legen (z. B. `C:\Blechbestand`) und doppelklicken. Eine Installation ist nicht nötig, weitere Dateien braucht das Programm nicht. `Blechbestand-<Version>.zip` enthält dieselbe Exe mit Kurzanleitung und Logo. Das Programm braucht nur das .NET Framework 4.8, und das ist in Windows 10 und 11 schon enthalten.
 
 Beim ersten Start meldet Windows SmartScreen eventuell „Der Computer wurde durch Windows geschützt“, weil die Datei nicht signiert ist. Dann auf **Weitere Informationen → Trotzdem ausführen** klicken. Meldet ein Virenschutz wie G DATA einen Fehlalarm, trägt die IT den Programmordner als Ausnahme ein. Die Prüfsumme der Exe steht beim Release (`SHA256.txt`).
 
@@ -126,7 +126,7 @@ dotnet build -c Release src/Blechbestand.csproj                   # → src/bin/
 
 Der Workflow `.github/workflows/blechbestand-windows.yml` baut und testet auf Windows, startet das Programm einmal, macht einen Screenshot und stellt `Blechbestand.exe` und das Download-Paket als Artefakt bereit.
 
-**Release:** Version in `src/Blechbestand.csproj` setzen, `RELEASE.md` anpassen und den Tag `blechbestand-v<Version>` pushen (z. B. `blechbestand-v1.0.0`). Der Workflow veröffentlicht dann `Blechbestand-<Version>.zip` (Exe, `LIESMICH.txt`, Logo) und `SHA256.txt` als GitHub-Release. Alternativ den Workflow von Hand mit „Als Release veröffentlichen“ starten.
+**Release:** Version in `src/Blechbestand.csproj` setzen, `RELEASE.md` anpassen und den Tag `blechbestand-v<Version>` pushen (z. B. `blechbestand-v1.0.0`). Der Workflow veröffentlicht dann `Blechbestand.exe`, `Blechbestand-<Version>.zip` (Exe, `LIESMICH.txt`, Logo) und `SHA256.txt` als GitHub-Release. Alternativ den Workflow von Hand mit „Als Release veröffentlichen“ starten. Gibt es das Release schon, wird das Programm darin nicht neu gebaut: Fehlende Dateien kommen aus dem veröffentlichten ZIP, nur der Text wird erneuert.
 
 | Ordner | Inhalt |
 | --- | --- |

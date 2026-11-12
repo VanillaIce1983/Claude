@@ -2,11 +2,12 @@ Erste offizielle Version von **Blechbestand**, dem Windows-Programm für den Ble
 
 ## Download und Start
 
-1. **Blechbestand-1.0.0.zip** unten herunterladen und entpacken, z. B. nach `C:\Blechbestand`.
-2. `Blechbestand.exe` doppelklicken. Eine Installation ist nicht nötig, Windows 10 und 11 bringen alles mit (.NET Framework 4.8).
-3. Beim ersten Start wird die Bestandsdatei mit den 35 Positionen aus der Excel-Liste angelegt (`Dokumente\Blechbestand\bestand.xml`). Für mehrere Rechner unter **Einstellungen** dieselbe Datei auf dem Netzlaufwerk wählen.
+- **Blechbestand.exe** unten herunterladen, in einen eigenen Ordner legen (z. B. `C:\Blechbestand`) und doppelklicken. Mehr braucht es nicht: keine Installation, keine weiteren Dateien. Windows 10 und 11 bringen alles mit (.NET Framework 4.8).
+- Oder **Blechbestand-1.0.0.zip**: dieselbe Exe zusammen mit Kurzanleitung (`LIESMICH.txt`) und Logo.
 
-Die Exe ist nicht digital signiert. Windows SmartScreen fragt deshalb beim ersten Start nach: **Weitere Informationen → Trotzdem ausführen**. Meldet ein Virenschutz wie G DATA einen Fehlalarm, trägt die IT den Programmordner als Ausnahme ein. Die Prüfsumme steht unten und in `SHA256.txt`.
+Beim ersten Start wird die Bestandsdatei mit den 35 Positionen aus der Excel-Liste angelegt (`Dokumente\Blechbestand\bestand.xml`). Für mehrere Rechner unter **Einstellungen** dieselbe Datei auf dem Netzlaufwerk wählen. Zum Aktualisieren nur die Exe ersetzen, die Daten bleiben erhalten.
+
+Die Exe ist nicht digital signiert. Der Browser warnt deshalb eventuell beim Herunterladen („wird selten heruntergeladen“, dann **Beibehalten**), und Windows SmartScreen fragt beim ersten Start nach: **Weitere Informationen → Trotzdem ausführen**. Meldet ein Virenschutz wie G DATA einen Fehlalarm, trägt die IT den Programmordner als Ausnahme ein. Die Prüfsumme steht unten und in `SHA256.txt`.
 
 ## Funktionen
 
