@@ -615,9 +615,17 @@ namespace Spiegelwerk.Core.Planning
         public static string LegacyNotCreated(IEnumerable<string> tried) =>
             $"SOLIDWORKS hat „Biegungen einfügen“ nicht angelegt ({string.Join("; ", tried)}).";
 
-        /// <summary>The allowance went in afterwards: InsertBends2 does not take its kind.</summary>
+        /// <summary>The allowance written went in afterwards: InsertBends2 does not take its kind.</summary>
         public static string LegacyAllowanceLater(BendAllowanceData a, IFormatProvider? culture = null) =>
             $"Biegezugabe ({SheetMetalCompare.Describe(a, culture)}) nimmt „Biegungen einfügen“ beim Anlegen nicht; sie wurde danach am Blech-Feature gesetzt.";
+
+        /// <summary>
+        /// A later body is created with the target's defaults, and InsertBends2 does not take their allowance: created with
+        /// a placeholder, the body's own (<paramref name="written"/>, one the call would take) set afterwards.
+        /// </summary>
+        public static string LegacyTargetAllowanceLater(BendAllowanceData targetDefaults, BendAllowanceData written, IFormatProvider? culture = null) =>
+            $"Die Biegezugabe der Blech-Standardwerte im Ziel ({SheetMetalCompare.Describe(targetDefaults, culture)}) nimmt „Biegungen einfügen“ beim Anlegen nicht; " +
+            $"angelegt mit einem Platzhalter, danach wurde am Blech-Feature die eigene ({SheetMetalCompare.Describe(written, culture)}) gesetzt.";
 
         /// <summary>„Biegungen eingefügt (mit Abwickeln und Zurückbiegen), Radius 1 mm, K 0,44“.</summary>
         public static string DescribeLegacy(LegacyBendsRecord r, IFormatProvider? culture = null)

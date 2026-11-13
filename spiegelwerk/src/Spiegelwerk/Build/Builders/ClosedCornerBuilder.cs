@@ -65,6 +65,7 @@ namespace Spiegelwerk.Build.Builders
                         break;
                     }
                     failure = got == null ? "Die neue Ecke ließ sich nicht zurücklesen."
+                        : count < 0 ? "Die Flächen der neuen Ecke ließen sich nicht lesen."
                         : count == wanted.Count ? "Die neue Ecke hat andere Flächen als die gespiegelten."
                         : $"Die neue Ecke hat {count} Flächen statt {wanted.Count}.";
                 }

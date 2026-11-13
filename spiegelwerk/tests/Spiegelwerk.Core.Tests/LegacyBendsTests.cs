@@ -199,6 +199,11 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal("SOLIDWORKS hat „Biegungen einfügen“ nicht angelegt (Markierung 0: x; Markierung 1: y).", SheetMetalRules.LegacyNotCreated(new[] { "Markierung 0: x", "Markierung 1: y" }));
             Assert.StartsWith("Biegezugabe (Biegeabzug 2 mm) nimmt „Biegungen einfügen“ beim Anlegen nicht",
                 SheetMetalRules.LegacyAllowanceLater(new BendAllowanceData { Kind = BendAllowanceKind.Deduction, BendDeduction = 0.002 }, De));
+            // A later body: the target's defaults needed the placeholder, the body's own allowance went on afterwards – both named.
+            Assert.Equal("Die Biegezugabe der Blech-Standardwerte im Ziel (Biegeabzug 2 mm) nimmt „Biegungen einfügen“ beim Anlegen nicht; " +
+                         "angelegt mit einem Platzhalter, danach wurde am Blech-Feature die eigene (K 0,44) gesetzt.",
+                SheetMetalRules.LegacyTargetAllowanceLater(new BendAllowanceData { Kind = BendAllowanceKind.Deduction, BendDeduction = 0.002 },
+                    new BendAllowanceData { Kind = BendAllowanceKind.KFactor, KFactor = 0.44 }, De));
         }
     }
 }

@@ -118,9 +118,10 @@ namespace Spiegelwerk.Core.Tests
         [Fact]
         public void Paths_and_texts()
         {
-            // The data object first (the help's way), the obsolete calls after it.
-            Assert.Equal(new[] { NormalCutPath.DataObject, NormalCutPath.Obsolete }, NormalCutRules.Paths);
+            // The data object first (the help's way), the obsolete calls after it: per group, then in the help's numbered order.
+            Assert.Equal(new[] { NormalCutPath.DataObject, NormalCutPath.Obsolete, NormalCutPath.ObsoleteHelpOrder }, NormalCutRules.Paths);
             Assert.Equal("AddSMNormalCut", NormalCutRules.PathName(NormalCutPath.Obsolete));
+            Assert.Equal("AddSMNormalCut in der Reihenfolge der Hilfe", NormalCutRules.PathName(NormalCutPath.ObsoleteHelpOrder));
             Assert.Equal("Normaler Schnitt (Ausdehnung), 2 Flächengruppen, 3 Flächen", NormalCutRules.Describe(TwoGroups()));
             var one = new NormalCutRecord("N", "NormalCut") { Parameters = NormalCutParameterTypes.OffsetPlane };
             one.Groups.Add(new List<FaceSignature> { Plane(1e-4, Vec3.Zero, Vec3.UnitZ) });
@@ -129,6 +130,26 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal("SOLIDWORKS hat den normalen Schnitt nicht mit den gespiegelten Flächengruppen angelegt (Datenobjekt: x).",
                 NormalCutRules.NotCreated(new[] { "Datenobjekt: x" }));
             Assert.Equal((1, 4, 8), (NormalCutRules.FaceMark, NormalCutRules.OffsetPlaneMark, NormalCutRules.DirectionMark));
+        }
+
+        [Fact]
+        public void Help_order_marks_the_first_face_of_a_group_1_and_the_others_2()
+        {
+            // AddSMNormalCutType remarks: cut-extrude faces with mark 1, „the group of cut-extrude faces“ with mark 2.
+            Assert.Equal(2, NormalCutRules.GroupMark);
+            Assert.Equal(new[] { 1 }, NormalCutRules.HelpOrderMarks(1));
+            Assert.Equal(new[] { 1, 2, 2 }, NormalCutRules.HelpOrderMarks(3));
+            Assert.Empty(NormalCutRules.HelpOrderMarks(0));
+        }
+
+        [Fact]
+        public void Read_back_failure_names_unreadable_groups()
+        {
+            Assert.Equal("Der neue Schnitt ließ sich nicht zurücklesen.", NormalCutRules.ReadBackFailure(false, -1, 2));
+            // Groups that do not read are not „-1 Flächengruppen“.
+            Assert.Equal("Die Flächengruppen des neuen Schnitts ließen sich nicht lesen.", NormalCutRules.ReadBackFailure(true, -1, 2));
+            Assert.Equal("Der neue Schnitt hat andere Flächen als die gespiegelten.", NormalCutRules.ReadBackFailure(true, 2, 2));
+            Assert.Equal("Der neue Schnitt hat 1 Flächengruppen statt 2.", NormalCutRules.ReadBackFailure(true, 1, 2));
         }
     }
 }

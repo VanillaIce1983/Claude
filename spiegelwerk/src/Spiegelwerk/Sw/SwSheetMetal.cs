@@ -340,14 +340,30 @@ namespace Spiegelwerk.Sw
             return f.IsSuppressed();
         }
 
-        /// <summary>Suppresses (folds) or unsuppresses (flattens) in the active configuration; true if the state is the wanted one afterwards.</summary>
-        public static bool SetSuppressed(ModelDoc2 doc, Feature f, bool suppressed)
+        /// <summary>
+        /// Suppresses (folds) or unsuppresses (flattens) in the active configuration; true if the state is the wanted one afterwards.
+        /// <paramref name="withDependents"/>: unsuppressing also unsuppresses the features SOLIDWORKS suppressed with it (its
+        /// children, swUnSuppressDependent) – a second call after the plain one, so either reading of that action (the children
+        /// alone, or the feature with them) works; whether the children came back does not count. Suppressing always takes them along.
+        /// </summary>
+        public static bool SetSuppressed(ModelDoc2 doc, Feature f, bool suppressed, bool withDependents = false)
         {
             if (IsSuppressed(f) == suppressed) return true;
             try
             {
                 f.SetSuppression2(suppressed ? (int)swFeatureSuppressionAction_e.swSuppressFeature : (int)swFeatureSuppressionAction_e.swUnSuppressFeature,
                     (int)swInConfigurationOpts_e.swThisConfiguration, null);
+                if (!suppressed && withDependents)
+                {
+                    try
+                    {
+                        f.SetSuppression2((int)swFeatureSuppressionAction_e.swUnSuppressDependent, (int)swInConfigurationOpts_e.swThisConfiguration, null);
+                    }
+                    catch (Exception)
+                    {
+                        // The feature itself is what counts; its children then stay as they were.
+                    }
+                }
                 doc.EditRebuild3();
             }
             catch (Exception)

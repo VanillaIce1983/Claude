@@ -10,7 +10,8 @@ namespace Spiegelwerk.Sw
     /// after the flat pattern and exist only flattened; the mass of a flattened part is not the
     /// folded one. So before anything is collected every flat pattern that is flattened in the
     /// active configuration is folded (suppressed) – and, legacy Insert Bends (S6), every
-    /// suppressed ProcessBends unsuppressed –, and put back when the run ends – whatever
+    /// ProcessBends suppressed on its own unsuppressed with its dependents (what was sketched
+    /// on the bent faces after it was suppressed with it) –, and put back when the run ends – whatever
     /// happens. The copies get the recorded state at the end of the build; in the same part
     /// (S1b) both, the originals and their copies, end in the state the originals had: the
     /// originals are flattened after their copies, so the copies are checked again afterwards.
@@ -49,7 +50,7 @@ namespace Spiegelwerk.Sw
         public string? Fold()
         {
             List<Feature> folds = FoldFeatures(_doc);
-            foreach (Feature f in folds) _flattened[f.Name] = SwSheetMetal.IsFlattened(f);
+            foreach (Feature f in folds) _flattened[f.Name] = SwSheetMetal.IsFlattened(_doc, f);
             foreach (Feature f in folds.Where(f => _flattened[f.Name]))
             {
                 if (SwSheetMetal.SetFlattened(_doc, f, false)) continue;
@@ -83,7 +84,7 @@ namespace Spiegelwerk.Sw
             foreach (string name in _flattenedCopies)
             {
                 Feature? copy = folds.FirstOrDefault(f => f.Name == name);
-                if (copy == null || !SwSheetMetal.IsFlattened(copy))
+                if (copy == null || !SwSheetMetal.IsFlattened(_doc, copy))
                     lines.Add($"{(copy == null ? $"„{name}“" : Label(copy))} ist in der Kopie nach dem Abwickeln des Originals nicht mehr abgewickelt – bitte von Hand abwickeln.");
             }
             return lines;

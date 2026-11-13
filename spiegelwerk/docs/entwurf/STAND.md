@@ -216,21 +216,33 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   Modell der Basislasche (erster Körper legt die Werte des Teils an, weitere über Überschreiben-Flags – `LegacyOverrides` wie
   `SamePartOverrides` –, die des ersten warten auf den zweiten Körper); nicht nehmbare Biegezugaben bekommen einen K-Faktor als Platzhalter.
   Eigene Werte von `FlattenBends`/`ProcessBends` werden gesetzt, die feste Fläche hat eine dritte Quelle (Standardwerte, nur mit einem
-  Blechkörper), eine Abwicklung eines Körpers alter Art gehört seinem `SheetMetal`. Die veralteten Aufrufe des normalen Schnitts stehen in der
-  Hilfe ohne Reihenfolge; angenommen ist `AddSMNormalCutType`, je Gruppe Flächen und `AddSMNormalCut`, Bezug, `FinishSMNormalCut` (B51); die
+  Blechkörper), eine Abwicklung eines Körpers alter Art gehört seinem `SheetMetal`. Für die veralteten Aufrufe des normalen Schnitts
+  nummeriert die Hilfe eine Reihenfolge (`AddSMNormalCut` vor jeder Auswahl, Flächen mit 1, „die Gruppe“ mit 2); der erste Versuch weicht
+  bewusst ab (`AddSMNormalCutType`, je Gruppe Flächen und `AddSMNormalCut`, Bezug, `FinishSMNormalCut`), die der Hilfe folgt danach (B51); die
   Richtung ist entbehrlich (Hinweis), die Versatzebene nicht. Die Regeln des normalen Schnitts stehen in einer eigenen Datei `NormalCutRules`,
   A1 #9 in `LegacyBendsTests` (der Plan: `SheetMetalTests`). Das Beispiel der Ablehnung in README und STOLPERSTEINE 151 ist jetzt ein
   Umformwerkzeug. Keine Tore (§5.2); nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+
+- Blech S6 geprüft, Befunde behoben (Commit „Blech S6: Befunde aus der Prüfung behoben“): Die Sitzung biegt ein abgewickeltes
+  `ProcessBends` mit seinen abhängigen Features zurück (`SetSuppressed(…, withDependents)`, nach dem schlichten Aufheben
+  `swUnSuppressDependent`) – was nach ihm auf den gebogenen Flächen entstand, blieb sonst unterdrückt und wurde nicht gespiegelt –, und
+  abgewickelt ist ein `ProcessBends` nur, wenn seine Elternteile (`FlattenBends`, `SheetMetal`; sonst die davor in der Baumreihenfolge)
+  nicht unterdrückt sind („Biegungen einfügen“ als Ganzes unterdrückt bleibt unangetastet). Der normale Schnitt versucht die veralteten
+  Aufrufe auch in der nummerierten Reihenfolge der Hilfe (`NormalCutPath.ObsoleteHelpOrder`, Markierung 2 angenommen für die übrigen
+  Flächen einer Gruppe, `HelpOrderMarks`), schließt einen abgebrochenen veralteten Versuch mit `FinishSMNormalCut` und nennt nicht lesbare
+  Gruppen beim Namen (`NormalCutRules.ReadBackFailure`; die geschlossene Ecke ebenso). Die Information zur nachträglich gesetzten Biegezugabe
+  nennt die gesetzte, bei einem späteren Körper mit Platzhalter wegen der Standardwerte des Ziels beide (`LegacyTargetAllowanceLater`).
+  STOLPERSTEINE 237, 239, 240, Prüftabelle (B51, abgewickelt alter Art), Testteil S6.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S5 stehen und sind geprüft und nachgeprüft (S0 bis S4 im Hauptzweig); S6 (normaler Schnitt, „Biegungen einfügen“ alter Art) ist umgesetzt, Prüfung und Nachprüfung stehen aus; S7a (Ersatzweg) wartet auf die Entscheidungen des Eigentümers (`blech-plan.md` §7); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S5 stehen und sind geprüft und nachgeprüft (S0 bis S4 im Hauptzweig); S6 (normaler Schnitt, „Biegungen einfügen“ alter Art) ist umgesetzt und geprüft, die Nachprüfung der Korrekturen steht aus; S7a (Ersatzweg) wartet auf die Entscheidungen des Eigentümers (`blech-plan.md` §7); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S6 prüfen, gegenprüfen und die Korrekturen nachprüfen. S7a (Ersatzweg) erst nach den Entscheidungen des
+1. Blech S6: die Korrekturen der Prüfung nachprüfen. S7a (Ersatzweg) erst nach den Entscheidungen des
    Eigentümers in `blech-plan.md` §7 (Ersatzweg überhaupt, Umgang mit gescheiterten Blättern, „Original löschen“), bei
    einem Nein stattdessen S7′; S8 (Versteifungsrippe, Lasche und Schlitz) und S9 (Umformwerkzeuge) hängen nicht davon ab
    und können vorher kommen, ebenso mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen.

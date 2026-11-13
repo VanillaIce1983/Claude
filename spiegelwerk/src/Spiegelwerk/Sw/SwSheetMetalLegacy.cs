@@ -195,22 +195,60 @@ namespace Spiegelwerk.Sw
         // ---- folded and flattened
 
         /// <summary>
-        /// Flattened: a flat pattern unsuppressed, a ProcessBends of legacy Insert Bends suppressed (the part shows
-        /// the state FlattenBends left). Anything else is never flattened.
+        /// Flattened: a flat pattern unsuppressed, a ProcessBends of legacy Insert Bends suppressed on its own (the part
+        /// shows the state FlattenBends left). A ProcessBends suppressed along with a suppressed parent – its FlattenBends
+        /// or SheetMetal, Insert Bends switched off as a whole – is not a state: it is left alone, and the collector skips
+        /// what is suppressed. Anything else is never flattened.
         /// </summary>
-        public static bool IsFlattened(Feature f) => f.GetTypeName2() switch
+        public static bool IsFlattened(ModelDoc2 doc, Feature f) => f.GetTypeName2() switch
         {
             "FlatPattern" => !IsSuppressed(f),
-            "ProcessBends" => IsSuppressed(f),
+            "ProcessBends" => IsSuppressed(f) && !LegacyParents(doc, f).Any(IsSuppressed),
             _ => false,
         };
 
-        /// <summary>Flattens or folds a flat pattern or a ProcessBends (<see cref="IsFlattened"/>); true if it is in the wanted state afterwards.</summary>
+        /// <summary>
+        /// Flattens or folds a flat pattern or a ProcessBends (<see cref="IsFlattened"/>); true if it is in the wanted state
+        /// afterwards. A ProcessBends is bent back with its dependents: what was sketched on the bent faces after it is its
+        /// child and was suppressed with it (folding again suppresses them with it).
+        /// </summary>
         public static bool SetFlattened(ModelDoc2 doc, Feature f, bool flattened) => f.GetTypeName2() switch
         {
             "FlatPattern" => SetSuppressed(doc, f, !flattened),
-            "ProcessBends" => SetSuppressed(doc, f, flattened),
+            "ProcessBends" => SetSuppressed(doc, f, flattened, withDependents: !flattened),
             _ => !flattened,
         };
+
+        /// <summary>
+        /// The parents of a ProcessBends (B52: its FlattenBends, and through it the SheetMetal); if they name no FlattenBends,
+        /// also the nearest FlattenBends and SheetMetal before it at the top level – as the tree finds them (<see cref="SheetMetalTree.LegacyAnchors"/>).
+        /// </summary>
+        private static List<Feature> LegacyParents(ModelDoc2 doc, Feature processBends)
+        {
+            List<Feature> parents = processBends.GetParents() is object[] ps ? ps.OfType<Feature>().ToList() : new List<Feature>();
+            if (parents.Any(p => p.GetTypeName2() == "FlattenBends")) return parents;
+            Feature? flatten = null, sheetMetal = null;
+            bool found = false;
+            foreach (Feature f in SwDoc.TopLevelFeatures(doc))
+            {
+                if (f.Name == processBends.Name)
+                {
+                    found = true;
+                    break;
+                }
+                switch (f.GetTypeName2())
+                {
+                    case "SheetMetal":
+                        sheetMetal = f;
+                        flatten = null;
+                        break;
+                    case "FlattenBends":
+                        flatten = f;
+                        break;
+                }
+            }
+            if (found) parents.AddRange(new[] { flatten, sheetMetal }.OfType<Feature>());
+            return parents;
+        }
     }
 }

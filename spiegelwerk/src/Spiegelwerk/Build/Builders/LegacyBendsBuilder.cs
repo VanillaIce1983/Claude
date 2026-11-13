@@ -60,8 +60,9 @@ namespace Spiegelwerk.Build.Builders
 
             double ratio = SheetMetalRules.LegacyOffsetRatio(create.Relief);
             BendAllowanceData allowance = create.BendAllowance;
-            bool tableThere = allowance.Kind != BendAllowanceKind.BendTable || File.Exists(allowance.BendTableFile);
-            InsertBendsArguments? args = tableThere ? SheetMetalRules.LegacyArguments(allowance, ratio) : null;
+            InsertBendsArguments? Takes(BendAllowanceData a) =>
+                a.Kind != BendAllowanceKind.BendTable || File.Exists(a.BendTableFile) ? SheetMetalRules.LegacyArguments(a, ratio) : null;
+            InsertBendsArguments? args = Takes(allowance);
             bool allowanceLater = args == null;
             args ??= SheetMetalRules.LegacyPlaceholder(allowance, ratio);
             if (args == null) return Fail(SheetMetalRules.LegacyRatioInvalid(ratio), notes);
@@ -86,7 +87,14 @@ namespace Spiegelwerk.Build.Builders
             Feature? flatPattern = made.FirstOrDefault(f => f.GetTypeName2() == "FlatPattern");
 
             // ---- parameters on the SheetMetal (or the part's defaults)
-            if (allowanceLater) info.Add(SheetMetalRules.LegacyAllowanceLater(allowance));
+            if (allowanceLater)
+            {
+                // What goes on afterwards: the created one, or – a later body created with the target's defaults – its own.
+                BendAllowanceData written = template == null ? allowance : SheetMetalRules.BodyValues(r.Defaults, r.Body).BendAllowance;
+                info.Add(template != null && Takes(written) != null
+                    ? SheetMetalRules.LegacyTargetAllowanceLater(allowance, written)
+                    : SheetMetalRules.LegacyAllowanceLater(written));
+            }
             if (first)
             {
                 notes.AddRange(BaseFlangeBuilder.WritePartValues(doc, sm, partValues ?? r.Body));

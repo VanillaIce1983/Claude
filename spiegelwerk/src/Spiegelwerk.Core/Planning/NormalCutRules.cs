@@ -14,10 +14,19 @@ namespace Spiegelwerk.Core.Planning
         DataObject,
 
         /// <summary>
-        /// The obsolete AddSMNormalCutType, then per group its faces selected and AddSMNormalCut (its error codes are
-        /// those of a face that does not fit), FinishSMNormalCut – the help lists the calls, not their order.
+        /// The obsolete calls, deliberately not in the order the help numbers (<see cref="ObsoleteHelpOrder"/>): the help puts
+        /// AddSMNormalCut before any selection, but its error codes are those of a face that does not fit – so here
+        /// AddSMNormalCutType, then per group its faces selected with mark 1 and AddSMNormalCut, the reference, FinishSMNormalCut.
         /// </summary>
         Obsolete,
+
+        /// <summary>
+        /// The obsolete calls in the order the help (AddSMNormalCutType remarks) numbers them: AddSMNormalCut, AddSMNormalCutType,
+        /// the cut-extrude faces with mark 1, „the group of cut-extrude faces“ with mark 2, the offset plane with 4 or the
+        /// direction with 8, FinishSMNormalCut. What mark 2 means is not documented (B51): taken here as the first face of
+        /// each group on 1, its other faces on 2 (<see cref="HelpOrderMarks"/>).
+        /// </summary>
+        ObsoleteHelpOrder,
     }
 
     /// <summary>
@@ -35,14 +44,41 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>The marks of the data object (help): faces of a group 1, offset plane 4, direction 8.</summary>
         public const int FaceMark = 1, OffsetPlaneMark = 4, DirectionMark = 8;
 
+        /// <summary>The mark the help gives the obsolete calls for „the group of cut-extrude faces“ (<see cref="NormalCutPath.ObsoleteHelpOrder"/>).</summary>
+        public const int GroupMark = 2;
+
+        /// <summary>
+        /// The marks of a group's faces in the help's order of the obsolete calls (<see cref="NormalCutPath.ObsoleteHelpOrder"/>):
+        /// the first face <see cref="FaceMark"/>, every other one <see cref="GroupMark"/> – an assumption the live test settles (B51).
+        /// </summary>
+        public static List<int> HelpOrderMarks(int faces) => Enumerable.Range(0, Math.Max(faces, 0)).Select(k => k == 0 ? FaceMark : GroupMark).ToList();
+
         /// <summary>The groups mirrored face by face, in their order.</summary>
         public static List<List<FaceSignature>> MirroredGroups(NormalCutRecord r, Reflection mirror) =>
             r.Groups.Select(g => g.Select(f => f.Mirror(mirror)).ToList()).ToList();
 
-        /// <summary>The paths in order: the data object (the help's way, with its 2019 example), then the obsolete calls (B51).</summary>
-        public static IReadOnlyList<NormalCutPath> Paths { get; } = new[] { NormalCutPath.DataObject, NormalCutPath.Obsolete };
+        /// <summary>
+        /// The paths in order: the data object (the help's way, with its 2019 example), then the obsolete calls – first per
+        /// group, then in the order the help numbers (B51).
+        /// </summary>
+        public static IReadOnlyList<NormalCutPath> Paths { get; } = new[] { NormalCutPath.DataObject, NormalCutPath.Obsolete, NormalCutPath.ObsoleteHelpOrder };
 
-        public static string PathName(NormalCutPath path) => path == NormalCutPath.DataObject ? "Datenobjekt" : "AddSMNormalCut";
+        public static string PathName(NormalCutPath path) => path switch
+        {
+            NormalCutPath.DataObject => "Datenobjekt",
+            NormalCutPath.Obsolete => "AddSMNormalCut",
+            _ => "AddSMNormalCut in der Reihenfolge der Hilfe",
+        };
+
+        /// <summary>
+        /// Why a path's new cut was not taken: it did not read back, its groups did not read (<paramref name="groups"/> &lt; 0),
+        /// it has other faces, or another number of groups.
+        /// </summary>
+        public static string ReadBackFailure(bool readBack, int groups, int wanted) =>
+            !readBack ? "Der neue Schnitt ließ sich nicht zurücklesen."
+            : groups < 0 ? "Die Flächengruppen des neuen Schnitts ließen sich nicht lesen."
+            : groups == wanted ? "Der neue Schnitt hat andere Flächen als die gespiegelten."
+            : $"Der neue Schnitt hat {groups} Flächengruppen statt {wanted}.";
 
         /// <summary>
         /// The same groups, as sets of sets: each wanted group has its own group in the copy with exactly its

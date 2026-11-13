@@ -17,7 +17,8 @@ namespace Spiegelwerk.Build.Builders
     /// and the offset plane (required in that mode) are found before anything is made; a missing face fails the
     /// step, the copy would be another cut. The direction is optional: missing, SOLIDWORKS' default stands in, with
     /// a note. Created through the data object (CreateDefinition(115), each group selected with mark 1 and taken by
-    /// CreateGroup, the offset plane on 4 or the direction on 8), else the obsolete calls (B51); the new feature is
+    /// CreateGroup, the offset plane on 4 or the direction on 8), else the obsolete calls – per group, then in the
+    /// order the help numbers (B51); the new feature is
     /// read back – its groups compared as sets of sets with the mirrored ones – and a path that made other groups
     /// goes again. Values and reference that differ are set in one edit, read back. No variants: nothing has a side.
     /// </summary>
@@ -89,13 +90,21 @@ namespace Spiegelwerk.Build.Builders
                 Feature? made = null;
                 try
                 {
-                    made = path == NormalCutPath.DataObject
-                        ? ByDataObject(doc, r, groups, reference, referenceMark, out failure)
-                        : ByObsoleteCalls(doc, r, groups, reference, referenceMark, out failure);
+                    made = path switch
+                    {
+                        NormalCutPath.DataObject => ByDataObject(doc, r, groups, reference, referenceMark, out failure),
+                        NormalCutPath.Obsolete => ByObsoleteCalls(doc, r, groups, reference, referenceMark, out failure),
+                        _ => ByObsoleteHelpOrder(doc, r, groups, reference, referenceMark, out failure),
+                    };
                 }
                 catch (Exception ex)
                 {
                     failure = ex.Message;
+                    if (path != NormalCutPath.DataObject)
+                    {
+                        SwSelect.Clear(doc);
+                        CloseObsolete(doc.FeatureManager);
+                    }
                 }
                 finally
                 {
@@ -112,9 +121,9 @@ namespace Spiegelwerk.Build.Builders
                         if (tried.Count > 0) info.Add($"Normaler Schnitt angelegt über {NormalCutRules.PathName(path)}.");
                         break;
                     }
-                    failure = got == null ? "Der neue Schnitt ließ sich nicht zurücklesen."
-                        : count == wanted.Count ? "Der neue Schnitt hat andere Flächen als die gespiegelten."
-                        : $"Der neue Schnitt hat {count} Flächengruppen statt {wanted.Count}.";
+                    // A path that stopped half-way and closed its open cut keeps its reason in front.
+                    string why = NormalCutRules.ReadBackFailure(got != null, count, wanted.Count);
+                    failure = failure == null ? why : $"{failure} {why}";
                 }
                 tried.Add($"{NormalCutRules.PathName(path)}: {failure ?? "kein normaler Schnitt entstanden."}");
                 if (!CornerSupport.RemoveMade(ctx, before.Names, tried)) break;
@@ -199,31 +208,74 @@ namespace Spiegelwerk.Build.Builders
         }
 
         /// <summary>
-        /// The obsolete calls (B51): AddSMNormalCutType, per group its faces with mark 1 and AddSMNormalCut (a code other
-        /// than 0 is a face it does not take), the reference with mark 4 or 8, FinishSMNormalCut.
+        /// The obsolete calls (B51), deliberately not in the help's numbered order (that is <see cref="ByObsoleteHelpOrder"/>):
+        /// AddSMNormalCutType, per group its faces with mark 1 and AddSMNormalCut (a code other than 0 is a face it does
+        /// not take), the reference with mark 4 or 8, FinishSMNormalCut. A group refused after AddSMNormalCutType still
+        /// ends with FinishSMNormalCut, so the next path does not inherit an open cut; what that makes is read back and removed.
         /// </summary>
         private static Feature? ByObsoleteCalls(ModelDoc2 doc, NormalCutRecord r, List<List<Face2>> groups, object? reference, int referenceMark, out string? failure)
         {
             failure = null;
             FeatureManager fm = doc.FeatureManager;
             fm.AddSMNormalCutType(r.AutoPropagation, r.OptimizeGeometry, r.Parameters == NormalCutParameterTypes.Extent);
-            for (int g = 0; g < groups.Count; g++)
+            for (int g = 0; g < groups.Count && failure == null; g++)
             {
                 if (!CornerSupport.SelectAll(doc, groups[g].Cast<object>().ToList(), groups[g].Select(_ => NormalCutRules.FaceMark).ToList()))
                 {
                     failure = $"Flächen der Gruppe {g + 1} ließen sich nicht wählen.";
-                    return null;
+                    break;
                 }
                 int error = fm.AddSMNormalCut();
-                if (error != 0)
+                if (error != 0) failure = $"Flächengruppe {g + 1} nicht angenommen (Code {error}).";
+            }
+            SwSelect.Clear(doc);
+            if (failure != null)
+            {
+                CloseObsolete(fm);
+                return null;
+            }
+            if (reference != null) SwSelect.Select(doc, reference, referenceMark, false);
+            return (object)fm.FinishSMNormalCut() as Feature;
+        }
+
+        /// <summary>
+        /// The obsolete calls in the order the help numbers them (AddSMNormalCutType remarks, B51): AddSMNormalCut (nothing is
+        /// selected yet, its code does not count), AddSMNormalCutType, every group's faces – the first with mark 1, the
+        /// others with mark 2 (<see cref="NormalCutRules.HelpOrderMarks"/>; what mark 2 means is not documented) –, the
+        /// reference with mark 4 or 8, FinishSMNormalCut with all of it still selected.
+        /// </summary>
+        private static Feature? ByObsoleteHelpOrder(ModelDoc2 doc, NormalCutRecord r, List<List<Face2>> groups, object? reference, int referenceMark, out string? failure)
+        {
+            failure = null;
+            FeatureManager fm = doc.FeatureManager;
+            SwSelect.Clear(doc);
+            fm.AddSMNormalCut();
+            fm.AddSMNormalCutType(r.AutoPropagation, r.OptimizeGeometry, r.Parameters == NormalCutParameterTypes.Extent);
+            for (int g = 0; g < groups.Count; g++)
+            {
+                if (!CornerSupport.SelectAll(doc, groups[g].Cast<object>().ToList(), NormalCutRules.HelpOrderMarks(groups[g].Count), append: true))
                 {
-                    failure = $"Flächengruppe {g + 1} nicht angenommen (Code {error}).";
+                    failure = $"Flächen der Gruppe {g + 1} ließen sich nicht wählen.";
+                    SwSelect.Clear(doc);
+                    CloseObsolete(fm);
                     return null;
                 }
             }
-            SwSelect.Clear(doc);
-            if (reference != null) SwSelect.Select(doc, reference, referenceMark, false);
+            if (reference != null) SwSelect.Select(doc, reference, referenceMark, true);
             return (object)fm.FinishSMNormalCut() as Feature;
+        }
+
+        /// <summary>Ends obsolete calls that stopped half-way; what it makes is found as new and removed by the caller.</summary>
+        private static void CloseObsolete(FeatureManager fm)
+        {
+            try
+            {
+                fm.FinishSMNormalCut();
+            }
+            catch (Exception)
+            {
+                // Nothing open, or nothing it could make.
+            }
         }
 
         /// <summary>
