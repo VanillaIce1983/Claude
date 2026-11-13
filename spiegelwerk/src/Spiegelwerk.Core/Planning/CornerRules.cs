@@ -162,13 +162,14 @@ namespace Spiegelwerk.Core.Planning
         /// The lengths of the 2019 call AddCornerReliefType (Length2, Length3) for a corner, or null for a
         /// relief type the help documents no lengths for (A3 P13): square – the length, with filleted
         /// corners their radius (half the diameter); obround – length and slot width; circular – the radius,
-        /// taken as half the slot length (an assumption, B49: the data of a corner name no radius).
+        /// taken as the slot width (the help calls it the radial slot width of a circular relief; the slot
+        /// length is valid only for rectangular and obround ones). Radius or diameter is checked live (B49).
         /// </summary>
         public static (double length2, double length3)? LegacyReliefLengths(CornerReliefItem c) => c.ReliefType switch
         {
             CornerReliefTypes.SquareRelief => (c.SlotLength, c.AddFilletedCorners ? c.CornerFilletDiameter / 2 : 0),
             CornerReliefTypes.ObroundRelief => (c.SlotLength, c.SlotWidth),
-            CornerReliefTypes.CircularRelief => (c.SlotLength / 2, 0),
+            CornerReliefTypes.CircularRelief => (c.SlotWidth, 0),
             _ => null,
         };
 
@@ -202,7 +203,7 @@ namespace Spiegelwerk.Core.Planning
                 (double length2, double length3)? w = LegacyReliefLengths(want), g = LegacyReliefLengths(got);
                 if (w.HasValue && g.HasValue)
                 {
-                    values.Add(("Länge", w.Value.length2, g.Value.length2, size));
+                    values.Add((want.ReliefType == CornerReliefTypes.CircularRelief ? "Radius" : "Länge", w.Value.length2, g.Value.length2, size));
                     if (want.ReliefType != CornerReliefTypes.CircularRelief) values.Add(("Breite bzw. Eckenradius", w.Value.length3, g.Value.length3, size));
                 }
             }

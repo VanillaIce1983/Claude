@@ -60,7 +60,8 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal((0.004, 0.001), CornerRules.LegacyReliefLengths(square));
             var obround = new CornerReliefItem { ReliefType = CornerReliefTypes.ObroundRelief, SlotLength = 0.006, SlotWidth = 0.002 };
             Assert.Equal((0.006, 0.002), CornerRules.LegacyReliefLengths(obround));
-            var circular = new CornerReliefItem { ReliefType = CornerReliefTypes.CircularRelief, SlotLength = 0.005 };
+            // Circular: the radial slot width is the radius; the slot length does not apply.
+            var circular = new CornerReliefItem { ReliefType = CornerReliefTypes.CircularRelief, SlotLength = 0.009, SlotWidth = 0.0025 };
             Assert.Equal((0.0025, 0.0), CornerRules.LegacyReliefLengths(circular));
             foreach (int other in new[] { CornerReliefTypes.BendWaistRelief, CornerReliefTypes.TearRelief, CornerReliefTypes.ConstantWidthRelief, CornerReliefTypes.Mixed,
                          CornerReliefTypes.FullRoundRelief, CornerReliefTypes.SuitCaseRelief, CornerReliefTypes.RectangularRelief })
@@ -216,6 +217,16 @@ namespace Spiegelwerk.Core.Tests
             List<string> legacy = CornerRules.Differences(want, got, legacy: true, De);
             Assert.DoesNotContain(legacy, x => x.StartsWith("Kofferform"));
             Assert.Contains("Länge: erwartet 4 mm, gelesen 5 mm", legacy);
+            // Circular in the 2019 call: its radius is the slot width.
+            var round = new CornerReliefItem { ReliefType = CornerReliefTypes.CircularRelief, SlotLength = 0.009, SlotWidth = 0.002 };
+            List<string> roundDiff = CornerRules.Differences(round, new CornerReliefItem
+            {
+                ReliefType = CornerReliefTypes.CircularRelief,
+                SlotLength = 0.009,
+                SlotWidth = 0.003,
+            }, legacy: true, De);
+            Assert.Contains("Radius: erwartet 2 mm, gelesen 3 mm", roundDiff);
+            Assert.DoesNotContain(roundDiff, x => x.StartsWith("Länge"));
             // A ratio is a factor, not a length.
             var ratio = new CornerReliefItem { ReliefType = CornerReliefTypes.ObroundRelief, RatioToThickness = true, SlotLength = 1.5 };
             Assert.Contains("Schlitzlänge: erwartet 1,5, gelesen 1,6", CornerRules.Differences(ratio, new CornerReliefItem

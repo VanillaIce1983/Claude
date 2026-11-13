@@ -32,11 +32,16 @@ namespace Spiegelwerk.Sw
 
         public static int CornerType(object def) => SwLate.Get(def, "CornerType") is int t ? t : CornerReliefBendTypes.TwoBend;
 
-        /// <summary>The corner at an index (GetCornerAtIndex, out parameter); null if it does not come back.</summary>
+        /// <summary>
+        /// The corner at a zero-based position (GetCornerAtIndex counts from 1, like RemoveCorner and
+        /// ISMCornerReliefData.CornerIndex; out parameter); null if it does not come back or the call reports
+        /// an error (swCornerReliefError_e, 0 = none).
+        /// </summary>
         public static object? CornerAt(object def, int index)
         {
-            var args = new object?[] { index, null };
-            SwLate.InvokeOut(def, "GetCornerAtIndex", args, new[] { false, true });
+            var args = new object?[] { index + 1, null };
+            object? code = SwLate.InvokeOut(def, "GetCornerAtIndex", args, new[] { false, true });
+            if (code is int c && c != 0) return null;
             return args[1] is DBNull ? null : args[1];
         }
 

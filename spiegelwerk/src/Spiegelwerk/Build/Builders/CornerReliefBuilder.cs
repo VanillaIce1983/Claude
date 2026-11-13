@@ -126,7 +126,8 @@ namespace Spiegelwerk.Build.Builders
 
         /// <summary>
         /// The data object (late-bound); null and what failed in <paramref name="tried"/> if it does not come about.
-        /// Values of a corner that did not take go to <paramref name="notes"/> (the read-back says what they are).
+        /// Values of a corner that did not take go to <paramref name="notes"/> only if the data object made the
+        /// feature (the read-back says what they are); otherwise to <paramref name="tried"/> with the rest.
         /// </summary>
         private static Feature? ByDefinition(BuildContext ctx, CornerReliefRecord r, Body2 body, List<(Face2 f1, Face2 f2, Face2? f3)> corners,
             SheetMetalSnapshot before, List<string> tried, List<string> notes)
@@ -157,6 +158,8 @@ namespace Spiegelwerk.Build.Builders
                 tried.Add($"Datenobjekt der Eckentlastung: SetBodyScope lehnt den Körper ab (Code {scope?.ToString() ?? "–"}).");
                 return null;
             }
+            // Values that did not take: notes only if this data object becomes the feature.
+            var unset = new List<string>();
             for (int i = 0; i < corners.Count; i++)
             {
                 CornerReliefItem c = r.Corners[i];
@@ -164,20 +167,24 @@ namespace Spiegelwerk.Build.Builders
                 int? code = SwCornerRelief.AddNewCorner(def!, f1, f2, f3, c.ReliefType, out object? corner);
                 if (code != 0 || corner == null)
                 {
+                    tried.AddRange(unset);
                     tried.Add($"Datenobjekt der Eckentlastung: Ecke {i + 1} nicht angenommen (Code {code?.ToString() ?? "–"}).");
                     return null;
                 }
                 List<string> failed = SwCornerRelief.WriteValues(corner, c);
-                if (failed.Count > 0) notes.Add($"Ecke {i + 1} der Eckentlastung: nicht gesetzt {string.Join(", ", failed)}.");
+                if (failed.Count > 0) unset.Add($"Ecke {i + 1} der Eckentlastung: nicht gesetzt {string.Join(", ", failed)}.");
             }
             try
             {
                 Feature? f = ctx.Doc.FeatureManager.CreateFeature(def);
                 ctx.Topology.Invalidate();
-                return f ?? SwSheetMetal.NewSince(ctx.Doc, before.Names).FirstOrDefault(x => SwCornerRelief.Is((object)x.GetDefinition()));
+                f ??= SwSheetMetal.NewSince(ctx.Doc, before.Names).FirstOrDefault(x => SwCornerRelief.Is((object)x.GetDefinition()));
+                (f != null ? notes : tried).AddRange(unset);
+                return f;
             }
             catch (Exception ex)
             {
+                tried.AddRange(unset);
                 tried.Add($"Datenobjekt der Eckentlastung: {ex.Message}");
                 return null;
             }
@@ -190,6 +197,9 @@ namespace Spiegelwerk.Build.Builders
             ModelDoc2 doc = ctx.Doc;
             FeatureManager fm = doc.FeatureManager;
             string variant = body == null ? "älterer Aufruf, Flächen auf Markierung 4" : "älterer Aufruf, Körper auf 0, Flächen auf 4";
+            // AddCornerReliefCorner was called, FinishCornerRelief not yet: the call keeps the corners added so far
+            // until FinishCornerRelief, the next variant (or corner relief) would inherit them.
+            bool open = false;
             try
             {
                 for (int i = 0; i < corners.Count; i++)
@@ -213,12 +223,14 @@ namespace Spiegelwerk.Build.Builders
                         return null;
                     }
                     fm.AddCornerReliefCorner();
+                    open = true;
                     if (!fm.AddCornerReliefType(-1, c.ReliefType, 0, length2, length3, c.CenterOnBendLines, c.RatioToThickness, c.TangentToBend, c.AddFilletedCorners, false))
                     {
                         tried.Add($"{variant}: Ecke {i + 1} nicht angenommen.");
                         return null;
                     }
                 }
+                open = false;
                 Feature? f = fm.FinishCornerRelief();
                 ctx.Topology.Invalidate();
                 f ??= SwSheetMetal.NewSince(doc, before.Names).FirstOrDefault(x => SwCornerRelief.Is((object)x.GetDefinition()));
@@ -232,6 +244,18 @@ namespace Spiegelwerk.Build.Builders
             }
             finally
             {
+                if (open)
+                {
+                    // Close the open set of corners; what it makes is removed by the caller (RemoveMade).
+                    try
+                    {
+                        fm.FinishCornerRelief();
+                    }
+                    catch (Exception)
+                    {
+                    }
+                    ctx.Topology.Invalidate();
+                }
                 SwSelect.Clear(doc);
             }
         }

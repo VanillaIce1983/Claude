@@ -180,7 +180,7 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   das Nachschlagen über das Gegenstück eines Besitzers mit einer Biegung leistet dasselbe, wenn es gebraucht wird. Die Eckentlastung steht
   ohne bestätigten Namen nicht in der Typtabelle (§1.5, B44; der Plan zählt `CornerRelief` unter den geöffneten Typen): Sie wird über ihre Daten
   erkannt, der Name `CornerRelief` bekommt nur den Text für ältere Versionen. Kein `FeatureEdit.Late`: Die Eckentlastung wird nicht bearbeitet,
-  Abweichungen sind Hinweise. Der Radius einer kreisförmigen Eckentlastung im älteren Aufruf ist als halbe Schlitzlänge angenommen (B49). Weichen die
+  Abweichungen sind Hinweise. Der Radius einer kreisförmigen Eckentlastung im älteren Aufruf ist als Schlitzbreite angenommen (laut Hilfe die radiale Schlitzbreite; B49). Weichen die
   Bruchlinien der Kopie von den gespiegelten ab, werden sie in die neue Skizze geschrieben (A3 P10 nennt nur einen Hinweis); ein Querbruch mit
   mehr als einer Skizze wird nicht nachgebaut. Abwickeln/Zurückbiegen versuchen vor jedem Auswahlwechsel eine Bearbeitung, die feste Fläche und
   Biegungen setzt; „sein Abwickeln“ ist das letzte davor in Erstellungsreihenfolge. Eine gebrochene Ecke, die zurückgelesen auf anderen
