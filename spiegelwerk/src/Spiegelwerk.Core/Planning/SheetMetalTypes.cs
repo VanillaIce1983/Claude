@@ -70,7 +70,8 @@ namespace Spiegelwerk.Core.Planning
 
         // S0: every entry NotYet. S1a: base flange, flat pattern and the template folders are
         // decided, a user corner trim is not rebuilt. S2: hem and miter flange. S3: edge flange.
-        // S4: jog and sketched bend; everything else is still refused.
+        // S4: jog and sketched bend. S5: unfold and fold, break corner, cross break, closed corner (the
+        // corner relief is found by its data, its name is not confirmed); everything else is still refused.
         private static readonly Dictionary<string, SheetMetalType> Table = new Dictionary<string, SheetMetalType>(StringComparer.Ordinal)
         {
             // Never collected; the new part gets its own with the first base flange.
@@ -98,14 +99,14 @@ namespace Spiegelwerk.Core.Planning
             ["Jog"] = Rebuilt(SheetMetalRole.Leaf),
             ["SM3dBend"] = Rebuilt(SheetMetalRole.Leaf),
             ["FlatPattern"] = Rebuilt(SheetMetalRole.Leaf),
-            ["UnFold"] = NotYet(SheetMetalRole.Leaf),
-            ["Fold"] = NotYet(SheetMetalRole.Leaf),
-            ["BreakCorner"] = NotYet(SheetMetalRole.Leaf),
+            ["UnFold"] = Rebuilt(SheetMetalRole.Leaf),
+            ["Fold"] = Rebuilt(SheetMetalRole.Leaf),
+            ["BreakCorner"] = Rebuilt(SheetMetalRole.Leaf),
             // The flat pattern's own corner trim is a part of it; one the user inserted is not rebuilt.
             ["CornerTrim"] = new SheetMetalType(SheetMetalRole.Leaf, SheetMetalState.Unsupported, CornerTrimReason, triggersFallback: false),
-            ["CrossBreak"] = NotYet(SheetMetalRole.Leaf),
+            ["CrossBreak"] = Rebuilt(SheetMetalRole.Leaf),
             // Closed corner: the name comes from the API help example "Get All Sheet Metal Feature Data" (ClosedCornerFeatureData), not from the GetTypeName2 table.
-            ["CornerFeat"] = NotYet(SheetMetalRole.Leaf),
+            ["CornerFeat"] = Rebuilt(SheetMetalRole.Leaf),
             ["NormalCut"] = NotYet(SheetMetalRole.Leaf),
             ["Rip"] = NotYet(SheetMetalRole.Leaf),
             ["SMGusset"] = NotYet(SheetMetalRole.Leaf),

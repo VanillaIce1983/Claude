@@ -73,6 +73,9 @@ namespace Spiegelwerk.Core.Planning
                              "Ausgangsteils, nicht in das Ausgangsteil selbst (von dort kämen sie über die Verknüpfung auch hierher).",
             // Reached only if the definition does not answer as the pattern's data interface.
             "CurvePattern" or "SketchPattern" or "TablePattern" or "FillPattern" or "DimPattern" or "VarPattern" => "Muster: Feature-Daten nicht lesbar.",
+            // By a name that is not confirmed (B44) – only the text: a corner relief whose data answer is captured
+            // whatever its name; one whose data do not (before 2022) gets this, under any other name the general text.
+            "CornerRelief" => CornerRules.CornerReliefTooOld,
             _ when SheetMetalTypes.Of(type)?.Reason is string own => own,
             // Reached only if the definition does not answer as the data interface its reader expects.
             _ when SheetMetalTypes.Of(type)?.State == SheetMetalState.Rebuilt => "Blech-Feature: Feature-Daten nicht lesbar.",

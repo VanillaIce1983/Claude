@@ -126,6 +126,18 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Corner_and_corner_relief_numbers()
+        {
+            // The corner records carry these through unchanged (blech-plan S5); the corner relief only from the 2022 interop.
+            SameConstants<swClosedCornerTypes_e>(typeof(ClosedCornerTypes), "swClosedCornerType");
+            SameConstants<swBreakCornerTypes_e>(typeof(BreakCornerTypes), "swBreakCornerType");
+            SameConstants<swCornerReliefType_e>(typeof(CornerReliefTypes), "swCorner");
+            SameConstants<swCornerReliefBendType_e>(typeof(CornerReliefBendTypes), "swCornerReliefBendType_");
+            Assert.Equal((int)swFeatureNameID_e.swFmCornerRelief, Spiegelwerk.Core.Planning.CornerRules.CornerReliefId);
+            Assert.Equal(0, (int)swCornerReliefError_e.swCornerReliefError_None);
+        }
+
+        [Fact]
         public void Hem_and_miter_flange_numbers()
         {
             // HemRecord.Position and MiterFlangeRecord.PositionType carry these numbers through unchanged (blech-plan S2).

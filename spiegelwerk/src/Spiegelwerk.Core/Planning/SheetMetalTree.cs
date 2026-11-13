@@ -72,6 +72,7 @@ namespace Spiegelwerk.Core.Planning
     ///    SheetMetal's base flange;
     ///  - features after a flat pattern exist only in the flattened state;
     ///  - the width sketches of a hem belong to it (S2): the new hem brings its own, they are written into those;
+    ///  - the sketch of a cross break (its break lines, B48) belongs to it (S5), alike;
     ///  - the profile sketches of an edge flange belong to it (S3): its sketch sub-features and – the layout
     ///    SOLIDWORKS sometimes shows (tbcphutai) – a top-level parent sketch, but only one that is absorbed by
     ///    nothing, stands on one of its edges, is no other feature's parent, while the flange has fewer
@@ -125,6 +126,11 @@ namespace Spiegelwerk.Core.Planning
             foreach (TreeFeature hem in all.Where(f => f.Type == "Hem"))
                 foreach (TreeFeature sub in hem.SubFeatures.Where(s => IsSketchType(s.Type)))
                     tree._owners[sub.Name] = (hem.Name, PartOwnerKind.Hem);
+
+            // A cross break's sketch holds its break lines (B48): the new cross break brings its own, the lines are written into it.
+            foreach (TreeFeature cross in all.Where(f => f.Type == "CrossBreak"))
+                foreach (TreeFeature sub in cross.SubFeatures.Where(s => IsSketchType(s.Type)))
+                    tree._owners[sub.Name] = (cross.Name, PartOwnerKind.CrossBreak);
 
             // An edge flange's sketches are its profiles; a top-level parent only under the P13 rule.
             foreach (TreeFeature flange in all.Where(f => f.Type == "EdgeFlange"))
@@ -235,7 +241,7 @@ namespace Spiegelwerk.Core.Planning
             (ownerType == "TemplateFlatPattern" && subType == "FlatPattern") ||
             ownerType == "FlatPattern";
 
-        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem; profiles → edge flange).</summary>
+        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem; profiles → edge flange; break lines → cross break).</summary>
         public IReadOnlyDictionary<string, (string owner, PartOwnerKind kind)> Owners => _owners;
 
         /// <summary>Flat pattern → the base flange of its body.</summary>

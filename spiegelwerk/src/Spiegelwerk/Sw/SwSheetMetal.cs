@@ -28,7 +28,7 @@ namespace Spiegelwerk.Sw
     /// written in the one order that works and read back –, the flat patterns and their state,
     /// and what a step added. The only place that writes sheet-metal parameters.
     /// </summary>
-    internal static class SwSheetMetal
+    internal static partial class SwSheetMetal
     {
         private static readonly HashSet<string> SheetMetalTypes = new HashSet<string>(StringComparer.Ordinal)
         {

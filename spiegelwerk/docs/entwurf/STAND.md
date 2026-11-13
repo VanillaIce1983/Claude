@@ -1,4 +1,4 @@
-# Zwischenstand (7.11.2026)
+# Zwischenstand (13.11.2026)
 
 Arbeitsstand von Spiegelwerk 0.11 im Hauptzweig `claude/cool-ritchie-ltfl07`. Diese Datei sagt, was
 erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
@@ -162,18 +162,40 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   `88b232f`): bewegte Zeugen zählen nur, wenn jedes frühere Feature des Körpers in der Kopie ohne Fehler nachgebaut ist
   (`BendSupport.Rebuilt`), und nicht, wenn die früheren Features nicht lesbar waren (`OwnWitnessesOnlyFor`). STOLPERSTEINE 225,
   228, 231, Prüftabelle.
+- Blech S5 (Zweig `feat-blech`): geschlossene und gebrochene Ecke, Abwickeln und Zurückbiegen, Querbruch, Eckentlastung. Core:
+  `ClosedCornerRecord`, `BreakCornerRecord`, `FoldRecord` mit `BendRef`, `CrossBreakRecord`, `CornerReliefRecord`/`CornerReliefItem` und die
+  swconst-Zahlen (`ClosedCornerTypes`, `BreakCornerTypes`, `CornerReliefTypes`, `CornerReliefBendTypes`) in `SheetMetalBendRecords.cs`,
+  `CornerRules` (Auswahlarten der geschlossenen Ecke, Überlappung ↔ Unterlappung, Rücklese-Vergleiche, Bruchlinien, Längen des älteren
+  Eckentlastungs-Aufrufs, Ecken paaren, Texte), `FoldRules` (Auswahlarten, einzige Biegung des Besitzers, Texte), `SetMatch`/`FaceSets`/
+  `BendMatcher` (Mengen, volle Treffer), die Bruchlinien-Skizze gehört dem Querbruch (`PartOwnerKind.CrossBreak`), `UnFold`, `Fold`,
+  `BreakCorner`, `CrossBreak`, `CornerFeat` „nachgebaut“; Tests `SheetMetalCornerTests` (A3 #7–#10, #12, #13, #15 und mehr), Ablehnung,
+  Berichtstexte, swconst-Nummern. Add-In: Leser in `FeatureCapture.SheetMetalCorners` (Eckentlastung spät gebunden über `SwCornerRelief`, auch
+  unter einem Namen außerhalb der Tabelle), `SwSheetMetal.Read…Scalars`/`ReadBack…` (Mengenvergleich unter dem `AccessSelections` der Kopie),
+  `NewOfType`, `AllBends`/`BendsOf`, `FeatureEdit.ClosedCorner`/`BreakCorner`/`CrossBreak`/`Folds`, `BuildContext.BendFor`/`RegisterBend`,
+  `CornerSupport` (Bezüge vorab auf eigenen Körpern, `FindBend`), `ClosedCornerBuilder`, `BreakCornerBuilder`, `FoldBuilder`,
+  `CrossBreakBuilder`, `CornerReliefBuilder`. STOLPERSTEINE 232–236, Prüftabelle (B44–B49).
+  Abweichend vom Plan: Die Regeln stehen in eigenen Dateien `CornerRules` und `FoldRules` (der Plan nennt `SheetMetalBendRules` für
+  `SwapOverlap`/`LegacyReliefLengths`), der Mengenvergleich in `SetMatch`/`FaceSets` neben `BendMatcher`. `ctx.Bends` heißt
+  `BendFor`/`RegisterBend` und wird nur von `FindBend` gefüllt: Die Builder der Laschen tragen ihre einzige Biegung nicht selbst ein (K25),
+  das Nachschlagen über das Gegenstück eines Besitzers mit einer Biegung leistet dasselbe, wenn es gebraucht wird. Die Eckentlastung steht
+  ohne bestätigten Namen nicht in der Typtabelle (§1.5, B44; der Plan zählt `CornerRelief` unter den geöffneten Typen): Sie wird über ihre Daten
+  erkannt, der Name `CornerRelief` bekommt nur den Text für ältere Versionen. Kein `FeatureEdit.Late`: Die Eckentlastung wird nicht bearbeitet,
+  Abweichungen sind Hinweise. Der Radius einer kreisförmigen Eckentlastung im älteren Aufruf ist als halbe Schlitzlänge angenommen (B49). Weichen die
+  Bruchlinien der Kopie von den gespiegelten ab, werden sie in die neue Skizze geschrieben (A3 P10 nennt nur einen Hinweis); ein Querbruch mit
+  mehr als einer Skizze wird nicht nachgebaut. Abwickeln/Zurückbiegen versuchen vor jedem Auswahlwechsel eine Bearbeitung, die feste Fläche und
+  Biegungen setzt; „sein Abwickeln“ ist das letzte davor in Erstellungsreihenfolge. Eine gebrochene Ecke, die zurückgelesen auf anderen
+  Elementen sitzt, ist ein Hinweis, kein Fehlschlag. Keine Tore (§5.2); nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | **pausiert** (7.11.2026, auf Wunsch des Eigentümers nach der Nachprüfung von S4); nach `blech-plan.md` in prüfbaren Schritten; S0 bis S4 stehen, sind geprüft und nachgeprüft und im Hauptzweig, als Nächstes S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung); S7a (Ersatzweg) wartet auf die Entscheidungen des Eigentümers (`blech-plan.md` §7); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S4 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung) ist umgesetzt, Prüfung und Nachprüfung stehen aus; danach S6 (Normal Cut, alte Biegungen); S7a (Ersatzweg) wartet auf die Entscheidungen des Eigentümers (`blech-plan.md` §7); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung) und S6 (Normal Cut, alte Biegungen einfügen) nach
-   `blech-plan.md`; jeder Schritt mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen. Der Zweig `feat-blech`
-   steht auf demselben Commit wie der Hauptzweig. S7a (Ersatzweg)
+1. Blech S5 prüfen, gegenprüfen und die Korrekturen nachprüfen; dann S6 (Normal Cut, alte Biegungen einfügen) nach
+   `blech-plan.md`, ebenso mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen. S7a (Ersatzweg)
    erst nach den Entscheidungen des Eigentümers in `blech-plan.md` §7 (Ersatzweg überhaupt, Umgang mit gescheiterten
    Blättern, „Original löschen“), bei einem Nein stattdessen S7′; S8 und S9 hängen nicht davon ab.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“

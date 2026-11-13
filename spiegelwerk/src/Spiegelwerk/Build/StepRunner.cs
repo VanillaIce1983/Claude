@@ -62,6 +62,11 @@ namespace Spiegelwerk.Build
             new EdgeFlangeBuilder(),
             new SketchedBendBuilder(),
             new JogBuilder(),
+            new ClosedCornerBuilder(),
+            new BreakCornerBuilder(),
+            new FoldBuilder(),
+            new CrossBreakBuilder(),
+            new CornerReliefBuilder(),
         };
 
         /// <summary>

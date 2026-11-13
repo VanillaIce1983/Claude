@@ -285,6 +285,31 @@ namespace Spiegelwerk.Build.Builders
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
+        public static bool ClosedCorner(ModelDoc2 doc, Feature f, Action<ClosedCornerFeatureData> change)
+        {
+            var d = (ClosedCornerFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool BreakCorner(ModelDoc2 doc, Feature f, Action<BreakCornerFeatureData> change)
+        {
+            var d = (BreakCornerFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        public static bool CrossBreak(ModelDoc2 doc, Feature f, Action<CrossBreakFeatureData> change)
+        {
+            var d = (CrossBreakFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        /// <summary>Unfold and fold (IFoldsFeatureData).</summary>
+        public static bool Folds(ModelDoc2 doc, Feature f, Action<FoldsFeatureData> change)
+        {
+            var d = (FoldsFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
         /// <summary>
         /// A feature's own bend allowance in an edit of its own (blech-plan §1.4, A2 P7) – never
         /// together with the geometric values, so a refused allowance costs only itself. Order of
