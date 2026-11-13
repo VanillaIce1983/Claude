@@ -271,6 +271,81 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Flatten_and_process_bends_belong_to_the_legacy_sheet_metal()
+        {
+            // By their parents: FlattenBends on the SheetMetal, ProcessBends on the FlattenBends.
+            var top = new List<TreeFeature>
+            {
+                F("Boss-Extrude1", "Extrusion", null, F("Sketch1", "ProfileFeature")),
+                F("Shell1", "Shell", new[] { "Boss-Extrude1" }),
+                F("Sheet-Metal1", "SheetMetal", new[] { "Shell1" }),
+                F("Flatten-Bends1", "FlattenBends", new[] { "Sheet-Metal1" }),
+                F("Process-Bends1", "ProcessBends", new[] { "Flatten-Bends1" }),
+                F("Cut-Extrude1", "Cut", new[] { "Process-Bends1" }),
+            };
+            SheetMetalTree tree = SheetMetalTree.Of(top);
+            Assert.Equal(("Sheet-Metal1", PartOwnerKind.LegacyBends), tree.Owners["Flatten-Bends1"]);
+            Assert.Equal(("Sheet-Metal1", PartOwnerKind.LegacyBends), tree.Owners["Process-Bends1"]);
+            Assert.True(tree.IsLegacyAnchor("Sheet-Metal1"));
+            Assert.Equal(new[] { "Sheet-Metal1" }, tree.LegacyAnchors);
+            Assert.Equal(("Flatten-Bends1", "Process-Bends1"), tree.LegacyParts("Sheet-Metal1"));
+            Assert.False(tree.Owners.ContainsKey("Sheet-Metal1"));
+            // A carrier with a record of its own, not an unowned SheetMetal.
+            Assert.False(tree.IsUnownedSheetMetal("Sheet-Metal1"));
+            Assert.Empty(tree.BetweenLegacyBends("Sheet-Metal1"));
+            // Selected, the three come as one: the SheetMetal brings its bends, either bends feature its SheetMetal.
+            Assert.Equal(new[] { "Flatten-Bends1", "Process-Bends1" }, tree.Closure(new[] { "Sheet-Metal1" }).OrderBy(n => n));
+            Assert.Equal(new[] { "Flatten-Bends1", "Sheet-Metal1" }, tree.Closure(new[] { "Process-Bends1" }).OrderBy(n => n));
+            Assert.Empty(tree.Closure(new[] { "Cut-Extrude1" }));
+
+            // No parents to tell: the next ones in tree order before the next SheetMetal; a second Insert Bends keeps its own.
+            var byOrder = new List<TreeFeature>
+            {
+                F("Sheet-Metal1", "SheetMetal"),
+                F("Flatten-Bends1", "FlattenBends"),
+                F("Cut-Extrude1", "Cut"),
+                F("Sketch9", "ProfileFeature"),
+                F("Process-Bends1", "ProcessBends"),
+                F("Sheet-Metal2", "SheetMetal"),
+                F("Flatten-Bends2", "FlattenBends"),
+                F("Process-Bends2", "ProcessBends"),
+            };
+            tree = SheetMetalTree.Of(byOrder);
+            Assert.Equal(("Flatten-Bends1", "Process-Bends1"), tree.LegacyParts("Sheet-Metal1"));
+            Assert.Equal(("Flatten-Bends2", "Process-Bends2"), tree.LegacyParts("Sheet-Metal2"));
+            // Made while flattened (between the bends features): the copy cannot put it there – a top-level sketch alone does not count.
+            Assert.Equal(new[] { "Cut-Extrude1" }, tree.BetweenLegacyBends("Sheet-Metal1"));
+            Assert.Empty(tree.BetweenLegacyBends("Sheet-Metal2"));
+
+            // A SheetMetal without bends features stays an unowned one (a convert, a lofted bend …).
+            tree = SheetMetalTree.Of(new[] { F("Sheet-Metal1", "SheetMetal"), F("Boss-Extrude1", "Extrusion") });
+            Assert.True(tree.IsUnownedSheetMetal("Sheet-Metal1"));
+            Assert.False(tree.IsLegacyAnchor("Sheet-Metal1"));
+            Assert.Empty(tree.LegacyAnchors);
+            Assert.Equal(((string?)null, (string?)null), tree.LegacyParts("Sheet-Metal1"));
+        }
+
+        [Fact]
+        public void A_flat_pattern_of_a_legacy_body_belongs_to_its_sheet_metal()
+        {
+            var top = new List<TreeFeature>
+            {
+                F("Shell1", "Shell"),
+                F("Sheet-Metal1", "SheetMetal", new[] { "Shell1" }),
+                F("Flatten-Bends1", "FlattenBends", new[] { "Sheet-Metal1" }),
+                F("Process-Bends1", "ProcessBends", new[] { "Flatten-Bends1" }),
+                F("Flat-Pattern1", "FlatPattern", new[] { "Process-Bends1" }),
+            };
+            var facts = new Dictionary<string, FlatPatternFacts> { ["Flat-Pattern1"] = new FlatPatternFacts(null, null, new[] { "Shell1", "Sheet-Metal1", "Flat-Pattern1" }) };
+            Assert.Equal("Sheet-Metal1", SheetMetalTree.Of(top, facts).FlatPatternOwners["Flat-Pattern1"]);
+            // Its body not readable (B9): its parent is the legacy SheetMetal, which is its own owner.
+            SheetMetalTree byTree = SheetMetalTree.Of(new List<TreeFeature>(top.Take(4)) { F("Flat-Pattern1", "FlatPattern", new[] { "Sheet-Metal1" }) });
+            Assert.Equal("Sheet-Metal1", byTree.FlatPatternOwners["Flat-Pattern1"]);
+            Assert.True(byTree.OwnerFromTree("Flat-Pattern1"));
+            Assert.Contains("Flat-Pattern1", byTree.Closure(new[] { "Sheet-Metal1" }));
+        }
+
+        [Fact]
         public void A_part_without_sheet_metal_has_an_empty_tree()
         {
             SheetMetalTree tree = SheetMetalTree.Of(new[] { F("Boss-Extrude1", "Extrusion", null, F("Sketch1", "ProfileFeature")) });

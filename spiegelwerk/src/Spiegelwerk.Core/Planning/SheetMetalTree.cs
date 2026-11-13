@@ -76,7 +76,11 @@ namespace Spiegelwerk.Core.Planning
     ///  - the profile sketches of an edge flange belong to it (S3): its sketch sub-features and – the layout
     ///    SOLIDWORKS sometimes shows (tbcphutai) – a top-level parent sketch, but only one that is absorbed by
     ///    nothing, stands on one of its edges, is no other feature's parent, while the flange has fewer
-    ///    profile sub-sketches than edges (A2 P13: not an up-to reference, not a shared sketch).
+    ///    profile sub-sketches than edges (A2 P13: not an up-to reference, not a shared sketch);
+    ///  - legacy Insert Bends (S6, A1 phase 1b): a SheetMetal without a base flange whose FlattenBends and
+    ///    ProcessBends follow it – by their parents, else the next ones in tree order before the next
+    ///    SheetMetal – is their anchor, a carrier of its own (<see cref="LegacyAnchors"/>); FlattenBends and
+    ///    ProcessBends belong to it. A flat pattern of such a body belongs to that SheetMetal.
     /// Template folders are system features: never collected, their flat patterns listed before them.
     /// </summary>
     public sealed class SheetMetalTree
@@ -89,6 +93,8 @@ namespace Spiegelwerk.Core.Planning
         private readonly HashSet<string> _flatPatternParts = new HashSet<string>(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _types = new Dictionary<string, string>(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _order = new Dictionary<string, int>(StringComparer.Ordinal);
+        private readonly Dictionary<string, (string? flatten, string? process)> _legacy = new Dictionary<string, (string?, string?)>(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<string>> _legacyBetween = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
         private SheetMetalTree()
         {
@@ -122,6 +128,8 @@ namespace Spiegelwerk.Core.Planning
                 if (flange != null) tree._owners[sm.Name] = (flange.Name, PartOwnerKind.SheetMetal);
             }
 
+            tree.FindLegacyBends(top, all);
+
             // A hem's sketches are its width sketches: they come into being with it.
             foreach (TreeFeature hem in all.Where(f => f.Type == "Hem"))
                 foreach (TreeFeature sub in hem.SubFeatures.Where(s => IsSketchType(s.Type)))
@@ -154,8 +162,8 @@ namespace Spiegelwerk.Core.Planning
                     else if (sub.Type == "CornerTrim")
                         tree._userCornerTrims.Add(sub.Name);
                 }
-                // The first base flange of its body (by tree order: GetFeatures says nothing about order).
-                string? owner = facts.BodyFeatures.Where(n => tree._types.TryGetValue(n, out string t) && t == "SMBaseFlange")
+                // The first base flange of its body (by tree order: GetFeatures says nothing about order), or its legacy SheetMetal.
+                string? owner = facts.BodyFeatures.Where(n => tree._types.TryGetValue(n, out string t) && (t == "SMBaseFlange" || tree._legacy.ContainsKey(n)))
                     .OrderBy(n => tree._order[n]).FirstOrDefault();
                 if (owner == null)
                 {
@@ -174,6 +182,52 @@ namespace Spiegelwerk.Core.Planning
         }
 
         private static bool IsSketchType(string type) => type == "ProfileFeature" || type == "3DProfileFeature";
+
+        /// <summary>
+        /// Legacy Insert Bends (S6): each SheetMetal without a base flange, in tree order, with the FlattenBends
+        /// and ProcessBends that follow it – by their parents (FlattenBends on the SheetMetal, ProcessBends on
+        /// either), else the next unclaimed ones in tree order before the next SheetMetal. With at least one of
+        /// them it is an anchor; the top-level features between it and its last bends feature (sketches and
+        /// folders aside) are what the part got while flattened (<see cref="BetweenLegacyBends"/>).
+        /// </summary>
+        private void FindLegacyBends(List<TreeFeature> top, List<TreeFeature> all)
+        {
+            List<TreeFeature> Distinct(IEnumerable<TreeFeature> fs) =>
+                fs.GroupBy(f => f.Name, StringComparer.Ordinal).Select(g => g.First()).OrderBy(f => _order[f.Name]).ToList();
+            List<TreeFeature> sheetMetals = Distinct(all.Where(f => f.Type == "SheetMetal" && !_owners.ContainsKey(f.Name)));
+            List<TreeFeature> allSheetMetals = Distinct(all.Where(f => f.Type == "SheetMetal"));
+            List<TreeFeature> bends = Distinct(all.Where(f => f.Type == "FlattenBends" || f.Type == "ProcessBends"));
+            var claimed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (TreeFeature sm in sheetMetals)
+            {
+                int start = _order[sm.Name];
+                int end = allSheetMetals.Where(o => _order[o.Name] > start).Select(o => _order[o.Name]).DefaultIfEmpty(int.MaxValue).Min();
+                TreeFeature? Next(string type, int after) =>
+                    bends.FirstOrDefault(b => b.Type == type && !claimed.Contains(b.Name) && _order[b.Name] > after && _order[b.Name] < end);
+                TreeFeature? flatten = bends.FirstOrDefault(b => b.Type == "FlattenBends" && !claimed.Contains(b.Name) && b.Parents.Contains(sm.Name))
+                                       ?? Next("FlattenBends", start);
+                TreeFeature? process = bends.FirstOrDefault(b => b.Type == "ProcessBends" && !claimed.Contains(b.Name) &&
+                                                                 (b.Parents.Contains(sm.Name) || (flatten != null && b.Parents.Contains(flatten.Name))))
+                                       ?? Next("ProcessBends", flatten != null ? _order[flatten.Name] : start);
+                if (flatten == null && process == null) continue;
+                _legacy[sm.Name] = (flatten?.Name, process?.Name);
+                foreach (TreeFeature? part in new[] { flatten, process })
+                {
+                    if (part == null) continue;
+                    claimed.Add(part.Name);
+                    _owners[part.Name] = (sm.Name, PartOwnerKind.LegacyBends);
+                }
+                // What lies between the anchor and its last bends feature at the top level.
+                int from = top.FindIndex(f => f.Name == sm.Name);
+                string last = (process ?? flatten)!.Name;
+                int to = top.FindIndex(f => f.Name == last);
+                if (from < 0 || to <= from) continue;
+                List<string> between = top.Skip(from + 1).Take(to - from - 1)
+                    .Where(f => f.Name != flatten?.Name && !IsSketchType(f.Type) && !IsSystemType(f.Type))
+                    .Select(f => f.Name).ToList();
+                if (between.Count > 0) _legacyBetween[sm.Name] = between;
+            }
+        }
 
         /// <summary>
         /// A parent of an edge flange that is its profile at the top level (A2 P13): a sketch at the top
@@ -210,15 +264,16 @@ namespace Spiegelwerk.Core.Planning
         }
 
         /// <summary>
-        /// The base flange that made the body of a feature, by name: a SheetMetal → its owner; a base
-        /// flange → the owner of its SheetMetal (a tab shares the one of its body), itself without
-        /// one. Anything else: null.
+        /// The base flange that made the body of a feature, by name: a SheetMetal → its owner (the SheetMetal of
+        /// legacy Insert Bends: itself); a base flange → the owner of its SheetMetal (a tab shares the one of
+        /// its body), itself without one. Anything else: null.
         /// </summary>
         private string? BaseFlangeOf(string name, List<TreeFeature> all)
         {
             string type = _types[name];
             if (type == "SheetMetal")
-                return _owners.TryGetValue(name, out var sm) && sm.kind == PartOwnerKind.SheetMetal ? sm.owner : null;
+                return _owners.TryGetValue(name, out var sm) && sm.kind == PartOwnerKind.SheetMetal ? sm.owner
+                    : _legacy.ContainsKey(name) ? name : null;
             if (type != "SMBaseFlange") return null;
             TreeFeature flange = all.First(f => f.Name == name);
             foreach (string p in flange.Parents.Where(p => _types.TryGetValue(p, out string t) && t == "SheetMetal"))
@@ -241,10 +296,10 @@ namespace Spiegelwerk.Core.Planning
             (ownerType == "TemplateFlatPattern" && subType == "FlatPattern") ||
             ownerType == "FlatPattern";
 
-        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem; profiles → edge flange; break lines → cross break).</summary>
+        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem; profiles → edge flange; break lines → cross break; FlattenBends and ProcessBends → their legacy SheetMetal).</summary>
         public IReadOnlyDictionary<string, (string owner, PartOwnerKind kind)> Owners => _owners;
 
-        /// <summary>Flat pattern → the base flange of its body.</summary>
+        /// <summary>Flat pattern → the base flange of its body (or its legacy SheetMetal).</summary>
         public IReadOnlyDictionary<string, string> FlatPatternOwners => _flatPatternOwners;
 
         /// <summary>The flat pattern's owner comes from the tree, not from its body (see <see cref="OwnerFromTreeNote"/>).</summary>
@@ -263,13 +318,36 @@ namespace Spiegelwerk.Core.Planning
         public bool SuppressedWhenFolded(string name) =>
             _flatPatternParts.Contains(name) || (_types.TryGetValue(name, out string type) && type == "FlatPattern");
 
-        /// <summary>The SheetMetal feature has no base flange of its own: its body comes from something else (a carrier).</summary>
+        /// <summary>
+        /// The SheetMetal feature has no base flange of its own and is no anchor of legacy Insert Bends: its body
+        /// comes from something else (a convert, a lofted bend, a swept flange – a carrier).
+        /// </summary>
         public bool IsUnownedSheetMetal(string name) =>
-            _types.TryGetValue(name, out string type) && type == "SheetMetal" && !_owners.ContainsKey(name);
+            _types.TryGetValue(name, out string type) && type == "SheetMetal" && !_owners.ContainsKey(name) && !_legacy.ContainsKey(name);
+
+        /// <summary>The SheetMetal features of legacy Insert Bends (S6): carriers with a record of their own.</summary>
+        public IReadOnlyCollection<string> LegacyAnchors => _legacy.Keys;
+
+        /// <summary>The SheetMetal is the anchor of legacy Insert Bends.</summary>
+        public bool IsLegacyAnchor(string name) => _legacy.ContainsKey(name);
+
+        /// <summary>The FlattenBends and ProcessBends of a legacy anchor; (null, null) for any other feature.</summary>
+        public (string? flatten, string? process) LegacyParts(string anchor) => _legacy.TryGetValue(anchor, out var parts) ? parts : (null, null);
+
+        /// <summary>
+        /// Top-level features between a legacy anchor and its last bends feature: added while the part was
+        /// flattened, they act on the flat state and are bent with ProcessBends. The copy creates SheetMetal,
+        /// FlattenBends and ProcessBends in one call and cannot put anything between them – such Insert Bends
+        /// are not rebuilt (<see cref="SheetMetalRules.LegacyBetween"/>). Empty for anything else.
+        /// </summary>
+        public IReadOnlyList<string> BetweenLegacyBends(string anchor) =>
+            _legacyBetween.TryGetValue(anchor, out List<string> between) ? between : (IReadOnlyList<string>)Array.Empty<string>();
 
         /// <summary>
         /// What a selection brings along (A1 P6): a base flange its SheetMetal and the flat pattern of
-        /// its body, a flat pattern its sketches and own corner features. Returns the names to add.
+        /// its body, a flat pattern its sketches and own corner features; legacy Insert Bends come as one –
+        /// the SheetMetal with its FlattenBends, ProcessBends and flat pattern, either bends feature with its
+        /// SheetMetal. Returns the names to add.
         /// </summary>
         public IReadOnlyCollection<string> Closure(IEnumerable<string> wanted)
         {
@@ -288,10 +366,14 @@ namespace Spiegelwerk.Core.Planning
             {
                 string n = queue.Dequeue();
                 if (!_types.TryGetValue(n, out string type)) continue;
-                if (type == "SMBaseFlange")
+                if (type == "SMBaseFlange" || _legacy.ContainsKey(n))
                 {
                     foreach (var kv in _owners.Where(kv => kv.Value.owner == n)) Add(kv.Key);
                     foreach (var kv in _flatPatternOwners.Where(kv => kv.Value == n)) Add(kv.Key);
+                }
+                else if (_owners.TryGetValue(n, out var legacyPart) && legacyPart.kind == PartOwnerKind.LegacyBends)
+                {
+                    Add(legacyPart.owner);
                 }
                 else if (type == "FlatPattern")
                 {

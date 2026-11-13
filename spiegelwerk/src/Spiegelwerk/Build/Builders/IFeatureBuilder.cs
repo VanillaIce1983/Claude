@@ -310,6 +310,20 @@ namespace Spiegelwerk.Build.Builders
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
+        /// <summary>Normal cut (ISMNormalCutFeatureData2).</summary>
+        public static bool NormalCut(ModelDoc2 doc, Feature f, Action<SMNormalCutFeatureData2> change)
+        {
+            var d = (SMNormalCutFeatureData2)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        /// <summary>FlattenBends and ProcessBends of legacy Insert Bends (IBendsFeatureData).</summary>
+        public static bool Bends(ModelDoc2 doc, Feature f, Action<BendsFeatureData> change)
+        {
+            var d = (BendsFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
         /// <summary>
         /// A feature's own bend allowance in an edit of its own (blech-plan §1.4, A2 P7) – never
         /// together with the geometric values, so a refused allowance costs only itself. Order of

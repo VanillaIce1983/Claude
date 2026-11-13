@@ -110,6 +110,7 @@ namespace Spiegelwerk.Core.Tests
         [InlineData(PartOwnerKind.Hem, false, "Skizze des Saums „X“, der nicht gespiegelt wird – entfällt mit ihm.")]
         [InlineData(PartOwnerKind.SheetMetal, false, "Entsteht nur mit der Basislasche „X“.")]
         [InlineData(PartOwnerKind.FlatPattern, false, "Gehört zur Abwicklung „X“.")]
+        [InlineData(PartOwnerKind.LegacyBends, false, "Entsteht nur mit „Biegungen einfügen“ an „X“.")]
         public void A_part_without_its_owner_is_captured_as_the_owner_kind_says(PartOwnerKind kind, bool position, string leftOut)
         {
             var part = new PartOfFeatureRecord("Skizze9", "ProfileFeature", "X", kind);

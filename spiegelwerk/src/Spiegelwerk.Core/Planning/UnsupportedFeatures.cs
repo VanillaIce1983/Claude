@@ -38,21 +38,31 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>
         /// Step 1 for the collected features in creation order: the first refused one
         /// (<see cref="RefusesBeforeCapture"/>). A part (a SheetMetal, a flat pattern's sketch or
-        /// own corner) counts as part of an accepted owner if its owner is collected and not
-        /// refused itself. Null: the run goes on. Since S1b the same part follows the same rule as
-        /// a new part (the guard keeps the part's shared values, blech-plan §3.3).
+        /// own corner, the FlattenBends and ProcessBends of legacy Insert Bends) counts as part of an
+        /// accepted owner if its owner is collected and not refused itself. The SheetMetal of legacy
+        /// Insert Bends (<paramref name="legacyAnchors"/>) is a carrier that is rebuilt
+        /// (<see cref="SheetMetalTypes.LegacyAnchor"/>), any other SheetMetal without a base flange is not
+        /// yet. Null: the run goes on. Since S1b the same part follows the same rule as a new part (the
+        /// guard keeps the part's shared values, blech-plan §3.3).
         /// </summary>
         /// <param name="owners">Part → owner (<see cref="SheetMetalTree.Owners"/>).</param>
+        /// <param name="legacyAnchors">The SheetMetal features of legacy Insert Bends (<see cref="SheetMetalTree.LegacyAnchors"/>).</param>
         public static string? RefusalBeforeCapture(IReadOnlyList<(string name, string type)> collected,
-            IReadOnlyDictionary<string, (string owner, Records.PartOwnerKind kind)> owners, bool fallbackOn)
+            IReadOnlyDictionary<string, (string owner, Records.PartOwnerKind kind)> owners, bool fallbackOn,
+            IReadOnlyCollection<string>? legacyAnchors = null)
         {
             var types = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var (name, type) in collected) types[name] = type;
+            var anchors = new HashSet<string>(legacyAnchors ?? Array.Empty<string>(), StringComparer.Ordinal);
+            bool Refused(string name, string type, bool partOfAcceptedOwner) =>
+                type == "MirrorStock" ||
+                SheetMetalTypes.Refuses(anchors.Contains(name) && type == "SheetMetal" ? SheetMetalTypes.LegacyAnchor : SheetMetalTypes.Of(type),
+                    partOfAcceptedOwner, fallbackOn);
             bool Accepted(string name) =>
                 owners.TryGetValue(name, out var o) && types.TryGetValue(o.owner, out string ownerType) &&
-                !RefusesBeforeCapture(ownerType, partOfAcceptedOwner: false, fallbackOn);
+                !Refused(o.owner, ownerType, partOfAcceptedOwner: false);
             foreach (var (name, type) in collected)
-                if (RefusesBeforeCapture(type, Accepted(name), fallbackOn))
+                if (Refused(name, type, Accepted(name)))
                     return RunRefusal(name, type);
             return null;
         }

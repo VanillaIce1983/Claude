@@ -32,10 +32,10 @@ namespace Spiegelwerk.Sw
     {
         private static readonly HashSet<string> SheetMetalTypes = new HashSet<string>(StringComparer.Ordinal)
         {
-            "SheetMetal", "TemplateSheetMetal", "FlatPattern", "TemplateFlatPattern", "SMBaseFlange",
+            "SheetMetal", "TemplateSheetMetal", "FlatPattern", "TemplateFlatPattern", "SMBaseFlange", "FlattenBends", "ProcessBends",
         };
 
-        /// <summary>The part has sheet metal: a SheetMetal, base flange, flat pattern or one of their folders at the top level.</summary>
+        /// <summary>The part has sheet metal: a SheetMetal, base flange, flat pattern, legacy bends feature or one of their folders at the top level.</summary>
         public static bool HasSheetMetal(ModelDoc2 doc) => SwDoc.TopLevelFeatures(doc).Any(f => SheetMetalTypes.Contains(f.GetTypeName2()));
 
         /// <summary>The part's defaults (TemplateSheetMetal); null before 2013 or without sheet metal.</summary>
@@ -281,7 +281,8 @@ namespace Spiegelwerk.Sw
         /// <summary>
         /// Deletes what a step made, in two rounds, and returns the names still there. A flat
         /// pattern goes with its own sketches; everything else alone – the profile sketch of a base
-        /// flange is a record of its own and stays.
+        /// flange is a record of its own and stays. Children first: flat patterns and ProcessBends,
+        /// then flanges and FlattenBends, the SheetMetal last.
         /// </summary>
         public static List<string> RemoveNew(ModelDoc2 doc, HashSet<string> before)
         {
@@ -314,7 +315,7 @@ namespace Spiegelwerk.Sw
 
         private static int DeleteRank(Feature f) => f.GetTypeName2() switch
         {
-            "FlatPattern" => 0,
+            "FlatPattern" or "ProcessBends" => 0,
             "SheetMetal" => 2,
             _ => 1,
         };

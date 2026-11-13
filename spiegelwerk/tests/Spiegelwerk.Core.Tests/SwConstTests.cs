@@ -138,6 +138,15 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Normal_cut_and_legacy_bends_numbers()
+        {
+            // NormalCutRecord.Parameters carries swNormalCutParameters_e through unchanged (blech-plan S6).
+            SameConstants<swNormalCutParameters_e>(typeof(NormalCutParameterTypes), "swNormalCut");
+            Assert.Equal((int)swFeatureNameID_e.swFmNormalCut, Spiegelwerk.Core.Planning.NormalCutRules.NormalCutId);
+            Assert.Equal(0, (int)swSMNormalCutError_e.swSMNormalCutError_NoError);
+        }
+
+        [Fact]
         public void Hem_and_miter_flange_numbers()
         {
             // HemRecord.Position and MiterFlangeRecord.PositionType carry these numbers through unchanged (blech-plan S2).
