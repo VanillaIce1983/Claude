@@ -69,7 +69,19 @@ namespace Spiegelwerk.Build.Builders
                     }
                 foreach (bool withBody in new[] { false, true })
                 {
-                    relief = Legacy(ctx, r, withBody ? body : null, corners, before, tried);
+                    Body2? scope = null;
+                    if (withBody)
+                    {
+                        // Found again: an attempt before may have made a feature that RemoveMade deleted, both
+                        // rebuild the part and a body pointer does not survive that (187); the corner faces are safe.
+                        scope = BodyOf(ctx, r, corners, new List<string>(), out string? lost);
+                        if (scope == null)
+                        {
+                            tried.Add($"älterer Aufruf, Körper auf 0, Flächen auf 4: {lost}");
+                            break;
+                        }
+                    }
+                    relief = Legacy(ctx, r, scope, corners, before, tried);
                     if (relief != null) break;
                     if (!CornerSupport.RemoveMade(ctx, before.Names, tried)) break;
                 }
@@ -179,7 +191,12 @@ namespace Spiegelwerk.Build.Builders
                 Feature? f = ctx.Doc.FeatureManager.CreateFeature(def);
                 ctx.Topology.Invalidate();
                 f ??= SwSheetMetal.NewSince(ctx.Doc, before.Names).FirstOrDefault(x => SwCornerRelief.Is((object)x.GetDefinition()));
-                (f != null ? notes : tried).AddRange(unset);
+                if (f != null) notes.AddRange(unset);
+                else
+                {
+                    tried.AddRange(unset);
+                    tried.Add("Datenobjekt der Eckentlastung: keine Eckentlastung entstanden.");
+                }
                 return f;
             }
             catch (Exception ex)
