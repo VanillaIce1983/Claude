@@ -1,0 +1,93 @@
+Spiegelwerk Live-Test B54/B55
+SOLIDWORKS-Version: 34.4.0
+Teil: NeoLaptop.SLDPRT, Volumenkoerper: 1
+Getesteter Koerper: Schnitt-Linear austragen5 (Blech)
+Original: Volumen 189131,485 mm3, Schwerpunkt (64,0927; 41,9277; 150,2998) mm, Eckpunkte 988, Fehler laut Check3: 0
+Spiegelsymmetrie des Originals zu Ebenen durch den Schwerpunkt: keine
+Schraege Spiegelebene: Normale (1; 2; 3)/Wurzel(14), Abstand vom Ursprung -199,6463 mm, 197,8395 mm vor dem Koerper (nach Extrempunkt)
+Anliegende Spiegelebene: x = 0,0000 mm (nach Extrempunkt), Eckpunkte des Originals darin: 24 (vermutlich Beruehrung auf einer Flaeche)
+
+=== B54: Spiegelung als Transformation einer Koerperkopie ===
+- direkt: Matrix mit Determinante -1, Skalierung 1
+  Transformation zurueckgelesen: [0,857143  -0,285714  -0,428571  -0,285714  0,428571  -0,857143  -0,428571  -0,857143  -0,285714  -0,106715  -0,213431  -0,320146  1,  0,  0,  0,]
+  ApplyTransform ...
+  ApplyTransform meldet True
+  Volumen 189131,043 mm3 (relative Abweichung 2,3E-06)
+  Schwerpunkt (-128,1722; -342,6025; -426,4955) mm, erwartet (-128,1723; -342,6024; -426,4954) mm (Abstand 0,0002 mm)
+  Eckpunkte: 988 (Original 988), groesster Abstand zum gespiegelten Original-Eckpunkt 0,0000 mm
+  Fehler laut Check3: 0
+  => bestanden
+- als (-M, Skalierung -1)
+  Transformation zurueckgelesen: [-0,857143  0,285714  0,428571  0,285714  -0,428571  0,857143  0,428571  0,857143  0,285714  -0,106715  -0,213431  -0,320146  1,  0,  0,  0,]
+  ApplyTransform ...
+  ApplyTransform meldet True
+  Volumen 189131,094 mm3 (relative Abweichung 2,1E-06)
+  Schwerpunkt (-85,2587; -84,2592; -213,7970) mm, erwartet (-128,1723; -342,6024; -426,4954) mm (Abstand 337,3772 mm)
+  Eckpunkte: 988 (Original 988), groesster Abstand zum gespiegelten Original-Eckpunkt 351,2062 mm
+  Fehler laut Check3: 0
+  => NICHT bestanden
+
+=== B55: Gespiegelten Koerper als eigenen Koerper einfuegen ===
+Schreibweise: direkt
+- selbes Teil, getrennt vom Original (schraege Ebene)
+  Transformation zurueckgelesen: [0,857143  -0,285714  -0,428571  -0,285714  0,428571  -0,857143  -0,428571  -0,857143  -0,285714  -0,106715  -0,213431  -0,320146  1,  0,  0,  0,]
+  ApplyTransform ...
+  ApplyTransform meldet True
+  CreateFeatureFromBody3 ...
+  Neues Feature: Importiert1 (Typ BaseBody), Fehlercode 0
+  pruefe temporaere Kopie ...
+  Temporaere Kopie danach: noch nutzbar (IsTemporaryBody True, Copy2 geht)
+  Volumenkoerper vorher 1, nachher 2: eigener Koerper Importiert1 (kein Blech)
+  Volumen 189131,043 mm3 (relative Abweichung 2,3E-06)
+  Schwerpunkt (-128,1722; -342,6025; -426,4955) mm, erwartet (-128,1723; -342,6024; -426,4954) mm (Abstand 0,0002 mm)
+  Eckpunkte: 988 (Original 988), groesster Abstand zum gespiegelten Original-Eckpunkt 0,0000 mm
+  Fehler laut Check3: 0
+  Externe Bezuege des neuen Features: 0
+  Original: unveraendert (Volumen 189131,485 mm3, Schwerpunkt um 0,0000 mm verschoben)
+  => bestanden
+- selbes Teil, am Original anliegend (Ebene x = xMin)
+  Transformation zurueckgelesen: [-1,  0,  0,  0,  1,  0,  0,  0,  1,  0,  0,  0,  1,  0,  0,  0,]
+  ApplyTransform ...
+  ApplyTransform meldet True
+  CreateFeatureFromBody3 ...
+  Neues Feature: Importiert2 (Typ BaseBody), Fehlercode 0
+  pruefe temporaere Kopie ...
+  Temporaere Kopie danach: noch nutzbar (IsTemporaryBody True, Copy2 geht)
+  Volumenkoerper vorher 2, nachher 3: eigener Koerper Importiert2 (kein Blech)
+  Volumen 189131,364 mm3 (relative Abweichung 6,4E-07)
+  Schwerpunkt (-64,0927; 41,9277; 150,2998) mm, erwartet (-64,0927; 41,9277; 150,2998) mm (Abstand 0,0000 mm)
+  Eckpunkte: 988 (Original 988), groesster Abstand zum gespiegelten Original-Eckpunkt 0,0000 mm
+  Fehler laut Check3: 0
+  Externe Bezuege des neuen Features: 0
+  Original: unveraendert (Volumen 189131,485 mm3, Schwerpunkt um 0,0000 mm verschoben)
+  => bestanden
+- neues Teil (Kopie im Testteil gemacht, im neuen Teil eingefuegt)
+  Vorlage: C:\ProgramData\SolidWorks\SOLIDWORKS 2026\templates\Teil.prtdot
+  Transformation zurueckgelesen: [0,857143  -0,285714  -0,428571  -0,285714  0,428571  -0,857143  -0,428571  -0,857143  -0,285714  -0,106715  -0,213431  -0,320146  1,  0,  0,  0,]
+  ApplyTransform ...
+  ApplyTransform meldet True
+  NewDocument ...
+  CreateFeatureFromBody3 ...
+  Neues Feature: Importiert1 (Typ BaseBody), Fehlercode 0
+  pruefe temporaere Kopie ...
+  Temporaere Kopie danach: noch nutzbar (IsTemporaryBody True, Copy2 geht)
+  Volumenkoerper im neuen Teil: 1
+  Volumen 189131,043 mm3 (relative Abweichung 2,3E-06)
+  Schwerpunkt (-128,1722; -342,6025; -426,4955) mm, erwartet (-128,1723; -342,6024; -426,4954) mm (Abstand 0,0002 mm)
+  Eckpunkte: 988 (Original 988), groesster Abstand zum gespiegelten Original-Eckpunkt 0,0000 mm
+  Fehler laut Check3: 0
+  Externe Bezuege des neuen Features: 0
+  => bestanden
+
+=== Ergebnis ===
+B54 direkt:                  bestanden
+B54 (-M, Skalierung -1):     NICHT bestanden
+B55 selbes Teil, getrennt:   bestanden
+B55 selbes Teil, anliegend:  bestanden
+B55 neues Teil:              bestanden
+Temporaere Kopie nach dem Einfuegen:
+  getrennt:  noch nutzbar (IsTemporaryBody True, Copy2 geht)
+  anliegend: noch nutzbar (IsTemporaryBody True, Copy2 geht)
+  neu:       noch nutzbar (IsTemporaryBody True, Copy2 geht)
+
+Ende.
