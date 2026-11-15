@@ -58,13 +58,9 @@ namespace Spiegelwerk.Capture
             if (r.Groups.Count == 0) throw new NotSupportedException("Lasche und Schlitz ohne lesbare Gruppen.");
 
             // The slot feature, should the tree not have recognised it (B64): the same groups as one captured before.
+            // Its slot after all if it has none yet, a part of it like one the tree found (measured up to it, its companion's name, reported with its fate).
             TabAndSlotRecord? earlier = _tabsAndSlots.FirstOrDefault(x => SameGroups(x, r));
-            if (earlier != null)
-            {
-                // Its slot after all: the tab is measured up to it (MeasureUntil), and the copy's slot becomes its companion under this name.
-                earlier.SlotFeatureName ??= f.Name;
-                return new UnsupportedRecord(f.Name, type, TabSlotRules.SameAsEarlier(earlier.Name), false) { TriggersFallback = false };
-            }
+            if (earlier != null) return TabSlotRules.SlotBySameGroups(earlier, f.Name, type);
             _tabsAndSlots.Add(r);
             return r;
         }

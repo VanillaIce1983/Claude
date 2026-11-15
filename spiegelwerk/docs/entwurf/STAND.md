@@ -289,12 +289,18 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   einer früheren Versteifungsrippe liegen bei Schnitt ± halber Breite (`IndentWidth`) oder ± halber Breite plus Dicke, nicht bei ± halber
   Dicke (`GussetSection.Width`). Tests in `TabSlotRulesTests`, `GussetRulesTests`, `OwnershipTests`; STOLPERSTEINE 80, 241, 244,
   Prüftabelle (B64, B65), Testteil S8, README, ARCHITEKTUR.
+- Blech S8 nachgeprüft, Befunde behoben (Commit „Blech S8: Befunde aus der Nachprüfung behoben“): Ein Schlitz, den erst die gleichen
+  Gruppen verraten, war zwar der Schlitz seiner Lasche, blieb aber ein nicht unterstützter Eintrag – nach einer gescheiterten Lasche hieß er
+  weiter „entsteht mit ihr“, nach einer gebauten zählte er als nicht gespiegelt und hielt „Original löschen“ auf. Jetzt wird er ein Teil
+  der Lasche wie ein Schlitz, den der Baum findet (`TabSlotRules.SlotBySameGroups`, `PartOwnerKind.TabAndSlot`, mit Hinweis
+  `SlotNotInTree`): „entsteht mit diesem“ oder „nicht entstanden“ (`OwnersNotBuilt`). Hat die Lasche schon einen Schlitz, bleibt er
+  nicht unterstützt (`SameAsEarlier` nennt ihn). Tests in `TabSlotRulesTests`; STOLPERSTEINE 241.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S6 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S7 (Ersatzweg): das Tor B54/B55 ist auf SOLIDWORKS 2026 bestanden (`livetests.md`), die Entscheidungen des Eigentümers (`blech-plan.md` §7) gelten vorläufig nach Empfehlung – Ersatzweg ja, hinter einem Schalter, der aus ist; ein gescheitertes Blatt wird gemeldet und der Rest gebaut; „Original löschen“ bleibt bei Blech abgelehnt –, als Nächstes der Live-Test B57 (Umwandeln in Blech, Makro `scripts/livetests/ersatzweg-b57.bas`), der den Weg von S7a bestimmt; bis dahin ist S8 (Versteifungsrippe, Lasche und Schlitz) gebaut und geprüft (Befunde behoben), die Nachprüfung steht aus; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S6 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S7 (Ersatzweg): das Tor B54/B55 ist auf SOLIDWORKS 2026 bestanden (`livetests.md`), die Entscheidungen des Eigentümers (`blech-plan.md` §7) gelten vorläufig nach Empfehlung – Ersatzweg ja, hinter einem Schalter, der aus ist; ein gescheitertes Blatt wird gemeldet und der Rest gebaut; „Original löschen“ bleibt bei Blech abgelehnt –, als Nächstes der Live-Test B57 (Umwandeln in Blech, Makro `scripts/livetests/ersatzweg-b57.bas`), der den Weg von S7a bestimmt; bis dahin ist S8 (Versteifungsrippe, Lasche und Schlitz) gebaut, geprüft und nachgeprüft (Befunde behoben); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 

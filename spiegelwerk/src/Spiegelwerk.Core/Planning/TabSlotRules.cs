@@ -174,8 +174,27 @@ namespace Spiegelwerk.Core.Planning
         public static string SlotNotFound(string slot, int candidates) =>
             $"Der Schlitz „{slot}“ hat in der Kopie kein eindeutiges eigenes Feature ({candidates} weitere neue Features); er entsteht mit der Lasche, sein Name wird nicht übernommen.";
 
-        /// <summary>A later tab and slot with the same edges and faces as one captured before: its slot feature, not recognised by the tree (B64).</summary>
-        public static string SameAsEarlier(string earlier) =>
-            $"Gleiche Kanten und Flächen wie Lasche und Schlitz „{earlier}“ – vermutlich deren Schlitz; entsteht mit ihr.";
+        /// <summary>
+        /// A later tab and slot <paramref name="name"/> with the same edges and faces as <paramref name="tab"/>, captured before:
+        /// its slot feature, which the tree did not recognise (B64). If the tab has no slot yet, it becomes its slot and a part
+        /// of it like one the tree found: the tab is measured up to it (MeasureUntil), the copy's slot takes its name, and it
+        /// is reported with the tab's fate – built with it, or „nicht entstanden“ when the tab fails. If the tree already gave
+        /// the tab another slot, it is not rebuilt (and triggers no fallback).
+        /// </summary>
+        public static FeatureRecord SlotBySameGroups(TabAndSlotRecord tab, string name, string type)
+        {
+            tab.SlotFeatureName ??= name;
+            if (tab.SlotFeatureName == name)
+                return new PartOfFeatureRecord(name, type, tab.Name, PartOwnerKind.TabAndSlot) { Notes = { SlotNotInTree(tab.Name) } };
+            return new UnsupportedRecord(name, type, SameAsEarlier(tab.Name, tab.SlotFeatureName), false) { TriggersFallback = false };
+        }
+
+        /// <summary>The note on a slot that only the same edges and faces tell (B64): it is reported as a part of its tab.</summary>
+        public static string SlotNotInTree(string tab) =>
+            $"Vom Baum nicht als Schlitz erkannt: gleiche Kanten und Flächen wie Lasche und Schlitz „{tab}“, als deren Schlitz behandelt.";
+
+        /// <summary>A later tab and slot with the same edges and faces as one captured before that already has its slot: not rebuilt.</summary>
+        public static string SameAsEarlier(string earlier, string slot) =>
+            $"Gleiche Kanten und Flächen wie Lasche und Schlitz „{earlier}“, deren Schlitz aber „{slot}“ ist – wird nicht für sich nachgebaut.";
     }
 }

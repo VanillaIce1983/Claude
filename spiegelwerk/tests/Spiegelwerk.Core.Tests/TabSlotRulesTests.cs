@@ -248,7 +248,55 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal("Lasche und Schlitz, 2 Gruppen", TabSlotRules.Describe(r));
             Assert.EndsWith("wird nicht nachgebaut.", TabSlotRules.InContext);
             Assert.Equal("Lasche und Schlitz, Gruppe 2: SOLIDWORKS nennt eine andere Schlitzfläche als die gespiegelte.", TabSlotRules.OtherEntities(2, 2, "Schlitzfläche"));
-            Assert.Contains("„T“", TabSlotRules.SameAsEarlier("T"));
+            Assert.Equal("Gleiche Kanten und Flächen wie Lasche und Schlitz „T“, deren Schlitz aber „S“ ist – wird nicht für sich nachgebaut.",
+                TabSlotRules.SameAsEarlier("T", "S"));
+            Assert.Equal("Vom Baum nicht als Schlitz erkannt: gleiche Kanten und Flächen wie Lasche und Schlitz „T“, als deren Schlitz behandelt.",
+                TabSlotRules.SlotNotInTree("T"));
+        }
+
+        [Fact]
+        public void A_slot_found_by_its_groups_is_a_part_of_its_tab_like_one_the_tree_found()
+        {
+            var tab = new TabAndSlotRecord("T", "TabAndSlot");
+            tab.Groups.Add(Group());
+            Assert.False(tab.BringsParts);
+
+            FeatureRecord found = TabSlotRules.SlotBySameGroups(tab, "S", "TabAndSlot");
+            var slot = Assert.IsType<PartOfFeatureRecord>(found);
+            Assert.Equal("T", slot.Owner);
+            Assert.Equal(PartOwnerKind.TabAndSlot, slot.OwnerKind);
+            Assert.False(slot.ChangesSolid);
+            Assert.Equal(new[] { TabSlotRules.SlotNotInTree("T") }, slot.Notes);
+            // The tab's slot: measured up to it, its companion's name, and it brings it – so the capture keeps the part.
+            Assert.Equal("S", tab.SlotFeatureName);
+            Assert.Equal("S", tab.MeasureUntil);
+            Assert.True(tab.BringsParts);
+        }
+
+        [Fact]
+        public void A_slot_found_by_its_groups_after_a_tab_that_failed_is_not_built()
+        {
+            var tab = new TabAndSlotRecord("T", "TabAndSlot");
+            tab.Groups.Add(Group());
+            var records = new List<FeatureRecord> { tab, TabSlotRules.SlotBySameGroups(tab, "S", "TabAndSlot") };
+            // The tab fails: it brings parts, so its withdrawal marks it as not built (OwnersNotBuilt) – also when Esc stops before it.
+            Assert.Equal(new[] { "T" }, records.Where(r => r.BringsParts).Select(r => r.Name));
+            Assert.Equal(new[] { "T" }, RunSteps.OwnersNotBuiltAfter(records, -1));
+            // Its slot comes after it as a part (PartOfBuilder), not as an unsupported feature that would say „entsteht mit ihr“.
+            var slot = Assert.IsType<PartOfFeatureRecord>(records[1]);
+            Assert.Equal("Teil von „T“; nicht entstanden, weil „T“ nicht gespiegelt wurde.", RunSteps.PartOf(slot.Owner, ownerNotBuilt: true));
+        }
+
+        [Fact]
+        public void A_feature_with_the_groups_of_a_tab_that_has_its_slot_is_not_rebuilt()
+        {
+            var tab = new TabAndSlotRecord("T", "TabAndSlot") { SlotFeatureName = "S" };
+            tab.Groups.Add(Group());
+            var other = Assert.IsType<UnsupportedRecord>(TabSlotRules.SlotBySameGroups(tab, "X", "TabAndSlot"));
+            Assert.Equal("S", tab.SlotFeatureName);
+            Assert.False(other.ChangesSolid);
+            Assert.False(other.TriggersFallback);
+            Assert.Equal(TabSlotRules.SameAsEarlier("T", "S"), other.Reason);
         }
     }
 }
