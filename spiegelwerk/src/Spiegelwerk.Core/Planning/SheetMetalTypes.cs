@@ -73,7 +73,8 @@ namespace Spiegelwerk.Core.Planning
         // S4: jog and sketched bend. S5: unfold and fold, break corner, cross break, closed corner (the
         // corner relief is found by its data, its name is not confirmed). S6: normal cut, and legacy Insert
         // Bends – FlattenBends and ProcessBends, parts of their SheetMetal, which is a carrier of its own
-        // (<see cref="LegacyAnchor"/>, by the tree, not by its name); everything else is still refused.
+        // (<see cref="LegacyAnchor"/>, by the tree, not by its name). S8: the gusset (tab and slot has no confirmed
+        // name: captured by its data, never refused by name); everything else is still refused.
         private static readonly Dictionary<string, SheetMetalType> Table = new Dictionary<string, SheetMetalType>(StringComparer.Ordinal)
         {
             // Never collected; the new part gets its own with the first base flange.
@@ -113,7 +114,7 @@ namespace Spiegelwerk.Core.Planning
             ["CornerFeat"] = Rebuilt(SheetMetalRole.Leaf),
             ["NormalCut"] = Rebuilt(SheetMetalRole.Leaf),
             ["Rip"] = NotYet(SheetMetalRole.Leaf),
-            ["SMGusset"] = NotYet(SheetMetalRole.Leaf),
+            ["SMGusset"] = Rebuilt(SheetMetalRole.Leaf),
             ["FormToolInstance"] = NotYet(SheetMetalRole.Leaf),
         };
 

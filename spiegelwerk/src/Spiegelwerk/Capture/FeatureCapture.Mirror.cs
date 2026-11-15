@@ -119,10 +119,11 @@ namespace Spiegelwerk.Capture
         /// A mirror feature over sheet metal is not rebuilt yet: its second half would be read
         /// back from the copies under the sheet-metal session and guard, which only the dedicated
         /// slice brings. Unsupported, it changes the solid (and may hand its body to the fallback).
+        /// A tab and slot counts by its data (its name is not confirmed, B64).
         /// </summary>
         private static void RefuseSheetMetalSeeds(IEnumerable<Feature> seeds)
         {
-            if (seeds.Any(s => UnsupportedFeatures.IsSheetMetal(s.GetTypeName2())))
+            if (seeds.Any(s => UnsupportedFeatures.IsSheetMetal(s.GetTypeName2()) || SwSheetMetal.IsTabAndSlot(s)))
                 throw new NotSupportedException(UnsupportedFeatures.MirrorOverSheetMetal);
         }
 

@@ -69,6 +69,8 @@ namespace Spiegelwerk.Build
             new CornerReliefBuilder(),
             new NormalCutBuilder(),
             new LegacyBendsBuilder(),
+            new TabAndSlotBuilder(),
+            new SheetMetalGussetBuilder(),
         };
 
         /// <summary>

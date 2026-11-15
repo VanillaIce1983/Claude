@@ -80,7 +80,10 @@ namespace Spiegelwerk.Core.Planning
     ///  - legacy Insert Bends (S6, A1 phase 1b): a SheetMetal without a base flange whose FlattenBends and
     ///    ProcessBends follow it – by their parents, else the next ones in tree order before the next
     ///    SheetMetal – is their anchor, a carrier of its own (<see cref="LegacyAnchors"/>); FlattenBends and
-    ///    ProcessBends belong to it. A flat pattern of such a body belongs to that SheetMetal.
+    ///    ProcessBends belong to it. A flat pattern of such a body belongs to that SheetMetal;
+    ///  - the slot feature of a tab and slot (S8, B64) belongs to it: the first feature after the tab in tree
+    ///    order that is its child and answers the same data, has its type or „Slot“ in its type – or whose name
+    ///    is the tab's with another word (<see cref="TabSlotRules.IsSlotName"/>).
     /// Template folders are system features: never collected, their flat patterns listed before them.
     /// </summary>
     public sealed class SheetMetalTree
@@ -95,6 +98,7 @@ namespace Spiegelwerk.Core.Planning
         private readonly Dictionary<string, int> _order = new Dictionary<string, int>(StringComparer.Ordinal);
         private readonly Dictionary<string, (string? flatten, string? process)> _legacy = new Dictionary<string, (string?, string?)>(StringComparer.Ordinal);
         private readonly Dictionary<string, List<string>> _legacyBetween = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _slots = new Dictionary<string, string>(StringComparer.Ordinal);
 
         private SheetMetalTree()
         {
@@ -106,8 +110,9 @@ namespace Spiegelwerk.Core.Planning
         /// <param name="topLevel">Top-level features in tree order; folders carry their contents as sub-features.</param>
         /// <param name="flatPatterns">Flat pattern name → what its data and body say.</param>
         /// <param name="edgeFlanges">Edge flange name → what its data say (only needed where a top-level parent sketch may be a profile).</param>
+        /// <param name="tabAndSlots">The features whose data answer as tab and slot (its type name is not confirmed, B64).</param>
         public static SheetMetalTree Of(IEnumerable<TreeFeature> topLevel, IReadOnlyDictionary<string, FlatPatternFacts>? flatPatterns = null,
-            IReadOnlyDictionary<string, EdgeFlangeFacts>? edgeFlanges = null)
+            IReadOnlyDictionary<string, EdgeFlangeFacts>? edgeFlanges = null, IReadOnlyCollection<string>? tabAndSlots = null)
         {
             var tree = new SheetMetalTree();
             List<TreeFeature> top = topLevel.ToList();
@@ -134,6 +139,8 @@ namespace Spiegelwerk.Core.Planning
             foreach (TreeFeature hem in all.Where(f => f.Type == "Hem"))
                 foreach (TreeFeature sub in hem.SubFeatures.Where(s => IsSketchType(s.Type)))
                     tree._owners[sub.Name] = (hem.Name, PartOwnerKind.Hem);
+
+            if (tabAndSlots != null && tabAndSlots.Count > 0) tree.FindSlots(all, tabAndSlots);
 
             // A cross break's sketch holds its break lines (B48): the new cross break brings its own, the lines are written into it.
             foreach (TreeFeature cross in all.Where(f => f.Type == "CrossBreak"))
@@ -230,6 +237,30 @@ namespace Spiegelwerk.Core.Planning
         }
 
         /// <summary>
+        /// Tab and slot (S8, A4 P12, B64): in tree order, each feature that answers as tab and slot and is no slot
+        /// itself is a tab; its slot is the first unclaimed feature after it (no sketch) that is its child and
+        /// answers the same data, has its type or „Slot“ in its type, or whose name is the tab's with another word.
+        /// </summary>
+        private void FindSlots(List<TreeFeature> all, IReadOnlyCollection<string> tabAndSlots)
+        {
+            var answers = new HashSet<string>(tabAndSlots, StringComparer.Ordinal);
+            List<TreeFeature> ordered = all.GroupBy(f => f.Name, StringComparer.Ordinal).Select(g => g.First()).OrderBy(f => _order[f.Name]).ToList();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                TreeFeature tab = ordered[i];
+                if (!answers.Contains(tab.Name) || _owners.ContainsKey(tab.Name)) continue;
+                TreeFeature? slot = ordered.Skip(i + 1).FirstOrDefault(c =>
+                    !IsSketchType(c.Type) && !_owners.ContainsKey(c.Name) && !_slots.ContainsKey(c.Name) &&
+                    ((c.Parents.Contains(tab.Name) &&
+                      (answers.Contains(c.Name) || c.Type == tab.Type || c.Type.IndexOf("Slot", StringComparison.OrdinalIgnoreCase) >= 0)) ||
+                     TabSlotRules.IsSlotName(tab.Name, c.Name)));
+                if (slot == null) continue;
+                _owners[slot.Name] = (tab.Name, PartOwnerKind.TabAndSlot);
+                _slots[tab.Name] = slot.Name;
+            }
+        }
+
+        /// <summary>
         /// A parent of an edge flange that is its profile at the top level (A2 P13): a sketch at the top
         /// level, absorbed by no feature, and a parent of no feature but this flange and its own
         /// sub-features (a shared sketch or an up-to reference of something else stays a sketch of its own).
@@ -296,7 +327,7 @@ namespace Spiegelwerk.Core.Planning
             (ownerType == "TemplateFlatPattern" && subType == "FlatPattern") ||
             ownerType == "FlatPattern";
 
-        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem; profiles → edge flange; break lines → cross break; FlattenBends and ProcessBends → their legacy SheetMetal).</summary>
+        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem; profiles → edge flange; break lines → cross break; FlattenBends and ProcessBends → their legacy SheetMetal; the slot feature → its tab and slot).</summary>
         public IReadOnlyDictionary<string, (string owner, PartOwnerKind kind)> Owners => _owners;
 
         /// <summary>Flat pattern → the base flange of its body (or its legacy SheetMetal).</summary>
@@ -325,6 +356,9 @@ namespace Spiegelwerk.Core.Planning
         public bool IsUnownedSheetMetal(string name) =>
             _types.TryGetValue(name, out string type) && type == "SheetMetal" && !_owners.ContainsKey(name) && !_legacy.ContainsKey(name);
 
+        /// <summary>The slot feature of a tab and slot (S8); null if it has none or the feature is no tab.</summary>
+        public string? SlotOf(string tab) => _slots.TryGetValue(tab, out string slot) ? slot : null;
+
         /// <summary>The SheetMetal features of legacy Insert Bends (S6): carriers with a record of their own.</summary>
         public IReadOnlyCollection<string> LegacyAnchors => _legacy.Keys;
 
@@ -347,7 +381,7 @@ namespace Spiegelwerk.Core.Planning
         /// What a selection brings along (A1 P6): a base flange its SheetMetal and the flat pattern of
         /// its body, a flat pattern its sketches and own corner features; legacy Insert Bends come as one –
         /// the SheetMetal with its FlattenBends, ProcessBends and flat pattern, either bends feature with its
-        /// SheetMetal. Returns the names to add.
+        /// SheetMetal; a tab and slot comes as one, tab with slot and slot with tab. Returns the names to add.
         /// </summary>
         public IReadOnlyCollection<string> Closure(IEnumerable<string> wanted)
         {
@@ -374,6 +408,14 @@ namespace Spiegelwerk.Core.Planning
                 else if (_owners.TryGetValue(n, out var legacyPart) && legacyPart.kind == PartOwnerKind.LegacyBends)
                 {
                     Add(legacyPart.owner);
+                }
+                else if (_slots.TryGetValue(n, out string slot))
+                {
+                    Add(slot);
+                }
+                else if (_owners.TryGetValue(n, out var slotPart) && slotPart.kind == PartOwnerKind.TabAndSlot)
+                {
+                    Add(slotPart.owner);
                 }
                 else if (type == "FlatPattern")
                 {

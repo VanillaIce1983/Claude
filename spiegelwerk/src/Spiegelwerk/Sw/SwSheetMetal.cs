@@ -91,8 +91,10 @@ namespace Spiegelwerk.Sw
 
         /// <summary>
         /// The tree as <see cref="SheetMetalTree"/> needs it: every top-level feature with its
-        /// parents and sub-features, folders with their contents, and for each flat pattern its own
-        /// corner features and the features of its body.
+        /// parents and sub-features, folders with their contents, for each flat pattern its own
+        /// corner features and the features of its body, and the features whose data answer as tab and
+        /// slot (its type name is not confirmed, B64: every top-level feature that is no sketch, datum,
+        /// folder or listed sheet-metal type is asked).
         /// </summary>
         public static SheetMetalTree Tree(ModelDoc2 doc)
         {
@@ -100,6 +102,7 @@ namespace Spiegelwerk.Sw
             var top = new List<TreeFeature>();
             var facts = new Dictionary<string, FlatPatternFacts>(StringComparer.Ordinal);
             var flanges = new Dictionary<string, EdgeFlangeFacts>(StringComparer.Ordinal);
+            var tabAndSlots = new HashSet<string>(StringComparer.Ordinal);
             TreeFeature Node(Feature f, IEnumerable<Feature> subs)
             {
                 if (f.GetTypeName2() == "FlatPattern" && !facts.ContainsKey(f.Name)) facts[f.Name] = Facts(doc, f);
@@ -115,8 +118,16 @@ namespace Spiegelwerk.Sw
                 foreach (Feature c in FolderContents(doc, f))
                     if (subs.All(s => s.Name != c.Name)) subs.Add(c);
                 top.Add(Node(f, subs));
+                if (MayBeTabAndSlot(f) && IsTabAndSlot(f)) tabAndSlots.Add(f.Name);
             }
-            return SheetMetalTree.Of(top, facts, flanges);
+            return SheetMetalTree.Of(top, facts, flanges, tabAndSlots);
+        }
+
+        /// <summary>A feature whose data may be asked whether they are a tab and slot: no sketch, datum, system folder or listed sheet-metal type.</summary>
+        private static bool MayBeTabAndSlot(Feature f)
+        {
+            string type = f.GetTypeName2();
+            return !SwDoc.IsSketch(f) && !SwDoc.IsSystemFeature(f) && !Capture.FeatureCollector.IsDatum(f) && !UnsupportedFeatures.IsSheetMetal(type);
         }
 
         /// <summary>

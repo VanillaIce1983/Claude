@@ -147,6 +147,21 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Tab_and_slot_and_gusset_numbers()
+        {
+            // The records carry these through unchanged; the builders pass them to SOLIDWORKS (blech-plan S8).
+            SameConstants<swTabSlotFeatureHeightType_e>(typeof(TabSlotHeightTypes), "");
+            SameConstants<swTabSlotFeatureSpacingType_e>(typeof(TabSlotSpacingTypes), "");
+            SameConstants<swTabEdgesType_e>(typeof(TabEdgesTypes), "");
+            SameConstants<swSheetMetalGussetProfileDimType_e>(typeof(GussetProfileDimTypes), "swSheetMetalGussetProfileDimType_");
+            SameConstants<swSheetMetalRibGussetType_e>(typeof(GussetTypes), "swSheetMetalRibGussetType_");
+            SameConstants<swSheetMetalGussetProfileType_e>(typeof(GussetProfileTypes), "swSheetMetalGussetProfileType_");
+            Assert.Equal((int)swFeatureNameID_e.swFmTabAndSlot, Spiegelwerk.Core.Planning.TabSlotRules.TabAndSlotId);
+            // In the enum from the 2024 interop only; the builder does not use it (the gusset is made by InsertSheetMetalGussetFeature).
+            Assert.Equal((int)swFeatureNameID_e.swFmSMGusset, Spiegelwerk.Core.Planning.GussetRules.SMGussetId);
+        }
+
+        [Fact]
         public void Hem_and_miter_flange_numbers()
         {
             // HemRecord.Position and MiterFlangeRecord.PositionType carry these numbers through unchanged (blech-plan S2).

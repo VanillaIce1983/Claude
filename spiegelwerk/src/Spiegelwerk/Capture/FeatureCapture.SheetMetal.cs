@@ -18,6 +18,7 @@ namespace Spiegelwerk.Capture
     /// S4: sketched bend (<c>FeatureCapture.SheetMetalBends.cs</c>) and jog.
     /// S5: closed and break corner, unfold and fold, cross break, corner relief (<c>FeatureCapture.SheetMetalCorners.cs</c>).
     /// S6: normal cut and legacy Insert Bends (<c>FeatureCapture.SheetMetalLegacy.cs</c>).
+    /// S8: tab and slot (by its data, its name is not confirmed) and the gusset (<c>FeatureCapture.TabSlotGusset.cs</c>).
     /// </summary>
     internal sealed partial class FeatureCapture
     {
@@ -86,6 +87,9 @@ namespace Spiegelwerk.Capture
             // Type name and data interface both: unfold and fold share theirs (A3 P14).
             FoldsFeatureData fd when type == "UnFold" || type == "Fold" => CaptureFold(f, type, fd),
             SMNormalCutFeatureData2 nc => CaptureNormalCut(f, type, nc),
+            SMGussetFeatureData g => CaptureGusset(f, type, g),
+            // Whatever its (unconfirmed) name, B64.
+            TabAndSlotFeatureData ts => CaptureTabAndSlot(f, type, ts),
             // FlattenBends and ProcessBends are parts of their SheetMetal; reached only if the tree found none for them.
             BendsFeatureData _ => throw new NotSupportedException("Gehört zu „Biegungen einfügen“, deren Blech-Feature nicht erkannt wurde."),
             // 2022 and later, late-bound, whatever its (unconfirmed) name.

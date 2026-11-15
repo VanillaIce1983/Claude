@@ -163,6 +163,8 @@ namespace Spiegelwerk.Capture
                 }
                 // A corner relief (2022 and later) under a name the type table does not know (B44): found by its data, captured as sheet metal.
                 if (SwCornerRelief.Is(def)) return CaptureSheetMetal(f, type);
+                // Tab and slot: its name is not confirmed either (B64) – by its data.
+                if (def is TabAndSlotFeatureData) return CaptureSheetMetal(f, type);
                 return new UnsupportedRecord(f.Name, type, UnsupportedFeatures.Reason(type), ChangesSolid(type));
             }
             catch (NotSupportedException ex)

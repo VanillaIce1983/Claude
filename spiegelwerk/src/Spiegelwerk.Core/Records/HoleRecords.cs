@@ -109,6 +109,9 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>FlattenBends and ProcessBends of legacy Insert Bends: they come into being with its SheetMetal.</summary>
         LegacyBends,
+
+        /// <summary>The slot feature of a tab and slot: it comes into being with it.</summary>
+        TabAndSlot,
     }
 
     /// <summary>
@@ -142,6 +145,7 @@ namespace Spiegelwerk.Core.Records
             PartOwnerKind.SheetMetal => $"Entsteht nur mit der Basislasche „{Owner}“.",
             PartOwnerKind.CrossBreak => $"Skizze der Bruchlinien des Querbruchs „{Owner}“, der nicht gespiegelt wird – entfällt mit ihm.",
             PartOwnerKind.LegacyBends => $"Entsteht nur mit „Biegungen einfügen“ an „{Owner}“.",
+            PartOwnerKind.TabAndSlot => $"Schlitz von Lasche und Schlitz „{Owner}“, das nicht gespiegelt wird – entfällt mit ihm.",
             _ => $"Gehört zur Abwicklung „{Owner}“.",
         };
     }

@@ -243,19 +243,46 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   bekommt wie das Original nur das `SheetMetal` (`InsertBends2` ohne „abwickeln“), statt gebogen zu entstehen. Tests in `LegacyBendsTests`;
   STOLPERSTEINE 239, Prüftabelle (B52, abgewickelt alter Art), Testteil S6, README, ARCHITEKTUR.
 
+- Blech S8 (Zweig `feat-blech`, vor S7, das auf den Live-Test B57 wartet): Versteifungsrippe und Lasche und Schlitz. Core:
+  `SheetMetalArea4Records.cs` (`TabAndSlotRecord` mit `TabSlotGroup`, `SheetMetalGussetRecord` mit `GussetAnchor`/`GussetSection`, die
+  swconst-Zahlen `TabSlotHeightTypes`, `TabSlotSpacingTypes`, `TabEdgesTypes`, `GussetProfileDimTypes`, `GussetTypes`, `GussetProfileTypes`),
+  `TabSlotRules` (D1/D2 getauscht nur ohne Punkte und mit umgekehrter Kante, `IsSlotName`, Rücklesen nur der benutzten Werte, Texte),
+  `GussetRules` (`Section`, `Ends`, `AnchorOf`, `Variants` samt L − d, `FlipOffsetFor`, Rücklesen, Texte), der Schlitz gehört seiner Lasche
+  (`PartOwnerKind.TabAndSlot`, `SheetMetalTree.SlotOf`, `Closure` in beide Richtungen, `MeasureUntil` bis zum Schlitz), `SMGusset` „nachgebaut“;
+  Tests `TabSlotRulesTests`, `GussetRulesTests` (A4 §13, checks.py #4), Ablehnung, Berichtstexte, Besitz, swconst-Nummern. Add-In: Leser in
+  `FeatureCapture.TabSlotGusset` (Gruppen unter `AccessSelections`, externe Bezüge abgelehnt; Schenkel, Bezugslinie und -punkt, Biegung unter den
+  Schenkeln, Schnitt mit der Leiste nach der Rippe, frühere Rippen auf derselben Biegung), `SwSheetMetalArea4` (Leser, Schreiber, Zurücklesen,
+  `BendOf`, `FacePoints`, `IsTabAndSlot`), Fakten für den Baum in `SwSheetMetal.Tree`, `FeatureEdit.TabAndSlot`/`Gusset`, `TabAndSlotBuilder`,
+  `SheetMetalGussetBuilder`, Spiegel-Features über Lasche und Schlitz abgelehnt. STOLPERSTEINE 151, 165 ergänzt, 241–245 neu, Prüftabelle (B64–B66),
+  Testteil S8.
+  Abweichend vom Plan: Lasche und Schlitz steht ohne bestätigten Namen nicht in der Typtabelle (§1.5; der Plan: „by its confirmed name“) – erkannt an
+  `TabAndSlotFeatureData`, im allgemeinen Erfassen wie die Eckentlastung und im Baum, für den `SwSheetMetal.Tree` jedes Feature der obersten Ebene
+  fragt, das keine Skizze, kein Bezug, kein Ordner und kein bekannter Blech-Typ ist. Der Schlitz wird über das Kind der Lasche oder einen Namen mit
+  anderem Wort gefunden (sprachunabhängig, nicht nur „-Slot“); antwortet ein nicht erkannter Schlitz mit denselben Kanten und Flächen wie eine
+  erfasste Lasche und Schlitz, wird er nicht nachgebaut. Lasche und Schlitz entsteht in zwei Versuchen (alle Werte im Datenobjekt, dann wie im
+  Beispiel der Hilfe), danach eine Bearbeitung nur, wo etwas anders zurückkommt oder Punkte und Laschenfläche zu setzen sind. Der Hinweis auf die
+  Schlitz-Optionen kommt wie beim Saum nur, wo die Prüfung sie nicht bestätigen kann (P12: immer). Der Schnitt einer Versteifungsrippe ist die Mitte
+  der Ausdehnung ihrer Flächen entlang der Biegelinie (A4 §7: Schwerpunkt der Flächen; angenommen ist, dass die Rippe symmetrisch zu ihrer
+  Schnittebene steht, B65); als Bezug einer früheren Rippe zählen auch ihre Seitenflächen (Schnitt ± halbe Dicke). Die Lageprüfung legt jede Variante
+  neu an (gespiegeltes Biegungsende beidseitig, ohne Punkt, L − d, andere Seite) und behält die erste passende; passt keine, bleibt die nächste mit
+  Hinweis, statt dass der Schritt scheitert. Der Aufruf mit 21 Werten nimmt keinen Bezugspunkt, also wird er immer mit Versatz angelegt und der Punkt
+  danach gesetzt. Ein Referenzpunkt-Feature als Bezugspunkt wird nicht übertragen. `FormToolInstance` bleibt „noch nicht“ (der Plan: ein nicht
+  unterstütztes Blatt wie ab S7a) – S7a fehlt noch. Spiegel-Features mit Lasche und Schlitz in der Saat werden wie andere Blech-Saaten abgelehnt.
+  Keine Tore (§5.2); nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S6 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S7 (Ersatzweg): das Tor B54/B55 ist auf SOLIDWORKS 2026 bestanden (`livetests.md`), die Entscheidungen des Eigentümers (`blech-plan.md` §7) gelten vorläufig nach Empfehlung – Ersatzweg ja, hinter einem Schalter, der aus ist; ein gescheitertes Blatt wird gemeldet und der Rest gebaut; „Original löschen“ bleibt bei Blech abgelehnt –, als Nächstes der Live-Test B57 (Umwandeln in Blech, Makro `scripts/livetests/ersatzweg-b57.bas`), der den Weg von S7a bestimmt; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S6 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S7 (Ersatzweg): das Tor B54/B55 ist auf SOLIDWORKS 2026 bestanden (`livetests.md`), die Entscheidungen des Eigentümers (`blech-plan.md` §7) gelten vorläufig nach Empfehlung – Ersatzweg ja, hinter einem Schalter, der aus ist; ein gescheitertes Blatt wird gemeldet und der Rest gebaut; „Original löschen“ bleibt bei Blech abgelehnt –, als Nächstes der Live-Test B57 (Umwandeln in Blech, Makro `scripts/livetests/ersatzweg-b57.bas`), der den Weg von S7a bestimmt; bis dahin ist S8 (Versteifungsrippe, Lasche und Schlitz) gebaut, noch ungeprüft; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
 1. Live-Test B57 (und B59) beim Eigentümer: Umwandeln bzw. „Biegungen einfügen“ des gespiegelten Körpers. Sein Ergebnis wählt
    den Weg von S7a (A: Umwandeln, B: „Biegungen einfügen“, sonst nur F3 – dann ist S7 neu abzuwägen). Danach S7a und S7b nach
    `blech-plan.md` mit den Folgen aus `livetests.md` (nur die direkte Spiegelmatrix, jede Transformation an Prüfpunkten bestätigen).
-   S8 (Versteifungsrippe, Lasche und Schlitz) und S9 (Umformwerkzeuge) hängen nicht davon ab und können vorher kommen; jeder
-   Schritt mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen.
+   S8 (Versteifungsrippe, Lasche und Schlitz) steht, Prüfung und Nachprüfung stehen aus; S9 (Umformwerkzeuge) hängt ebenfalls nicht davon
+   ab und kann vorher kommen; jeder Schritt mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.
 3. Doku, Version, Regressionsprüfung, Release (Tag nur nach Rückfrage).

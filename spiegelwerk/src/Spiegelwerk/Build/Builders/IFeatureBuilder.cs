@@ -324,6 +324,20 @@ namespace Spiegelwerk.Build.Builders
             return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
         }
 
+        /// <summary>Tab and slot (ITabAndSlotFeatureData; its groups through SelectionGetGroups, as in the help example).</summary>
+        public static bool TabAndSlot(ModelDoc2 doc, Feature f, Action<TabAndSlotFeatureData> change)
+        {
+            var d = (TabAndSlotFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
+        /// <summary>Sheet-metal gusset (ISMGussetFeatureData).</summary>
+        public static bool Gusset(ModelDoc2 doc, Feature f, Action<SMGussetFeatureData> change)
+        {
+            var d = (SMGussetFeatureData)(object)f.GetDefinition();
+            return Edit(doc, f, d, () => d.AccessSelections(doc, null), () => change(d), d.ReleaseSelectionAccess);
+        }
+
         /// <summary>
         /// A feature's own bend allowance in an edit of its own (blech-plan §1.4, A2 P7) – never
         /// together with the geometric values, so a refused allowance costs only itself. Order of
