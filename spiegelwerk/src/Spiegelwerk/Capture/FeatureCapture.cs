@@ -21,6 +21,7 @@ namespace Spiegelwerk.Capture
     internal sealed partial class FeatureCapture
     {
         private readonly ModelDoc2 _doc;
+        private readonly SldWorks? _sw;
         private readonly SwMath _math;
         private readonly SketchCapture _sketches;
         private readonly RegionSpaceMemory _regionSpaces;
@@ -35,10 +36,12 @@ namespace Spiegelwerk.Capture
         /// <param name="ofOwnCopy">The features are the job's own copies in the target, not the original.</param>
         /// <param name="sheetMetal">Who comes into being with whom in a sheet-metal part; none for other parts.</param>
         /// <param name="wasFlattened">Whether a flat pattern was flattened before the run folded it; none: folded.</param>
+        /// <param name="sw">The application, for the design-library folders a forming tool's file is looked for in; none: not looked for.</param>
         public FeatureCapture(ModelDoc2 doc, SwMath math, RegionSpaceMemory regionSpaces, bool ofOwnCopy = false, SheetMetalTree? sheetMetal = null,
-            Func<string, bool>? wasFlattened = null)
+            Func<string, bool>? wasFlattened = null, SldWorks? sw = null)
         {
             _doc = doc;
+            _sw = sw;
             _math = math;
             _ofOwnCopy = ofOwnCopy;
             _sketches = new SketchCapture(math);

@@ -6,8 +6,9 @@ namespace Spiegelwerk.Core.Records
 {
     /// <summary>
     /// A feature placed at the points of a position sketch it brings along – holes (Hole Wizard,
-    /// Advanced Hole) and later form tools. The position sketch is captured with the feature and
-    /// rebuilt into the position sketch of the new one; it is not rebuilt as a sketch of its own.
+    /// Advanced Hole) and forming tools. The position sketch is captured with the feature and
+    /// rebuilt into the position sketch of the new one (a forming tool's: written on the face and
+    /// selected for it); it is not rebuilt as a sketch of its own.
     /// </summary>
     public abstract class PositionedFeatureRecord : FeatureRecord
     {
@@ -89,7 +90,7 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Hole Wizard hole or Advanced Hole: the position sketch becomes an ordinary sketch again, the profile sketch is left out.</summary>
         Hole,
 
-        /// <summary>Form tool: the position sketch becomes an ordinary sketch again, its other sketch is left out.</summary>
+        /// <summary>Forming tool: the position sketch becomes an ordinary sketch again, its orientation sketch is left out.</summary>
         FormTool,
 
         /// <summary>Profile sketch of an edge flange: left out with it.</summary>

@@ -22,8 +22,8 @@ namespace Spiegelwerk.Capture
         /// The owner a feature is part of, if it does not come into being on its own: the
         /// sketches of a Hole Wizard hole (position and profile) or an Advanced Hole – the new
         /// hole brings its own, and the position sketch is written into that –, and in sheet metal
-        /// the SheetMetal of a base flange, the sketches and own corner features of a flat pattern
-        /// and the width sketches of a hem (<see cref="SheetMetalTree.Owners"/>).
+        /// the SheetMetal of a base flange, the sketches and own corner features of a flat pattern,
+        /// the width sketches of a hem and the sketches of a forming tool (<see cref="SheetMetalTree.Owners"/>).
         /// </summary>
         private PartOfFeatureRecord? OwnedPart(Feature f, string type)
         {
@@ -62,9 +62,12 @@ namespace Spiegelwerk.Capture
             }
         }
 
-        /// <summary>The sketch the holes sit on, for either kind of hole.</summary>
-        private Feature? PositionSketchOf(Feature hole) =>
-            hole.GetDefinition() is AdvancedHoleFeatureData ? SwAdvancedHole.PositionSketch(hole) : SwHole.PositionSketch(_doc, hole);
+        /// <summary>The sketch the instances sit on, for either kind of hole and for a forming tool (its first sketch, S9).</summary>
+        private Feature? PositionSketchOf(Feature owner)
+        {
+            if (owner.GetTypeName2() == SwFormTool.TypeName) return SwFormTool.Sketches(owner).FirstOrDefault();
+            return owner.GetDefinition() is AdvancedHoleFeatureData ? SwAdvancedHole.PositionSketch(owner) : SwHole.PositionSketch(_doc, owner);
+        }
 
         private bool IsPositionSketch(string hole, string sketch)
         {
@@ -85,7 +88,7 @@ namespace Spiegelwerk.Capture
 
         /// <summary>
         /// A part whose owner is not rebuilt (not in the job, unsupported, skipped). The position
-        /// sketch of a hole becomes an ordinary sketch again, so its points stay available; every
+        /// sketch of a hole or a forming tool becomes an ordinary sketch again, so its points stay available; every
         /// other part means nothing without its owner and is left out (<see cref="PartOfFeatureRecord.LeftOut"/>).
         /// A 3D sub-sketch of a hole can only be a position sketch (on several or curved faces) –
         /// profiles are always 2D.

@@ -1,16 +1,19 @@
 using System.Collections.Generic;
 using Spiegelwerk.Core.Geometry;
 using Spiegelwerk.Core.Matching;
+using Spiegelwerk.Core.Sketch;
 
 namespace Spiegelwerk.Core.Records
 {
-    // Area 4 of the sheet-metal plan (A4 (2) §3, blech-plan S8): tab and slot and the sheet-metal gusset.
-    // A reflection keeps every value of both; it maps edges, faces and points onto their mirror images.
-    // What it does not tell: from which end of a tab edge D1 counts when the copy's edge runs the other
-    // way (TabSlotRules.Offsets), and from which end of a bend an offset counts when a gusset has no
+    // Area 4 of the sheet-metal plan (A4 (2) §3, blech-plan S8, S9): tab and slot, the sheet-metal gusset and
+    // forming tools. A reflection keeps every value of the first two; it maps edges, faces and points onto their
+    // mirror images. What it does not tell: from which end of a tab edge D1 counts when the copy's edge runs the
+    // other way (TabSlotRules.Offsets), and from which end of a bend an offset counts when a gusset has no
     // reference point of its own – the help says „the end of the sheet metal bend“, and which end that is
     // depends on how the copy's bend runs (A4 P9). The copy gets an explicit reference point there, and
-    // the place of the new gusset on its bend is always checked (GussetRules).
+    // the place of the new gusset on its bend is always checked (GussetRules). A forming tool is placed
+    // unmirrored (the tool part is not mirrored); its rotation θ′ = β − θ − 2α is not readable before 2025 and is
+    // measured (FormToolPlacement).
 
     /// <summary>Same numbers as swTabSlotFeatureHeightType_e.</summary>
     public static class TabSlotHeightTypes
@@ -278,5 +281,80 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>The earlier gusset its offset counts from (<see cref="GussetAnchor.PreviousGusset"/>).</summary>
         public string? AnchorGusset { get; set; }
+    }
+
+    /// <summary>Where the tool file of a forming tool came from.</summary>
+    public enum ToolSource
+    {
+        /// <summary>The feature names it as an external reference (IFeature.ListExternalFileReferences2, path only).</summary>
+        ExternalReference,
+
+        /// <summary>Its data name it (ILibraryFormToolFeatureData.FormToolPath, 2025 SP2 and later, late-bound).</summary>
+        LateBound,
+
+        /// <summary>Found in the design library by the feature's name without its trailing digits (heuristic; the place check confirms it).</summary>
+        LibrarySearch,
+    }
+
+    /// <summary>
+    /// Forming tool (FormToolInstance; no data interface before 2025 SP2, ILibraryFormToolFeatureData then, late-bound).
+    /// Two sketches come with it: the position sketch, whose points are the instances (the first sketch sub-feature,
+    /// rebuilt like a hole's), and the orientation sketch (the second), whose points carry the tool's rotation as
+    /// geometry (A4 P10, B68). The tool part is placed unmirrored – it must be mirror-symmetric, which the tools of
+    /// the design library are – with the same flip (outward normals stay outward); its rotation in the copy is
+    /// θ′ = β − θ − 2α (A4 §2), which needs α (the tool's symmetry plane) and θ, both unreadable before 2025, so the
+    /// copy's rotation is measured: points on the instances' faces (<see cref="ShapeSamples"/>), mirrored, must lie on
+    /// the new feature's faces, and the side they stand on (<see cref="ProtrusionSide"/>) decides the flip
+    /// (<see cref="Planning.FormToolPlacement"/>).
+    /// </summary>
+    public sealed class FormToolRecord : PositionedFeatureRecord
+    {
+        public FormToolRecord(string name, string typeName, string positionSketchName, SketchModel position, string? orientationSketchName = null)
+            : base(name, typeName, positionSketchName, position)
+        {
+            OrientationSketchName = orientationSketchName;
+        }
+
+        /// <summary>The second sketch sub-feature; null if the tool has none.</summary>
+        public string? OrientationSketchName { get; }
+
+        /// <summary>The points of the orientation sketch, model coordinates (unmirrored); empty if it does not read.</summary>
+        public List<Vec3> OrientationPoints { get; } = new List<Vec3>();
+
+        /// <summary>Full path of the tool file (.sldftp or .sldprt).</summary>
+        public string ToolPath { get; set; } = "";
+
+        /// <summary>The tool's configuration (late-bound, 2025 SP2 and later); null: not readable – the build tries the file's configurations.</summary>
+        public string? ToolConfiguration { get; set; }
+
+        /// <summary>Linked to the tool file (LinkToPart): the copy gets the same external reference.</summary>
+        public bool LinkToTool { get; set; }
+
+        public ToolSource Source { get; set; }
+
+        /// <summary>The rotation angle of the original (late-bound, 2025 SP2 and later; radians assumed, B69); null: not readable.</summary>
+        public double? RotationAngle { get; set; }
+
+        /// <summary>Outward normal of the placement face (state before the tool), unmirrored.</summary>
+        public Vec3 PlacementNormal { get; set; }
+
+        /// <summary>Sheet thickness of its body (metres); 0 if unknown.</summary>
+        public double Thickness { get; set; }
+
+        /// <summary>Points on the faces of its instances in the state right after it, model coordinates (unmirrored).</summary>
+        public List<Vec3> ShapeSamples { get; } = new List<Vec3>();
+
+        /// <summary>For each of <see cref="ShapeSamples"/> the index of its instance in <see cref="PositionedFeatureRecord.Points"/>.</summary>
+        public List<int> SampleInstance { get; } = new List<int>();
+
+        /// <summary>
+        /// Where the instances stand relative to the placement face: +1 out of the face (along its outward normal),
+        /// −1 through the sheet to the other side, 0 not determinable (<see cref="Planning.FormToolPlacement.ProtrusionSide"/>).
+        /// </summary>
+        public int ProtrusionSide { get; set; }
+
+        /// <summary>Both its sketches come into being with it.</summary>
+        public override IReadOnlyList<string> OwnedSketches =>
+            OrientationSketchName == null ? new[] { PositionSketchName } : new[] { PositionSketchName, OrientationSketchName };
     }
 }

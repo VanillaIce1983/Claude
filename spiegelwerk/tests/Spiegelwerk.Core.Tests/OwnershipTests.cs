@@ -9,17 +9,10 @@ namespace Spiegelwerk.Core.Tests
     /// <summary>
     /// One ownership model for every feature that brings parts (blech-plan §1.3): which records
     /// own sketches, which bring parts at all, and which delete their absorbed features with them.
-    /// The sheet-metal records do not exist yet; stubs stand in for them as the plan defines them.
+    /// Stubs stand in for sheet-metal records where only the ownership matters.
     /// </summary>
     public class OwnershipTests
     {
-        private sealed class FormToolStub : PositionedFeatureRecord
-        {
-            public FormToolStub() : base("Louver1", "FormToolInstance", "Skizze7", new SketchModel())
-            {
-            }
-        }
-
         /// <summary>A base flange brings its SheetMetal and flat pattern, but owns no sketch: its profile is an ordinary, maybe shared sketch.</summary>
         private sealed class BaseFlangeStub : FeatureRecord
         {
@@ -47,9 +40,13 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal(new[] { "Skizze2" }, hole.OwnedSketches);
             Assert.True(hole.DeleteWithAbsorbed);
 
-            var tool = new FormToolStub();
+            // A forming tool owns its position and its orientation sketch (S9); without the second only the first.
+            var tool = new FormToolRecord("louver1", "FormToolInstance", "Skizze7", new SketchModel(), "Skizze8");
             Assert.True(tool.BringsParts);
-            Assert.Equal(new[] { "Skizze7" }, tool.OwnedSketches);
+            Assert.Equal(new[] { "Skizze7", "Skizze8" }, tool.OwnedSketches);
+            Assert.True(tool.DeleteWithAbsorbed);
+            Assert.IsAssignableFrom<PositionedFeatureRecord>(tool);
+            Assert.Equal(new[] { "Skizze9" }, new FormToolRecord("dimple1", "FormToolInstance", "Skizze9", new SketchModel()).OwnedSketches);
 
             var flange = new EdgeFlangeStub();
             Assert.True(flange.BringsParts);

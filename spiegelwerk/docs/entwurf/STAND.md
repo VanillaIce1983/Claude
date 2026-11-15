@@ -295,20 +295,48 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   der Lasche wie ein Schlitz, den der Baum findet (`TabSlotRules.SlotBySameGroups`, `PartOwnerKind.TabAndSlot`, mit Hinweis
   `SlotNotInTree`): „entsteht mit diesem“ oder „nicht entstanden“ (`OwnersNotBuilt`). Hat die Lasche schon einen Schlitz, bleibt er
   nicht unterstützt (`SameAsEarlier` nennt ihn). Tests in `TabSlotRulesTests`; STOLPERSTEINE 241.
+- Blech S9 (Zweig `feat-blech`, wie S8 vor S7, das auf den Live-Test B57 wartet): Umformwerkzeuge. Core: `FormToolRecord` (ein
+  `PositionedFeatureRecord`, mit `ToolSource`) in `SheetMetalArea4Records.cs`, `FormToolPlacement` (Drehregel θ′ = β − θ − 2α, `Register3D`:
+  Drehung über Formpunkte – Raster 0,5°, Kandidaten über die Punkte fern der Achse, dann alle, verfeinert, kleinster |ψ| –, `Register2D` für erste
+  Schätzungen aus den Orientierungsskizzen, `ProtrusionSide`, `PickSamples`, Drehsinn, Konfigurationen, Werkzeugname und -pfad, Texte), die Skizzen
+  gehören dem Werkzeug (`SheetMetalTree`, `PartOwnerKind.FormTool`), `FormToolInstance` „nachgebaut“; Tests `FormToolPlacementTests` (A4 §13,
+  checks.py #1 und #2), Ablehnung, Berichtstexte, Besitz, Baum, swconst-Nummern. Add-In: `FeatureCapture.FormTool` (nach dem Typnamen vor der
+  Definition; Positionsskizze ganz, Orientierungsskizze als Punkte, Werkzeugdatei aus den Bezügen, den Daten oder der Konstruktionsbibliothek,
+  Platzierungsfläche und Dicke mit der Leiste hinter der Positionsskizze, Formpunkte und Seite mit der Leiste hinter dem Werkzeug), `SwFormTool`,
+  `SketchBuilder.BuildOnFace`, `FormToolBuilder` (Positionsskizze auf der Fläche gewählt, sonst Fläche und Skizze nachträglich; Probe, Seite,
+  Drehung, neu eingesetzt und geprüft; Konfigurationen der Datei; jeder Versuch entfernt), `BuildShared.FormToolSense`, Positionsskizzen als
+  Punktskizzen und mit Stützfläche, `CaptureOnItsOwn` mit der Positionsskizze eines Umformwerkzeugs. STOLPERSTEINE 151 und 164 ergänzt,
+  246–251 neu, Prüftabelle (B67–B70), Testteil S9.
+  Abweichend vom Plan: Die Anzeige in der Abwicklung wird nicht gelesen (für 2025 ist kein lesendes Mitglied belegt) – die Kopie hat die
+  Einstellung des Dokuments, mit Information; `FormToolRecord` hat dafür keine Felder. Verknüpft ist die Kopie, wie die Daten sagen, sonst wenn das
+  Original das Werkzeug als Bezug nennt (B70 offen, ob auch nicht verknüpfte es tun). Formpunkte sind ein Punkt je Fläche und Anfang, Mitte, Ende
+  ihrer Kanten (der Entwurf: zusätzlich Punkte über `Surface.Evaluate`); gemessen wird je Instanz nur gegen die Flächen nahe ihrem Einfügepunkt.
+  Variante B des Entwurfs (Verschieben mit `MoveOrCopy`) entfällt: die gewählte Skizze, sonst Variante A. Die Skizze auf der Fläche geht über den
+  gemeinsamen Weg (K7), aber ohne Rückfall auf eine Ebene (`BuildOnFace`). Ab 2025 SP2 wird am Feature gedreht (`RotationAngle` +
+  `ModifyDefinition`), angelegt wird in jeder Version mit `InsertFormToolFeature` (kein `CreateDefinition(73)`); die Variante „Drehung +180°“ für die
+  Prüfung gibt es nicht (die eigene Prüfung entscheidet immer). Ein Werkzeug ohne lesbare Formpunkte wird nicht nachgebaut (sonst wäre die Drehung
+  ungeprüft). Die Probe ist immer „nicht umgekehrt“ (die Richtung des Originals ist in keiner Version lesbar), die Konfigurationen sind auf 8
+  begrenzt, der Drehsinn gilt für den Lauf (`BuildShared`). `FeatureCapture` bekommt die Anwendung (`SldWorks`) für die Ordner der
+  Konstruktionsbibliothek. Das Tor B67 ist nicht erprobt; wie bei S1a, S3 und S4 ist der Typ trotzdem geöffnet – scheitert B67, bleibt Variante A.
+  Keine Tore sonst (§5.2); nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+  Was S7a für Umformwerkzeuge ergänzen muss: `FormToolInstance` bleibt „nachgebaut“ (die Typtabelle von S7a, Plan §3.9: „nicht unterstützt“, Blatt,
+  gilt nicht mehr). Ein Umformwerkzeug, das sich nicht erfassen lässt (Werkzeugdatei nirgends, Form oder Platzierungsfläche nicht lesbar), ist ein
+  gewöhnlicher Eintrag „fehlgeschlagen“ mit `TriggersFallback` (wahr) – mit S7a ein Auslöser auf einem qualifizierten Körper; eines, das erst beim
+  Aufbau scheitert („Werkzeug passt nicht“, unsymmetrisches Werkzeug), ist Sache von S7b (Neustart).
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S6 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S7 (Ersatzweg): das Tor B54/B55 ist auf SOLIDWORKS 2026 bestanden (`livetests.md`), die Entscheidungen des Eigentümers (`blech-plan.md` §7) gelten vorläufig nach Empfehlung – Ersatzweg ja, hinter einem Schalter, der aus ist; ein gescheitertes Blatt wird gemeldet und der Rest gebaut; „Original löschen“ bleibt bei Blech abgelehnt –, als Nächstes der Live-Test B57 (Umwandeln in Blech, Makro `scripts/livetests/ersatzweg-b57.bas`), der den Weg von S7a bestimmt; bis dahin ist S8 (Versteifungsrippe, Lasche und Schlitz) gebaut, geprüft und nachgeprüft (Befunde behoben); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S6 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S7 (Ersatzweg): das Tor B54/B55 ist auf SOLIDWORKS 2026 bestanden (`livetests.md`), die Entscheidungen des Eigentümers (`blech-plan.md` §7) gelten vorläufig nach Empfehlung – Ersatzweg ja, hinter einem Schalter, der aus ist; ein gescheitertes Blatt wird gemeldet und der Rest gebaut; „Original löschen“ bleibt bei Blech abgelehnt –, als Nächstes der Live-Test B57 (Umwandeln in Blech, Makro `scripts/livetests/ersatzweg-b57.bas`), der den Weg von S7a bestimmt; bis dahin ist S8 (Versteifungsrippe, Lasche und Schlitz) gebaut, geprüft und nachgeprüft (Befunde behoben) und S9 (Umformwerkzeuge) gebaut, die Prüfung steht aus; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
 1. Live-Test B57 (und B59) beim Eigentümer: Umwandeln bzw. „Biegungen einfügen“ des gespiegelten Körpers. Sein Ergebnis wählt
    den Weg von S7a (A: Umwandeln, B: „Biegungen einfügen“, sonst nur F3 – dann ist S7 neu abzuwägen). Danach S7a und S7b nach
    `blech-plan.md` mit den Folgen aus `livetests.md` (nur die direkte Spiegelmatrix, jede Transformation an Prüfpunkten bestätigen).
-   S8 (Versteifungsrippe, Lasche und Schlitz) steht und ist geprüft, die Nachprüfung der Korrekturen steht aus; S9 (Umformwerkzeuge) hängt ebenfalls nicht davon
-   ab und kann vorher kommen; jeder Schritt mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen.
+   S8 (Versteifungsrippe, Lasche und Schlitz) steht, ist geprüft und nachgeprüft; S9 (Umformwerkzeuge) steht, Prüfung und Nachprüfung der
+   Korrekturen stehen aus; jeder Schritt mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.
 3. Doku, Version, Regressionsprüfung, Release (Tag nur nach Rückfrage).

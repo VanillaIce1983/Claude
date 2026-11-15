@@ -271,6 +271,28 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Forming_tool_sketches_belong_to_the_tool()
+        {
+            // S9: position sketch and orientation sketch come into being with the tool; a sketch it merely uses does not.
+            var top = new List<TreeFeature>
+            {
+                F("Sheet-Metal1", "SheetMetal"),
+                F("Base-Flange1", "SMBaseFlange", new[] { "Sheet-Metal1", "Sketch1" }, F("Sketch1", "ProfileFeature")),
+                F("Sketch2", "ProfileFeature", new[] { "Base-Flange1" }),
+                F("louver1", "FormToolInstance", new[] { "Base-Flange1", "Sketch2" }, F("Sketch3", "ProfileFeature"), F("Sketch4", "ProfileFeature")),
+            };
+            SheetMetalTree tree = SheetMetalTree.Of(top);
+            Assert.Equal(("louver1", PartOwnerKind.FormTool), tree.Owners["Sketch3"]);
+            Assert.Equal(("louver1", PartOwnerKind.FormTool), tree.Owners["Sketch4"]);
+            Assert.False(tree.Owners.ContainsKey("Sketch2"));
+            Assert.True(SheetMetalTree.ListsSubFeature("FormToolInstance", "ProfileFeature"));
+            // Its position sketch becomes an ordinary sketch again without it, the orientation sketch is left out.
+            var part = new PartOfFeatureRecord("Sketch4", "ProfileFeature", "louver1", PartOwnerKind.FormTool);
+            Assert.True(part.OwnerHasPositionSketch);
+            Assert.Equal("Skizze des Umformwerkzeugs „louver1“, das nicht gespiegelt wird – entfällt mit ihm.", part.LeftOut);
+        }
+
+        [Fact]
         public void Flatten_and_process_bends_belong_to_the_legacy_sheet_metal()
         {
             // By their parents: FlattenBends on the SheetMetal, ProcessBends on the FlattenBends.

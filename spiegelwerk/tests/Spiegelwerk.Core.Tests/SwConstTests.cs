@@ -162,6 +162,16 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Forming_tool_numbers()
+        {
+            // blech-plan S9: the feature id (CreateDefinition from 2025 SP2), the design-library folders searched for a tool file.
+            Assert.Equal((int)swFeatureNameID_e.swFmFormToolInstance, Spiegelwerk.Core.Planning.FormToolPlacement.FormToolInstanceId);
+            Assert.Equal(38, (int)swUserPreferenceStringValue_e.swFileLocationsDesignLibrary);
+            Assert.Equal(4, (int)swUserPreferenceStringValue_e.swFileLocationsPaletteFormTools);
+            Assert.Equal(2, (int)swDeleteSelectionOptions_e.swDelete_Absorbed);
+        }
+
+        [Fact]
         public void Hem_and_miter_flange_numbers()
         {
             // HemRecord.Position and MiterFlangeRecord.PositionType carry these numbers through unchanged (blech-plan S2).

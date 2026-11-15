@@ -53,6 +53,12 @@ namespace Spiegelwerk.Build
 
         /// <summary>Own values of the first body, waiting for the second sheet-metal body (B15).</summary>
         public List<PendingBodyOverrides> PendingBodyOverrides { get; } = new List<PendingBodyOverrides>();
+
+        /// <summary>
+        /// The rotation sense of InsertFormToolFeature's angle about the outward normal (+1 right-handed, −1 the other way),
+        /// once a forming tool confirmed it; null before (B68). Later tools try it first.
+        /// </summary>
+        public int? FormToolSense { get; set; }
     }
 
     /// <summary>

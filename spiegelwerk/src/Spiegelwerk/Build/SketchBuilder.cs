@@ -75,6 +75,31 @@ namespace Spiegelwerk.Build
                 sketch = _sm.ActiveSketch ?? throw new InvalidOperationException("Skizze konnte nicht geöffnet werden.");
             }
 
+            SketchMap map = WriteOpened(src, sketch, notes);
+            map.OnSupportFace = wanted && missed == null;
+            map.SupportFaceMissed = missed;
+            return map;
+        }
+
+        /// <summary>
+        /// Like <see cref="Build"/>, but only on the mirrored support face (the position sketch of a forming tool, S9:
+        /// the tool needs a face, a plane will not do): null and why if the face is not usable – then nothing is made.
+        /// </summary>
+        public SketchMap? BuildOnFace(SketchRecord rec, List<string> notes, out string? missed)
+        {
+            SketchModel src = rec.Sketch;
+            missed = "keine Fläche erfasst";
+            if (!_ctx.SketchSupportFaces.TryGetValue(src.Name, out FaceSignature support)) return null;
+            Sketch? sketch = OpenOnFace(support, _ctx.Mirror.Apply(src.Frame.Plane), out missed);
+            if (sketch == null) return null;
+            SketchMap map = WriteOpened(src, sketch, notes);
+            map.OnSupportFace = true;
+            return map;
+        }
+
+        /// <summary>Writes the mirror into a sketch just opened, closes it and registers its map; a failure deletes it again.</summary>
+        private SketchMap WriteOpened(SketchModel src, Sketch sketch, List<string> notes)
+        {
             SketchMap map;
             _everyPointCounts = _ctx.PointSketches.Contains(src.Name);
             try
@@ -95,8 +120,6 @@ namespace Spiegelwerk.Build
 
             SwSelect.Clear(_doc);
             _sm.InsertSketch(true);
-            map.OnSupportFace = wanted && missed == null;
-            map.SupportFaceMissed = missed;
             _ctx.Sketches[src.Name] = map;
             return map;
         }

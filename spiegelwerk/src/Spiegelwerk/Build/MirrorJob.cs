@@ -53,8 +53,9 @@ namespace Spiegelwerk.Build
     ///     feature did to the volume). After this the original is not used any more.
     ///  2. Build – create every record mirrored in the target with plain FeatureManager /
     ///     SketchManager calls (one StepRunner step each). No Mirror feature, no derived part,
-    ///     no external reference – a mirror feature of the original becomes ordinary features
-    ///     too (MirrorFeatureBuilder).
+    ///     no external reference to the original – a mirror feature of the original becomes ordinary
+    ///     features too (MirrorFeatureBuilder). A forming tool linked to its tool file keeps that
+    ///     link, as the original has it (A4 P11).
     ///  3. Verify – per feature, compare with the mirrored original and pick the right variant.
     /// </summary>
     internal sealed class MirrorJob
@@ -167,7 +168,8 @@ namespace Spiegelwerk.Build
                     fallbackOn: false, sheetMetal.LegacyAnchors);
                 if (refusal != null) throw new InvalidOperationException(refusal);
                 progress.Start(features.Count, opt.VerifySteps);
-                var capture = new FeatureCapture(source, _math, regionSpaces, sheetMetal: sheetMetal, wasFlattened: session == null ? null : (Func<string, bool>)session.WasFlattened);
+                var capture = new FeatureCapture(source, _math, regionSpaces, sheetMetal: sheetMetal, wasFlattened: session == null ? null : (Func<string, bool>)session.WasFlattened,
+                    sw: _sw);
                 List<FeatureRecord>? captured = capture.CaptureAll(features, f => progress.Show(RunSteps.Capture, f.Name), progress.CancelAfterStep);
                 if (captured == null) return CancelledBeforeBuild(report, RunSteps.Capture);
                 records = captured;
@@ -215,7 +217,8 @@ namespace Spiegelwerk.Build
             }
             foreach (PartOfFeatureRecord part in records.OfType<PartOfFeatureRecord>()) ctx.PartOwners[part.Name] = part.Owner;
             foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) ctx.PointSketches.Add(pattern.SketchName);
-            // The sketches of sketched bends and jogs go on the mirrored faces they were drawn on (K7).
+            foreach (FormToolRecord tool in records.OfType<FormToolRecord>()) ctx.PointSketches.Add(tool.PositionSketchName);
+            // The sketches of sketched bends, jogs and forming tools go on the mirrored faces they were drawn on (K7).
             ctx.NoteSupportFaces(records);
             // The copies' flat patterns (and ProcessBends of legacy Insert Bends, with the copies of what came back with them) get
             // the state of their originals (flattened or folded) – once, also after an unexpected error.

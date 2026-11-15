@@ -96,13 +96,15 @@ namespace Spiegelwerk.Sw
         /// slot (its type name is not confirmed, B64: every top-level feature that is no sketch, datum,
         /// folder or listed sheet-metal type is asked). Tab and slot also stands on plain solid bodies
         /// (weldment plates): a part without sheet metal gets the tree too if it has one – then it holds
-        /// only the top-level features and the tab-and-slot facts, so its slot is found there as well.
+        /// only the top-level features and the tab-and-slot facts, so its slot is found there as well. A forming tool
+        /// asks for the tree too: its sketches come into being with it (S9).
         /// </summary>
         public static SheetMetalTree Tree(ModelDoc2 doc)
         {
             var tabAndSlots = new HashSet<string>(SwDoc.TopLevelFeatures(doc).Where(f => MayBeTabAndSlot(f) && IsTabAndSlot(f)).Select(f => f.Name),
                 StringComparer.Ordinal);
-            if (tabAndSlots.Count == 0 && !HasSheetMetal(doc)) return SheetMetalTree.Empty;
+            if (tabAndSlots.Count == 0 && !HasSheetMetal(doc) && !SwDoc.TopLevelFeatures(doc).Any(f => f.GetTypeName2() == SwFormTool.TypeName))
+                return SheetMetalTree.Empty;
             var top = new List<TreeFeature>();
             var facts = new Dictionary<string, FlatPatternFacts>(StringComparer.Ordinal);
             var flanges = new Dictionary<string, EdgeFlangeFacts>(StringComparer.Ordinal);

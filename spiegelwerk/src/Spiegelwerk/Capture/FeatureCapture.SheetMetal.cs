@@ -19,6 +19,7 @@ namespace Spiegelwerk.Capture
     /// S5: closed and break corner, unfold and fold, cross break, corner relief (<c>FeatureCapture.SheetMetalCorners.cs</c>).
     /// S6: normal cut and legacy Insert Bends (<c>FeatureCapture.SheetMetalLegacy.cs</c>).
     /// S8: tab and slot (by its data, its name is not confirmed) and the gusset (<c>FeatureCapture.TabSlotGusset.cs</c>).
+    /// S9: forming tools, by their type name (<c>FeatureCapture.FormTool.cs</c>).
     /// </summary>
     internal sealed partial class FeatureCapture
     {
@@ -65,10 +66,12 @@ namespace Spiegelwerk.Capture
 
         /// <summary>
         /// Readers by type name, for types whose definition may be null or does not tell: the SheetMetal of legacy
-        /// Insert Bends (by the tree – its data are those of any SheetMetal).
+        /// Insert Bends (by the tree – its data are those of any SheetMetal), a forming tool (no data before 2025 SP2, A4 P15).
         /// </summary>
         private FeatureRecord? SheetMetalByType(Feature f, string type) =>
-            type == "SheetMetal" && _sheetMetal.IsLegacyAnchor(f.Name) ? CaptureLegacyBends(f, type) : null;
+            type == "SheetMetal" && _sheetMetal.IsLegacyAnchor(f.Name) ? CaptureLegacyBends(f, type)
+            : type == SwFormTool.TypeName ? CaptureFormTool(f, type)
+            : null;
 
         /// <summary>Readers by definition (switch on the data interface).</summary>
         private FeatureRecord? SheetMetalByDefinition(Feature f, string type, object? def) => def switch

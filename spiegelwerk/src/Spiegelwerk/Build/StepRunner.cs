@@ -71,6 +71,7 @@ namespace Spiegelwerk.Build
             new LegacyBendsBuilder(),
             new TabAndSlotBuilder(),
             new SheetMetalGussetBuilder(),
+            new FormToolBuilder(),
         };
 
         /// <summary>

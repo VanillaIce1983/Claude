@@ -69,7 +69,6 @@ namespace Spiegelwerk.Core.Tests
         [Theory]
         [InlineData("SheetMetal")]
         [InlineData("SketchBend")]
-        [InlineData("FormToolInstance")]
         [InlineData("Rip")]
         public void Sheet_metal_features_get_one_clear_message(string type)
         {
@@ -93,6 +92,7 @@ namespace Spiegelwerk.Core.Tests
         [InlineData("FlattenBends")]
         [InlineData("ProcessBends")]
         [InlineData("SMGusset")]
+        [InlineData("FormToolInstance")]
         public void Rebuilt_sheet_metal_types_are_reported_as_unreadable_not_as_unsupported(string type)
         {
             // Reached only if the definition does not answer as its reader expects.
@@ -104,7 +104,9 @@ namespace Spiegelwerk.Core.Tests
         {
             // The first of them carries the body: nothing after it could be built.
             Assert.True(UnsupportedFeatures.RefusesRun("SheetMetal"));
-            Assert.True(UnsupportedFeatures.RefusesRun("FormToolInstance"));
+            Assert.True(UnsupportedFeatures.RefusesRun("Rip"));
+            // Decided by blech-plan S9: forming tools are rebuilt.
+            Assert.False(UnsupportedFeatures.RefusesRun("FormToolInstance"));
             // Decided by blech-plan S8: the gusset is rebuilt.
             Assert.False(UnsupportedFeatures.RefusesRun("SMGusset"));
             // Decided by blech-plan S6: the normal cut is rebuilt.

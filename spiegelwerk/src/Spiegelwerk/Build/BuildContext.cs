@@ -182,18 +182,19 @@ namespace Spiegelwerk.Build
 
         /// <summary>
         /// Original names of sketches in which every sketch point is an instance – reference
-        /// sketches of sketch driven patterns: a stand-in there must not be a point of its own.
+        /// sketches of sketch driven patterns, position sketches of forming tools: a stand-in there
+        /// must not be a point of its own.
         /// </summary>
         public HashSet<string> PointSketches { get; } = new HashSet<string>(StringComparer.Ordinal);
 
         /// <summary>
         /// Original sketch name → the face it was drawn on (unmirrored, state right after the sketch;
         /// blech-plan K7): <see cref="SketchBuilder.Build"/> opens the copy on the mirrored face where
-        /// it is found. Filled from the records of sketched bends and jogs (<see cref="NoteSupportFaces"/>).
+        /// it is found. Filled from the records of sketched bends, jogs and forming tools (<see cref="NoteSupportFaces"/>).
         /// </summary>
         public Dictionary<string, FaceSignature> SketchSupportFaces { get; } = new Dictionary<string, FaceSignature>(StringComparer.Ordinal);
 
-        /// <summary>The support faces of the sketches that sketched bends and jogs are made from.</summary>
+        /// <summary>The support faces of the sketches that sketched bends and jogs are made from, and of a forming tool's position sketch (its placement face).</summary>
         public void NoteSupportFaces(IEnumerable<FeatureRecord> records)
         {
             foreach (FeatureRecord r in records)
@@ -204,6 +205,9 @@ namespace Spiegelwerk.Build
                         break;
                     case JogRecord j when j.SketchFace != null:
                         SketchSupportFaces[j.SketchName] = j.SketchFace;
+                        break;
+                    case FormToolRecord t when t.Face?.Face != null:
+                        SketchSupportFaces[t.PositionSketchName] = t.Face.Face;
                         break;
                 }
         }

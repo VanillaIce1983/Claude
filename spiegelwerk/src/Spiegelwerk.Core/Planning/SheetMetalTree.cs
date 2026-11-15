@@ -83,7 +83,9 @@ namespace Spiegelwerk.Core.Planning
     ///    ProcessBends belong to it. A flat pattern of such a body belongs to that SheetMetal;
     ///  - the slot feature of a tab and slot (S8, B64) belongs to it: the first feature after the tab in tree
     ///    order that is its child and answers the same data, has its type or „Slot“ in its type – or whose name
-    ///    is the tab's with another word (<see cref="TabSlotRules.IsSlotName"/>).
+    ///    is the tab's with another word (<see cref="TabSlotRules.IsSlotName"/>);
+    ///  - the sketches of a forming tool (S9) belong to it: the first is its position sketch, the second its
+    ///    orientation sketch (A4 P10); the new tool brings its own.
     /// Template folders are system features: never collected, their flat patterns listed before them.
     /// </summary>
     public sealed class SheetMetalTree
@@ -141,6 +143,11 @@ namespace Spiegelwerk.Core.Planning
                     tree._owners[sub.Name] = (hem.Name, PartOwnerKind.Hem);
 
             if (tabAndSlots != null && tabAndSlots.Count > 0) tree.FindSlots(all, tabAndSlots);
+
+            // A forming tool's sketches (S9): position and orientation; the new tool brings its own, the position sketch is written into it.
+            foreach (TreeFeature tool in all.Where(f => f.Type == "FormToolInstance"))
+                foreach (TreeFeature sub in tool.SubFeatures.Where(s => IsSketchType(s.Type)))
+                    tree._owners[sub.Name] = (tool.Name, PartOwnerKind.FormTool);
 
             // A cross break's sketch holds its break lines (B48): the new cross break brings its own, the lines are written into it.
             foreach (TreeFeature cross in all.Where(f => f.Type == "CrossBreak"))
@@ -327,7 +334,7 @@ namespace Spiegelwerk.Core.Planning
             (ownerType == "TemplateFlatPattern" && subType == "FlatPattern") ||
             ownerType == "FlatPattern";
 
-        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem; profiles → edge flange; break lines → cross break; FlattenBends and ProcessBends → their legacy SheetMetal; the slot feature → its tab and slot).</summary>
+        /// <summary>Part name → its owner and the owner's kind (SheetMetal → base flange; flat-pattern sketches and own corners → flat pattern; width sketches → hem; profiles → edge flange; break lines → cross break; FlattenBends and ProcessBends → their legacy SheetMetal; the slot feature → its tab and slot; position and orientation sketch → their forming tool).</summary>
         public IReadOnlyDictionary<string, (string owner, PartOwnerKind kind)> Owners => _owners;
 
         /// <summary>Flat pattern → the base flange of its body (or its legacy SheetMetal).</summary>
