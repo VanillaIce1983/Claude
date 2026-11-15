@@ -594,6 +594,28 @@ namespace Spiegelwerk.Core.Planning
         public static bool HasOwnValues(BendValues? v) => v != null && (!v.UseDefaultRadius || (!v.UseDefaultAllowance && v.Allowance != null));
 
         /// <summary>
+        /// The FlattenBends and ProcessBends of legacy Insert Bends the copy makes (<see cref="SheetMetalTree.LegacyParts"/>).
+        /// One still suppressed once the session folded the part – it bent back every ProcessBends suppressed on its own – is
+        /// switched off with a parent (FlattenBends suppressed, ProcessBends with it as its child): the original shows the
+        /// SheetMetal alone, and so does the copy (InsertBends2 without flattening: (null, null)); the collector reports both
+        /// as suppressed.
+        /// </summary>
+        public static (string? flatten, string? process) LegacyPartsInRun((string? flatten, string? process) parts, Func<string, bool> suppressed) =>
+            (parts.flatten != null && suppressed(parts.flatten)) || (parts.process != null && suppressed(parts.process)) ? (null, null) : parts;
+
+        /// <summary>
+        /// What bending a ProcessBends back with its dependents brought back (S6): suppressed before, not after, in the order
+        /// of <paramref name="suppressedBefore"/> – not the features the session folds itself (<paramref name="foldFeatures"/>:
+        /// flat patterns, ProcessBends). In the original they are its children and are suppressed with it again at the end;
+        /// their copies sit on planes, not on its bent faces, so the copy's ProcessBends does not take them along.
+        /// </summary>
+        public static List<string> BroughtBack(IEnumerable<string> suppressedBefore, IEnumerable<string> suppressedAfter, ICollection<string> foldFeatures)
+        {
+            var after = new HashSet<string>(suppressedAfter, StringComparer.Ordinal);
+            return suppressedBefore.Where(n => !after.Contains(n) && !foldFeatures.Contains(n)).Distinct(StringComparer.Ordinal).ToList();
+        }
+
+        /// <summary>
         /// Features between a legacy SheetMetal and its ProcessBends (<see cref="SheetMetalTree.BetweenLegacyBends"/>):
         /// made while flattened, bent with ProcessBends – the copy cannot put anything between its bends features.
         /// </summary>

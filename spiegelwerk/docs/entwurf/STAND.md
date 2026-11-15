@@ -233,6 +233,15 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   Gruppen beim Namen (`NormalCutRules.ReadBackFailure`; die geschlossene Ecke ebenso). Die Information zur nachträglich gesetzten Biegezugabe
   nennt die gesetzte, bei einem späteren Körper mit Platzhalter wegen der Standardwerte des Ziels beide (`LegacyTargetAllowanceLater`).
   STOLPERSTEINE 237, 239, 240, Prüftabelle (B51, abgewickelt alter Art), Testteil S6.
+- Blech S6 nachgeprüft, Befunde behoben (Commit „Blech S6: Befunde aus der Nachprüfung behoben“): Was ein `ProcessBends` beim
+  Zurückbiegen mit seinen abhängigen Features zurückbrachte, merkt sich die Sitzung (`SheetMetalRules.BroughtBack`) und unterdrückt die
+  Kopien davon nach dem Abwickeln der Kopie einzeln – sie liegen auf Ebenen und sind keine Kinder des kopierten `ProcessBends`, das
+  Unterdrücken nahm sie dort nicht mit. Die `ProcessBends` werden vor den Abwicklungen zurückgebogen, die Abwicklungen danach nach ihrem
+  dann gültigen Zustand gefaltet (eine gefaltete kam womöglich mit zurück und hätte das Teil für den Lauf abgewickelt). Als Elternteile
+  eines `ProcessBends` zählen nur `FlattenBends` und `SheetMetal` (eine mitgenannte Skizze ist mit ihm unterdrückt). Ist `FlattenBends`
+  unterdrückt, `SheetMetal` aber nicht, kommt der Datensatz ohne die Biegungs-Features aus (`SheetMetalRules.LegacyPartsInRun`): Die Kopie
+  bekommt wie das Original nur das `SheetMetal` (`InsertBends2` ohne „abwickeln“), statt gebogen zu entstehen. Tests in `LegacyBendsTests`;
+  STOLPERSTEINE 239, Prüftabelle (B52, abgewickelt alter Art), Testteil S6, README, ARCHITEKTUR.
 
 ## In Arbeit
 

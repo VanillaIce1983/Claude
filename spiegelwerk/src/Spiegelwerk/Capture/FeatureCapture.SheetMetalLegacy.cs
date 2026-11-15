@@ -61,15 +61,18 @@ namespace Spiegelwerk.Capture
         /// Legacy Insert Bends, anchored on its SheetMetal (<see cref="SheetMetalTree.IsLegacyAnchor"/>): the
         /// SheetMetal's parameters with its fixed reference, the part's defaults, FlattenBends and ProcessBends with
         /// what they have of their own, their dimensions, and whether the part was flattened (ProcessBends
-        /// suppressed) before the run. The fixed face: the SheetMetal's fixed reference, else the one of
-        /// FlattenBends, else – one sheet-metal body only – the one of the part's defaults. Not rebuilt: features the
-        /// original got between the bends features while flattened.
+        /// suppressed) before the run – without them if they are switched off with the FlattenBends
+        /// (<see cref="SheetMetalRules.LegacyPartsInRun"/>). The fixed face: the SheetMetal's fixed reference, else the
+        /// one of FlattenBends, else – one sheet-metal body only – the one of the part's defaults. Not rebuilt: features
+        /// the original got between the bends features while flattened.
         /// </summary>
         private LegacyBendsRecord CaptureLegacyBends(Feature f, string type)
         {
             IReadOnlyList<string> between = _sheetMetal.BetweenLegacyBends(f.Name);
             if (between.Count > 0) throw new NotSupportedException(SheetMetalRules.LegacyBetween(between));
-            var (flattenName, processName) = _sheetMetal.LegacyParts(f.Name);
+            // FlattenBends suppressed (ProcessBends with it): Insert Bends switched off past the SheetMetal – the copy gets the SheetMetal alone.
+            var (flattenName, processName) = SheetMetalRules.LegacyPartsInRun(_sheetMetal.LegacyParts(f.Name),
+                name => SwDoc.FeatureByName(_doc, name) is Feature part && SwSheetMetal.IsSuppressed(part));
             var r = new LegacyBendsRecord(f.Name, type) { FlattenBendsName = flattenName, ProcessBendsName = processName };
             r.Body = SwSheetMetal.ReadParameters(_doc, f, true, FaceOrEdgeRef);
             r.FixedFace = r.Body.FixedReference;

@@ -216,12 +216,12 @@ namespace Spiegelwerk.Build
             foreach (SketchPatternRecord pattern in records.OfType<SketchPatternRecord>()) ctx.PointSketches.Add(pattern.SketchName);
             // The sketches of sketched bends and jogs go on the mirrored faces they were drawn on (K7).
             ctx.NoteSupportFaces(records);
-            // The copies' flat patterns (and ProcessBends of legacy Insert Bends) get the state of their originals (flattened or
-            // folded) – once, also after an unexpected error.
+            // The copies' flat patterns (and ProcessBends of legacy Insert Bends, with the copies of what came back with them) get
+            // the state of their originals (flattened or folded) – once, also after an unexpected error.
             List<string> FlatStates() => session == null ? new List<string>()
                 : session.ApplyTo(target, records.OfType<FlatPatternRecord>().Select(fp => fp.Name)
                     .Concat(records.OfType<LegacyBendsRecord>().Where(l => l.ProcessBendsName != null).Select(l => l.ProcessBendsName!))
-                    .Where(ctx.Created.ContainsKey).Select(name => (name, ctx.Created[name])).ToList());
+                    .Where(ctx.Created.ContainsKey).Select(name => (name, ctx.Created[name])).ToList(), name => ctx.Counterparts(name, false));
             report.General.Add($"Spiegelebene: {ReportText.Plane(req.MirrorPlane)}");
             // New part: only the part's material is copied. Same part: a body of its own gets the part's material.
             if (opt.Target == MirrorTarget.NewPart ? opt.CopyMaterial : separateBody) NoteBodyMaterials(source, selectedBodyNames, req.Features.Count > 0 ? features : null, report);

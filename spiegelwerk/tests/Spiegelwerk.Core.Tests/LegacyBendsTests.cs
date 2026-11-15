@@ -188,6 +188,42 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Bends_switched_off_with_their_flatten_bends_leave_the_copy_the_sheet_metal_alone()
+        {
+            var parts = ((string?)"Flatten-Bends1", (string?)"Process-Bends1");
+            // Both active (the session bent a flattened one back): the copy makes all three.
+            Assert.Equal(parts, SheetMetalRules.LegacyPartsInRun(parts, _ => false));
+            // FlattenBends suppressed, ProcessBends with it – still so after folding: switched off, not flattened.
+            var off = new HashSet<string> { "Flatten-Bends1", "Process-Bends1" };
+            Assert.Equal(((string?)null, (string?)null), SheetMetalRules.LegacyPartsInRun(parts, off.Contains));
+            Assert.Equal(((string?)null, (string?)null), SheetMetalRules.LegacyPartsInRun(parts, n => n == "Flatten-Bends1"));
+            Assert.Equal(((string?)null, (string?)null), SheetMetalRules.LegacyPartsInRun(parts, n => n == "Process-Bends1"));
+            Assert.Equal(((string?)null, (string?)null), SheetMetalRules.LegacyPartsInRun((null, null), _ => true));
+
+            // Then InsertBends2 without flattening: measured after the SheetMetal, described without the bends.
+            var (flatten, process) = SheetMetalRules.LegacyPartsInRun(parts, off.Contains);
+            var r = new LegacyBendsRecord("Sheet-Metal1", "SheetMetal") { FlattenBendsName = flatten, ProcessBendsName = process };
+            r.Body.BendRadius = 0.001;
+            r.Body.BendAllowance = new BendAllowanceData { Kind = BendAllowanceKind.KFactor, KFactor = 0.44 };
+            Assert.Equal("Sheet-Metal1", r.MeasureUntil);
+            Assert.Equal("Biegungen eingefügt, Radius 1 mm, K 0,44", SheetMetalRules.DescribeLegacy(r, De));
+        }
+
+        [Fact]
+        public void Bending_back_with_dependents_brings_back_what_left_suppression()
+        {
+            var folds = new HashSet<string> { "Flat-Pattern1", "Process-Bends1" };
+            List<string> back = SheetMetalRules.BroughtBack(
+                new[] { "Sketch5", "Cut-Extrude1", "Flat-Pattern1", "Process-Bends1", "Fillet3", "Sketch9", "Cut-Extrude2" },
+                new[] { "Fillet3" },
+                folds);
+            // In creation order; what stays suppressed (suppressed by the user on its own) and what the session folds itself left out.
+            Assert.Equal(new[] { "Sketch5", "Cut-Extrude1", "Sketch9", "Cut-Extrude2" }, back);
+            Assert.Empty(SheetMetalRules.BroughtBack(new[] { "Process-Bends1" }, new string[0], folds));
+            Assert.Empty(SheetMetalRules.BroughtBack(new[] { "Cut-Extrude1" }, new[] { "Cut-Extrude1" }, folds));
+        }
+
+        [Fact]
         public void Texts()
         {
             var r = new LegacyBendsRecord("Sheet-Metal1", "SheetMetal") { FlattenBendsName = "F", ProcessBendsName = "P" };

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolidWorks.Interop.sldworks;
+using Spiegelwerk.Core.Planning;
 
 namespace Spiegelwerk.Sw
 {
@@ -15,6 +16,8 @@ namespace Spiegelwerk.Sw
     /// happens. The copies get the recorded state at the end of the build; in the same part
     /// (S1b) both, the originals and their copies, end in the state the originals had: the
     /// originals are flattened after their copies, so the copies are checked again afterwards.
+    /// What a ProcessBends brought back is suppressed with it again in the original (its children);
+    /// their copies sit on planes, not on the copy's bent faces, so the copy suppresses them itself.
     /// </summary>
     internal sealed class SheetMetalSession
     {
@@ -25,6 +28,9 @@ namespace Spiegelwerk.Sw
 
         /// <summary>Same part: the copies <see cref="ApplyTo"/> flattened, by name – checked again once the originals are flattened.</summary>
         private readonly List<string> _flattenedCopies = new List<string>();
+
+        /// <summary>ProcessBends name → the features bending it back with its dependents brought back (<see cref="SheetMetalRules.BroughtBack"/>).</summary>
+        private readonly Dictionary<string, List<string>> _broughtBack = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
         private bool _restored;
         private bool _applied;
@@ -40,8 +46,23 @@ namespace Spiegelwerk.Sw
         /// <summary>The features that hold the flattened state: flat patterns (top level and folders) and the ProcessBends of legacy Insert Bends.</summary>
         private static List<Feature> FoldFeatures(ModelDoc2 doc) => SwSheetMetal.OfType(doc, "FlatPattern").Concat(SwSheetMetal.OfType(doc, "ProcessBends")).ToList();
 
+        private static bool IsLegacy(Feature f) => f.GetTypeName2() == "ProcessBends";
+
         /// <summary>„Abwicklung „X““ or, legacy, „„X“ (Biegungen einfügen)“.</summary>
-        private static string Label(Feature f) => f.GetTypeName2() == "ProcessBends" ? $"„{f.Name}“ (Biegungen einfügen)" : $"Abwicklung „{f.Name}“";
+        private static string Label(Feature f) => IsLegacy(f) ? $"„{f.Name}“ (Biegungen einfügen)" : $"Abwicklung „{f.Name}“";
+
+        /// <summary>The names of every suppressed feature, in creation order; null if the tree does not read (then nothing is recorded).</summary>
+        private List<string>? SuppressedNames()
+        {
+            try
+            {
+                return SwDoc.FeaturesInCreationOrder(_doc).Where(SwSheetMetal.IsSuppressed).Select(f => f.Name).ToList();
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
 
         /// <summary>
         /// Folds every flattened flat pattern and legacy part. Returns why the run cannot go on (the state is put
@@ -51,11 +72,22 @@ namespace Spiegelwerk.Sw
         {
             List<Feature> folds = FoldFeatures(_doc);
             foreach (Feature f in folds) _flattened[f.Name] = SwSheetMetal.IsFlattened(_doc, f);
-            foreach (Feature f in folds.Where(f => _flattened[f.Name]))
+            var foldNames = new HashSet<string>(folds.Select(f => f.Name), StringComparer.Ordinal);
+            // ProcessBends first: bent back with its dependents, it may bring back a folded flat pattern of its body (its child).
+            // The flat patterns are judged after that, by their state then (lazily) – recorded as they were at the start, so
+            // Restore leaves such a one to the ProcessBends that takes it along again.
+            IEnumerable<Feature> order = folds.Where(f => IsLegacy(f) && _flattened[f.Name])
+                .Concat(folds.Where(f => !IsLegacy(f) && SwSheetMetal.IsFlattened(_doc, f)));
+            foreach (Feature f in order)
             {
-                if (SwSheetMetal.SetFlattened(_doc, f, false)) continue;
+                List<string>? before = IsLegacy(f) ? SuppressedNames() : null;
+                if (SwSheetMetal.SetFlattened(_doc, f, false))
+                {
+                    if (before != null && SuppressedNames() is List<string> after) _broughtBack[f.Name] = SheetMetalRules.BroughtBack(before, after, foldNames);
+                    continue;
+                }
                 List<string> lost = Restore();
-                lost.Insert(0, f.GetTypeName2() == "ProcessBends"
+                lost.Insert(0, IsLegacy(f)
                     ? $"„{f.Name}“ (Biegungen einfügen) ließ sich für den Lauf nicht zurückbiegen. Es wurde nichts gespiegelt."
                     : $"Die Abwicklung „{f.Name}“ ließ sich für den Lauf nicht zurückfalten. Es wurde nichts gespiegelt.");
                 return string.Join(" ", lost);
@@ -93,11 +125,13 @@ namespace Spiegelwerk.Sw
         /// <summary>
         /// The copies of the flat patterns get the state of their originals (flattened or folded):
         /// at the end of the build, or – the build stopped on an unexpected error – where it stopped.
-        /// In the same part the originals follow with <see cref="Restore"/>, so both end as they
-        /// were; the copies flattened here are checked again there. Returns report lines for what
-        /// could not be set; runs once.
+        /// A copy's ProcessBends flattened, the copies of what its original brought back
+        /// (<paramref name="copiesOf"/>: original name → its copies) are suppressed too – in the copy
+        /// they are no children of it. In the same part the originals follow with <see cref="Restore"/>,
+        /// so both end as they were; the copies flattened here are checked again there. Returns
+        /// report lines for what could not be set; runs once.
         /// </summary>
-        public List<string> ApplyTo(ModelDoc2 target, IEnumerable<(string original, Feature copy)> copies)
+        public List<string> ApplyTo(ModelDoc2 target, IEnumerable<(string original, Feature copy)> copies, Func<string, List<Feature>> copiesOf)
         {
             var lines = new List<string>();
             if (_applied) return lines;
@@ -106,9 +140,16 @@ namespace Spiegelwerk.Sw
             {
                 if (!WasFlattened(original)) continue;
                 if (!SwSheetMetal.SetFlattened(target, copy, true))
+                {
                     lines.Add($"{Label(copy)} ließ sich in der Kopie nicht abwickeln wie im Original.");
-                else if (ReferenceEquals(target, _doc))
-                    _flattenedCopies.Add(copy.Name);
+                    continue;
+                }
+                if (ReferenceEquals(target, _doc)) _flattenedCopies.Add(copy.Name);
+                if (!_broughtBack.TryGetValue(original, out List<string> back)) continue;
+                // Parents first: a child suppressed with its parent is already in the state wanted (SetSuppressed returns at once).
+                foreach (Feature dependent in back.SelectMany(copiesOf))
+                    if (!SwSheetMetal.SetSuppressed(target, dependent, true))
+                        lines.Add($"„{dependent.Name}“ ließ sich in der Kopie nicht mit {Label(copy)} unterdrücken wie im Original – bitte von Hand unterdrücken.");
             }
             return lines;
         }
