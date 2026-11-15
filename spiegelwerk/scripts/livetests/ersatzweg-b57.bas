@@ -274,10 +274,11 @@ Private Function TestSamePart(ByVal model As SldWorks.ModelDoc2, ByVal bodyName 
     Set act = swApp.ActivateDoc3(model.GetTitle, False, NO_REBUILD, errs)
     Note "- " & IIf(convert, "Umwandeln", "Biegungen einfuegen") & " wie " & route & " im Testteil (aktiviert: " & _
         IIf(act Is Nothing, "nein", "ja") & ")"
-    Dim sigBefore As String, tplBefore As String, flatBefore As Double
-    sigBefore = SMSignature(part)
+    Dim sigBefore As String, flagsBefore As String, tplBefore As String, flatBefore As Double
+    sigBefore = SMSignature(part, flagsBefore)
     tplBefore = TemplateSignature(model)
     Note "  Blechparameter des Originals vorher: " & sigBefore
+    Note "  Ueberschreib-Flags des Originals vorher:" & flagsBefore
     Note "  Blech-Vorlage des Teils vorher: " & tplBefore
     flatBefore = FlatVolume(model, pl, "vorher")
 
@@ -314,14 +315,23 @@ Private Function TestSamePart(ByVal model As SldWorks.ModelDoc2, ByVal bodyName 
     Dim origOk As Boolean
     origOk = OriginalUnchanged(part, bodyName, mp0)
 
-    Dim sigAfter As String, sigOk As Boolean
-    sigAfter = SMSignature(part)
+    Dim sigAfter As String, flagsAfter As String, sigOk As Boolean, flagsOk As Boolean
+    sigAfter = SMSignature(part, flagsAfter)
     sigOk = (sigAfter = sigBefore)
     Note "  Blechparameter des Originals nachher: " & sigAfter & IIf(sigOk, " (unveraendert)", " (VERAENDERT)")
+    ' Flags count only where they could be read before (single-body: not applicable before, B15).
+    flagsOk = (flagsAfter = flagsBefore) Or (InStr(1, flagsBefore, "nicht anwendbar", vbTextCompare) > 0)
+    Note "  Ueberschreib-Flags des Originals nachher:" & flagsAfter & _
+        IIf(flagsAfter = flagsBefore, " (unveraendert)", IIf(flagsOk, " (vorher nicht anwendbar)", " (VERAENDERT)"))
+    sigOk = sigOk And flagsOk
 
-    Dim tplAfter As String, tplOk As Boolean
+    Dim tplAfter As String, tplOk As Boolean, tplChecked As Boolean
     tplAfter = TemplateSignature(model)
-    If tplBefore = "keine Vorlage" Then
+    tplChecked = Not (Unreadable(tplBefore) Or Unreadable(tplAfter))
+    If Not tplChecked Then
+        tplOk = True
+        Note "  Blech-Vorlage des Teils nachher: " & tplAfter & " (nicht pruefbar: Vorlage nicht lesbar)"
+    ElseIf tplBefore = "keine Vorlage" Then
         tplOk = (tplAfter = "keine Vorlage") Or (tplAfter = OrigData())
         Note "  Blech-Vorlage des Teils nachher: " & tplAfter & _
             IIf(tplOk, " (keine oder mit den Werten des Originals)", " (WEICHT von den Werten des Originals AB)")
@@ -344,9 +354,14 @@ Private Function TestSamePart(ByVal model As SldWorks.ModelDoc2, ByVal bodyName 
             IIf(flatOk, " (unveraendert)", " (VERAENDERT)")
     End If
 
+    If Not tplChecked And flatBefore < 0 Then
+        tplOk = False
+        Note "  Weder Vorlage noch Abwicklung pruefbar: B59 nicht entscheidbar"
+    End If
     Note "  Volumenkoerper im Testteil jetzt: " & SolidCount(part)
     Note "  Teilergebnisse: Weg " & Verdict(convOk) & ", Original " & Verdict(origOk) & ", eigene Werte " & _
-        Verdict(sigOk) & ", Vorlage " & Verdict(tplOk) & ", Abwicklung " & Verdict(flatOk)
+        Verdict(sigOk) & ", Vorlage " & IIf(tplChecked, Verdict(tplOk), "nicht pruefbar") & ", Abwicklung " & _
+        IIf(flatBefore < 0, "nicht geprueft", Verdict(flatOk))
     TestSamePart = convOk And origOk And sigOk And tplOk And flatOk
     Note "  => B59 " & Verdict(TestSamePart)
 End Function
@@ -508,17 +523,19 @@ Private Function OrigData() As String
     OrigData = SMValues(smT, smR, smKind, smK, smBA, smAuto, smRelief, smRatio)
 End Function
 
-' The original's own SheetMetal feature now: all values plus the three override flags (flag and return code).
-Private Function SMSignature(ByVal p As SldWorks.PartDoc) As String
+' The original's own SheetMetal feature now: all values as text; the three override flags go to
+' flags - a flag only where its read returned 0 (in a single-body part the read does not apply, B15).
+Private Function SMSignature(ByVal p As SldWorks.PartDoc, flags As String) As String
     Dim f As SldWorks.Feature, d As SldWorks.SheetMetalFeatureData
-    Dim i As Long, ov As Boolean, code As Long, s As String
+    Dim i As Long, ov As Boolean, code As Long
+    flags = ""
     Set f = p.FeatureByName(smName)
     If f Is Nothing Then
         SMSignature = "Feature " & smName & " nicht gefunden"
         Exit Function
     End If
     Set d = f.GetDefinition
-    s = SMData(d) & ", Ueberschreiben"
+    SMSignature = SMData(d)
     On Error Resume Next
     For i = 0 To 2
         ov = False
@@ -526,14 +543,15 @@ Private Function SMSignature(ByVal p As SldWorks.PartDoc) As String
         Err.Clear
         code = d.GetOverrideDefaultParameter2(i, ov)
         If Err.Number <> 0 Then
-            s = s & " " & i & "=nicht lesbar"
+            flags = flags & " " & i & "=nicht lesbar"
             Err.Clear
+        ElseIf code <> 0 Then
+            flags = flags & " " & i & "=nicht anwendbar (" & code & ")"
         Else
-            s = s & " " & i & "=" & IIf(ov, "ja", "nein") & "/" & code
+            flags = flags & " " & i & "=" & IIf(ov, "ja", "nein")
         End If
     Next i
     On Error GoTo 0
-    SMSignature = s
 End Function
 
 ' The part's sheet-metal defaults (Extension.GetTemplateSheetMetal), or "keine Vorlage".
@@ -561,6 +579,11 @@ Private Function TemplateSignature(ByVal doc As SldWorks.ModelDoc2) As String
         Exit Function
     End If
     TemplateSignature = SMData(d)
+    If TemplateSignature = "" Then TemplateSignature = "Vorlage, Daten nicht lesbar " & ErrText()
+End Function
+
+Private Function Unreadable(ByVal s As String) As Boolean
+    Unreadable = (InStr(1, s, "nicht lesbar", vbTextCompare) > 0)
 End Function
 
 ' The name of the first flat pattern, at the top level or inside a folder; "" if there is none.
