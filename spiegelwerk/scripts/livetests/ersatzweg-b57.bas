@@ -10,8 +10,9 @@ Attribute VB_Name = "Modul_B57"
 '      B1/B2: Biegungen einfuegen (PartDoc.InsertBends2) mit denselben Flaechen.
 '      Erwartet: Blechkoerper, Biegungen erkannt, Geometrie unveraendert.
 '      Jeder Versuch laeuft in einem eigenen neuen Teil.
-' B59: Dasselbe Umwandeln im Testteil neben dem Original: bleiben das Original
-'      und seine Blechparameter unveraendert?
+' B59: Derselbe Weg (Umwandeln, sonst Biegungen einfuegen) im Testteil neben
+'      dem Original: bleiben das Original, seine Blechparameter, die
+'      Blech-Vorlage des Teils und die Abwicklung des Originals unveraendert?
 '
 ' Ablauf:
 '  1. Testteil oeffnen: ein Blechteil mit runden Biegungen, gefaltet,
@@ -60,7 +61,7 @@ Private mathUtil As SldWorks.MathUtility
 Private logPath As String
 
 ' Sheet-metal values of the original (its first SheetMetal feature).
-Private smName As String
+Private smName As String, smFlatName As String
 Private smT As Double, smR As Double, smK As Double, smBA As Double
 Private smKind As Long, smRelief As Long, smRatio As Double, smAuto As Boolean
 
@@ -123,6 +124,8 @@ Sub Spiegelwerk_Test_B57()
         GoTo Done
     End If
     Note "Blechparameter des Originals (" & smName & "): " & SMText()
+    smFlatName = FindFlatName(model)
+    Note "Abwicklung des Originals: " & IIf(smFlatName = "", "keine gefunden", smFlatName)
     NoteOriginalBends model
 
     Dim mp0 As Variant
@@ -165,16 +168,22 @@ Sub Spiegelwerk_Test_B57()
 
     ' ---- B59 ---------------------------------------------------------------
     Note ""
-    Note "=== B59: Umwandeln im Testteil neben dem Original ==="
+    Note "=== B59: Derselbe Weg im Testteil neben dem Original ==="
     Dim s59 As Boolean, ran59 As Boolean
     If a1 Then
         ran59 = True
-        s59 = TestSamePart(model, bodyName, obl, fixM, mp0, "A1")
+        s59 = TestSamePart(model, bodyName, obl, fixM, mp0, "A1", True)
     ElseIf a2 Then
         ran59 = True
-        s59 = TestSamePart(model, bodyName, obl, oppM, mp0, "A2")
+        s59 = TestSamePart(model, bodyName, obl, oppM, mp0, "A2", True)
+    ElseIf b1 Then
+        ran59 = True
+        s59 = TestSamePart(model, bodyName, obl, fixM, mp0, "B1", False)
+    ElseIf b2 Then
+        ran59 = True
+        s59 = TestSamePart(model, bodyName, obl, oppM, mp0, "B2", False)
     Else
-        Note "uebersprungen: weder A1 noch A2 bestanden"
+        Note "uebersprungen: keiner der Wege A1, A2, B1, B2 bestanden"
     End If
 
     Note ""
@@ -184,9 +193,9 @@ Sub Spiegelwerk_Test_B57()
     Note "B57 B1 Biegungen einfuegen, gew. Flaeche:  " & Verdict(b1)
     Note "B57 B2 Biegungen einfuegen, Gegenflaeche:  " & Verdict(b2)
     If ran59 Then
-        Note "B59 Umwandeln im selben Teil:              " & Verdict(s59)
+        Note "B59 derselbe Weg im selben Teil:           " & Verdict(s59)
     Else
-        Note "B59 Umwandeln im selben Teil:              nicht gelaufen"
+        Note "B59 derselbe Weg im selben Teil:           nicht gelaufen"
     End If
     GoTo Done
 
@@ -253,18 +262,24 @@ Private Function TestRoute(ByVal label As String, ByVal convert As Boolean, ByVa
     TestRoute = ConvertAndCheck(doc, nb, convert, fixM)
 End Function
 
-' B59: the same convert in the test part, next to the original.
+' B59: the same route (convert or Insert Bends) in the test part, next to the original. Checks the
+' original's body, its own sheet-metal values with the override flags, the part's sheet-metal
+' template and the original's flat blank before and after.
 Private Function TestSamePart(ByVal model As SldWorks.ModelDoc2, ByVal bodyName As String, pl As MPlane, _
-        ByVal fixM As Variant, ByVal mp0 As Variant, ByVal route As String) As Boolean
+        ByVal fixM As Variant, ByVal mp0 As Variant, ByVal route As String, ByVal convert As Boolean) As Boolean
     Dim part As SldWorks.PartDoc
     Set part = model
     Dim errs As Long
     Dim act As Object
     Set act = swApp.ActivateDoc3(model.GetTitle, False, NO_REBUILD, errs)
-    Note "- Umwandeln wie " & route & " im Testteil (aktiviert: " & IIf(act Is Nothing, "nein", "ja") & ")"
-    Dim sigBefore As String
+    Note "- " & IIf(convert, "Umwandeln", "Biegungen einfuegen") & " wie " & route & " im Testteil (aktiviert: " & _
+        IIf(act Is Nothing, "nein", "ja") & ")"
+    Dim sigBefore As String, tplBefore As String, flatBefore As Double
     sigBefore = SMSignature(part)
+    tplBefore = TemplateSignature(model)
     Note "  Blechparameter des Originals vorher: " & sigBefore
+    Note "  Blech-Vorlage des Teils vorher: " & tplBefore
+    flatBefore = FlatVolume(model, pl, "vorher")
 
     Dim src As SldWorks.Body2
     Set src = FindSolid(part, bodyName)
@@ -295,14 +310,44 @@ Private Function TestSamePart(ByVal model As SldWorks.ModelDoc2, ByVal bodyName 
     End If
 
     Dim convOk As Boolean
-    convOk = ConvertAndCheck(model, nb, True, fixM)
+    convOk = ConvertAndCheck(model, nb, convert, fixM)
     Dim origOk As Boolean
     origOk = OriginalUnchanged(part, bodyName, mp0)
-    Dim sigAfter As String
+
+    Dim sigAfter As String, sigOk As Boolean
     sigAfter = SMSignature(part)
-    Note "  Blechparameter des Originals nachher: " & sigAfter & IIf(sigAfter = sigBefore, " (unveraendert)", " (VERAENDERT)")
+    sigOk = (sigAfter = sigBefore)
+    Note "  Blechparameter des Originals nachher: " & sigAfter & IIf(sigOk, " (unveraendert)", " (VERAENDERT)")
+
+    Dim tplAfter As String, tplOk As Boolean
+    tplAfter = TemplateSignature(model)
+    If tplBefore = "keine Vorlage" Then
+        tplOk = (tplAfter = "keine Vorlage") Or (tplAfter = OrigData())
+        Note "  Blech-Vorlage des Teils nachher: " & tplAfter & _
+            IIf(tplOk, " (keine oder mit den Werten des Originals)", " (WEICHT von den Werten des Originals AB)")
+    Else
+        tplOk = (tplAfter = tplBefore)
+        Note "  Blech-Vorlage des Teils nachher: " & tplAfter & IIf(tplOk, " (unveraendert)", " (VERAENDERT)")
+    End If
+
+    Dim flatAfter As Double, flatOk As Boolean
+    flatAfter = FlatVolume(model, pl, "nachher")
+    If flatBefore < 0 Then
+        flatOk = True
+        Note "  Abwicklung des Originals: nicht geprueft"
+    ElseIf flatAfter < 0 Then
+        flatOk = False
+        Note "  Abwicklung des Originals: nachher nicht messbar"
+    Else
+        flatOk = (Abs(flatAfter - flatBefore) / flatBefore <= TOL_REL)
+        Note "  Abwicklung des Originals: Volumen vorher " & Vol(flatBefore) & ", nachher " & Vol(flatAfter) & _
+            IIf(flatOk, " (unveraendert)", " (VERAENDERT)")
+    End If
+
     Note "  Volumenkoerper im Testteil jetzt: " & SolidCount(part)
-    TestSamePart = convOk And origOk And (sigAfter = sigBefore)
+    Note "  Teilergebnisse: Weg " & Verdict(convOk) & ", Original " & Verdict(origOk) & ", eigene Werte " & _
+        Verdict(sigOk) & ", Vorlage " & Verdict(tplOk) & ", Abwicklung " & Verdict(flatOk)
+    TestSamePart = convOk And origOk And sigOk And tplOk And flatOk
     Note "  => B59 " & Verdict(TestSamePart)
 End Function
 
@@ -445,17 +490,144 @@ Private Function SMText() As String
         ", Entlastungsart " & smRelief & ", Verhaeltnis " & Format(smRatio, "0.0000")
 End Function
 
-' Thickness, radius, K-factor and allowance kind of the original's SheetMetal feature, as text.
+' One text for a set of sheet-metal values, so two sets compare as text.
+Private Function SMValues(ByVal th As Double, ByVal rad As Double, ByVal kind As Long, ByVal kf As Double, _
+        ByVal ba As Double, ByVal autoRel As Boolean, ByVal relief As Long, ByVal ratio As Double) As String
+    SMValues = "Dicke " & Mm(th) & ", Radius " & Mm(rad) & ", Biegezugabe-Art " & kind & ", K-Faktor " & _
+        Format(kf, "0.0000") & ", Biegezugabe " & Mm(ba) & ", automatische Entlastung " & IIf(autoRel, "ja", "nein") & _
+        ", Entlastungsart " & relief & ", Verhaeltnis " & Format(ratio, "0.0000")
+End Function
+
+Private Function SMData(ByVal d As SldWorks.SheetMetalFeatureData) As String
+    SMData = SMValues(d.Thickness, d.BendRadius, d.BendAllowanceType, d.KFactor, d.BendAllowance, d.UseAutoRelief, _
+        d.AutoReliefType, d.ReliefRatio)
+End Function
+
+' The original's values as read at the start, in the same form.
+Private Function OrigData() As String
+    OrigData = SMValues(smT, smR, smKind, smK, smBA, smAuto, smRelief, smRatio)
+End Function
+
+' The original's own SheetMetal feature now: all values plus the three override flags (flag and return code).
 Private Function SMSignature(ByVal p As SldWorks.PartDoc) As String
     Dim f As SldWorks.Feature, d As SldWorks.SheetMetalFeatureData
+    Dim i As Long, ov As Boolean, code As Long, s As String
     Set f = p.FeatureByName(smName)
     If f Is Nothing Then
         SMSignature = "Feature " & smName & " nicht gefunden"
         Exit Function
     End If
     Set d = f.GetDefinition
-    SMSignature = "Dicke " & Mm(d.Thickness) & ", Radius " & Mm(d.BendRadius) & ", K-Faktor " & _
-        Format(d.KFactor, "0.0000") & ", Biegezugabe-Art " & d.BendAllowanceType
+    s = SMData(d) & ", Ueberschreiben"
+    On Error Resume Next
+    For i = 0 To 2
+        ov = False
+        code = 0
+        Err.Clear
+        code = d.GetOverrideDefaultParameter2(i, ov)
+        If Err.Number <> 0 Then
+            s = s & " " & i & "=nicht lesbar"
+            Err.Clear
+        Else
+            s = s & " " & i & "=" & IIf(ov, "ja", "nein") & "/" & code
+        End If
+    Next i
+    On Error GoTo 0
+    SMSignature = s
+End Function
+
+' The part's sheet-metal defaults (Extension.GetTemplateSheetMetal), or "keine Vorlage".
+Private Function TemplateSignature(ByVal doc As SldWorks.ModelDoc2) As String
+    Dim t As Object, tf As SldWorks.Feature, d As SldWorks.SheetMetalFeatureData
+    On Error Resume Next
+    Err.Clear
+    Set t = doc.Extension.GetTemplateSheetMetal
+    If Err.Number <> 0 Then
+        TemplateSignature = "nicht lesbar " & ErrText()
+        Exit Function
+    End If
+    If t Is Nothing Then
+        TemplateSignature = "keine Vorlage"
+        Exit Function
+    End If
+    Set tf = t
+    Set d = tf.GetDefinition
+    If Err.Number <> 0 Then
+        TemplateSignature = "Vorlage, Daten nicht lesbar " & ErrText()
+        Exit Function
+    End If
+    If d Is Nothing Then
+        TemplateSignature = "Vorlage, Daten nicht lesbar"
+        Exit Function
+    End If
+    TemplateSignature = SMData(d)
+End Function
+
+' The name of the first flat pattern, at the top level or inside a folder; "" if there is none.
+Private Function FindFlatName(ByVal doc As SldWorks.ModelDoc2) As String
+    Dim f As SldWorks.Feature, sf As SldWorks.Feature
+    Set f = doc.FirstFeature
+    Do While Not f Is Nothing
+        If f.GetTypeName2 = "FlatPattern" Then
+            FindFlatName = f.Name
+            Exit Function
+        End If
+        Set sf = f.GetFirstSubFeature
+        Do While Not sf Is Nothing
+            If sf.GetTypeName2 = "FlatPattern" Then
+                FindFlatName = sf.Name
+                Exit Function
+            End If
+            Set sf = sf.GetNextSubFeature
+        Loop
+        Set f = f.GetNextFeature
+    Loop
+End Function
+
+' Flattens the original's flat pattern, adds up the solids on the original's side of pl (the
+' mirrored copy lies on the other side), folds again. -1 if it cannot be measured.
+Private Function FlatVolume(ByVal doc As SldWorks.ModelDoc2, pl As MPlane, ByVal label As String) As Double
+    Dim p As SldWorks.PartDoc, f As SldWorks.Feature, ok As Boolean, code As Long, warn As Boolean
+    Dim v As Variant, i As Long, b As SldWorks.Body2, m As Variant, vsum As Double, n As Long, e As String
+    FlatVolume = -1#
+    If smFlatName = "" Then
+        Note "  Abwicklung des Originals " & label & ": keine Abwicklung gefunden"
+        Exit Function
+    End If
+    Set p = doc
+    Set f = p.FeatureByName(smFlatName)
+    If f Is Nothing Then
+        Note "  Abwicklung des Originals " & label & ": " & smFlatName & " nicht gefunden"
+        Exit Function
+    End If
+    Note "  Abwicklung des Originals " & label & " messen ..."
+    On Error Resume Next
+    Err.Clear
+    ok = f.SetSuppression2(UNSUPPRESS, THIS_CONFIG, Empty)
+    doc.EditRebuild3
+    code = f.GetErrorCode2(warn)
+    v = p.GetBodies2(SOLID_BODY, False)
+    If Not IsEmpty(v) Then
+        For i = LBound(v) To UBound(v)
+            Set b = v(i)
+            m = b.GetMassProperties(1#)
+            If Not IsEmpty(m) Then
+                If pl.nx * m(0) + pl.ny * m(1) + pl.nz * m(2) > pl.d Then
+                    vsum = vsum + m(3)
+                    n = n + 1
+                End If
+            End If
+        Next i
+    End If
+    If Err.Number <> 0 Then e = ErrText()
+    f.SetSuppression2 SUPPRESS, THIS_CONFIG, Empty
+    doc.EditRebuild3
+    Err.Clear
+    On Error GoTo 0
+    Note "  Abwicklung des Originals " & label & ": entdrueckt " & IIf(ok, "ja", "nein") & ", Fehlercode " & code & _
+        ", " & n & " Koerper auf der Seite des Originals, Volumen " & Vol(vsum) & IIf(e <> "", " " & e, "") & _
+        ", wieder gefaltet"
+    If ok And n > 0 And code = 0 Then FlatVolume = vsum
 End Function
 
 Private Function ReliefKind() As Long
@@ -502,12 +674,25 @@ End Function
 
 ' ---- Features -----------------------------------------------------------------
 
+' Folders a multibody sheet-metal part keeps its SheetMetal and FlatPattern features in.
+Private Function IsSMFolder(ByVal typ As String) As Boolean
+    IsSMFolder = (typ = "TemplateSheetMetal") Or (typ = "TemplateFlatPattern")
+End Function
+
+' Names of the top-level features and of the features inside the sheet-metal folders.
 Private Function FeatureNames(ByVal doc As SldWorks.ModelDoc2) As Collection
-    Dim col As New Collection, f As SldWorks.Feature
+    Dim col As New Collection, f As SldWorks.Feature, sf As SldWorks.Feature
     Set f = doc.FirstFeature
     On Error Resume Next
     Do While Not f Is Nothing
         col.Add f.Name, f.Name
+        If IsSMFolder(f.GetTypeName2) Then
+            Set sf = f.GetFirstSubFeature
+            Do While Not sf Is Nothing
+                col.Add sf.Name, sf.Name
+                Set sf = sf.GetNextSubFeature
+            Loop
+        End If
         Set f = f.GetNextFeature
     Loop
     Err.Clear
@@ -515,23 +700,32 @@ Private Function FeatureNames(ByVal doc As SldWorks.ModelDoc2) As Collection
 End Function
 
 Private Function AnyNew(ByVal doc As SldWorks.ModelDoc2, ByVal before As Collection) As Boolean
-    Dim f As SldWorks.Feature
+    Dim f As SldWorks.Feature, sf As SldWorks.Feature
     Set f = doc.FirstFeature
     Do While Not f Is Nothing
         If Not HasKey(before, f.Name) Then
             AnyNew = True
             Exit Function
         End If
+        If IsSMFolder(f.GetTypeName2) Then
+            Set sf = f.GetFirstSubFeature
+            Do While Not sf Is Nothing
+                If Not HasKey(before, sf.Name) Then
+                    AnyNew = True
+                    Exit Function
+                End If
+                Set sf = sf.GetNextSubFeature
+            Loop
+        End If
         Set f = f.GetNextFeature
     Loop
 End Function
 
-' Logs every new top-level feature with its sub-features; bends = largest number of
-' sub-features with "Bend" in their type under one feature.
+' Logs every new feature (top level and inside the sheet-metal folders) with its sub-features;
+' bends = largest number of sub-features with "Bend" in their type under one feature.
 Private Sub NoteNewFeatures(ByVal doc As SldWorks.ModelDoc2, ByVal before As Collection, bends As Long, _
         sheet As Boolean, flat As SldWorks.Feature)
-    Dim f As SldWorks.Feature, typ As String, n As Long, tally As String, found As Boolean
-    Dim code As Long, warn As Boolean
+    Dim f As SldWorks.Feature, sf As SldWorks.Feature, found As Boolean
     bends = 0
     sheet = False
     Set flat = Nothing
@@ -539,17 +733,43 @@ Private Sub NoteNewFeatures(ByVal doc As SldWorks.ModelDoc2, ByVal before As Col
     Do While Not f Is Nothing
         If Not HasKey(before, f.Name) Then
             found = True
-            typ = f.GetTypeName2
-            tally = SubTally(f, n)
-            If n > bends Then bends = n
-            If typ = "SolidToSheetMetal" Or typ = "SheetMetal" Then sheet = True
-            If typ = "FlatPattern" Then Set flat = f
-            code = f.GetErrorCode2(warn)
-            Note "  neu: " & f.Name & " (" & typ & ")" & IIf(code <> 0, ", Fehlercode " & code, "") & tally
+            NoteOneNew f, "", bends, sheet, flat
+        End If
+        If IsSMFolder(f.GetTypeName2) Then
+            Set sf = f.GetFirstSubFeature
+            Do While Not sf Is Nothing
+                If Not HasKey(before, sf.Name) Then
+                    found = True
+                    NoteOneNew sf, " im Ordner " & f.Name, bends, sheet, flat
+                End If
+                Set sf = sf.GetNextSubFeature
+            Loop
         End If
         Set f = f.GetNextFeature
     Loop
     If Not found Then Note "  Keine neuen Features"
+End Sub
+
+Private Sub NoteOneNew(ByVal f As SldWorks.Feature, ByVal where As String, bends As Long, sheet As Boolean, _
+        flat As SldWorks.Feature)
+    Dim typ As String, n As Long, tally As String, code As Long, warn As Boolean
+    Dim d As SldWorks.SheetMetalFeatureData, vals As String
+    typ = f.GetTypeName2
+    tally = SubTally(f, n)
+    If n > bends Then bends = n
+    If typ = "SolidToSheetMetal" Or typ = "SheetMetal" Then sheet = True
+    If typ = "FlatPattern" And flat Is Nothing Then Set flat = f
+    code = f.GetErrorCode2(warn)
+    Note "  neu: " & f.Name & " (" & typ & ")" & where & IIf(code <> 0, ", Fehlercode " & code, "") & tally
+    If typ = "SheetMetal" Then
+        On Error Resume Next
+        Err.Clear
+        Set d = f.GetDefinition
+        If Err.Number = 0 And Not d Is Nothing Then vals = SMData(d)
+        If Err.Number <> 0 Then vals = "nicht lesbar " & ErrText()
+        On Error GoTo 0
+        Note "    Werte des neuen Blech-Features: " & vals
+    End If
 End Sub
 
 Private Function SubTally(ByVal f As SldWorks.Feature, n As Long) As String
