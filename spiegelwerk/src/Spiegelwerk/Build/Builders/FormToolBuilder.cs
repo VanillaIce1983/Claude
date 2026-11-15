@@ -17,7 +17,8 @@ namespace Spiegelwerk.Build.Builders
     ///  1. the position sketch is written on the mirrored placement face (never a plane; separate body: on a mirrored
     ///     body) and selected at mark 0 for InsertFormToolFeature, which puts an instance at each point and absorbs it
     ///     (B67); where that does not place it, the face is picked at the first point and the position sketch the tool
-    ///     brings is written afterwards (variant A, as for holes);
+    ///     brings is written afterwards (variant A, as for holes) – not for a turned copy once the sketch placed the tool:
+    ///     only the angle differs then, and that sense counts as not placed (B68);
     ///  2. the probe – angle 0, flip off, the default configuration – is measured: the side its form stands on against the
     ///     original's (else flip on), then the rotation ψ about each insertion axis that puts the mirrored samples of the
     ///     original on its faces (first guesses from the orientation sketches);
@@ -83,6 +84,9 @@ namespace Spiegelwerk.Build.Builders
 
             /// <summary>The position sketch is selected for the call (B67); false once only the face placed the tool.</summary>
             private bool _bySketch = true;
+
+            /// <summary>The selected position sketch placed the tool at least once (B67).</summary>
+            private bool _sketchPlaced;
 
             /// <summary>SOLIDWORKS placed the tool at least once.</summary>
             private bool _inserted;
@@ -316,8 +320,8 @@ namespace Spiegelwerk.Build.Builders
 
             /// <summary>
             /// One tool: on the position sketch written on the face (B67), else – the sketch not placing it, or the face taking no
-            /// sketch – on the face, its own position sketch written afterwards (variant A); from then on always so. Null if
-            /// neither places it (what was made is removed).
+            /// sketch – on the face, its own position sketch written afterwards (variant A); from then on always so. Not so for a
+            /// turned tool once the sketch placed it: null then, as when neither places it (what was made is removed).
             /// </summary>
             private Feature? Place(string configuration, bool flip, double angle)
             {
@@ -327,9 +331,13 @@ namespace Spiegelwerk.Build.Builders
                     if (onSketch != null)
                     {
                         _inserted = true;
+                        _sketchPlaced = true;
                         return onSketch;
                     }
                     if (!Remove()) return null;
+                    // The sketch placed the probe, only the angle differs: turned the wrong way the form runs over the face's edge
+                    // (B68). The face, placing one instance, would hide that and say nothing about the sketch (B67).
+                    if (_sketchPlaced && angle != 0) return null;
                 }
                 Feature? onFace = PlaceOnFace(configuration, flip, angle);
                 if (onFace == null)
@@ -428,7 +436,7 @@ namespace Spiegelwerk.Build.Builders
                 if (d.Flip) result.Info.Add(FormToolPlacement.Flipped);
                 if (d.Configuration.Length > 0) result.Info.Add(FormToolPlacement.Configuration(d.Configuration));
                 if (FormToolPlacement.Link(_r) is string link) result.Info.Add(link);
-                if (_r.Source == ToolSource.LibrarySearch) result.Info.Add(FormToolPlacement.FoundInLibrary(_r.ToolPath));
+                if (FormToolPlacement.Library(_r) is string library) result.Info.Add(library);
                 if (FormToolPlacement.Display(_r) is string display) result.Info.Add(display);
                 result.Info.AddRange(_info);
                 result.Info.AddRange(_tried);

@@ -404,17 +404,28 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>Info: the copy is linked to the tool file as the original is.</summary>
         public static string Linked(string path) => $"Mit der Werkzeugdatei „{path}“ verknüpft wie das Original (externer Bezug).";
 
-        /// <summary>Info: the copy is linked because the original names the tool file as a reference – its link is not readable (B70).</summary>
-        public static string LinkedInferred(string path) =>
-            $"Mit der Werkzeugdatei „{path}“ verknüpft (externer Bezug), weil das Original sie als Bezug nennt – ob das Original verknüpft ist, lässt sich vor SOLIDWORKS 2025 SP2 nicht lesen.";
+        /// <summary>
+        /// Info: the copy is linked because the original names the tool file as a reference – its link is not readable (B70).
+        /// <paramref name="named"/>: the file the original names where that is gone and <paramref name="path"/> was found in the
+        /// design library instead (<see cref="Moved"/>).
+        /// </summary>
+        public static string LinkedInferred(string path, string? named = null) =>
+            $"Mit der Werkzeugdatei „{path}“ verknüpft (externer Bezug), weil das Original {(named == null ? "sie" : $"seine Werkzeugdatei „{named}“")} als Bezug nennt – ob das Original verknüpft ist, lässt sich vor SOLIDWORKS 2025 SP2 nicht lesen.";
 
         /// <summary>The link info for the copy; null if it is not linked.</summary>
         public static string? Link(FormToolRecord r) =>
-            !r.LinkToTool ? null : r.LinkInferred ? LinkedInferred(r.ToolPath) : Linked(r.ToolPath);
+            !r.LinkToTool ? null : r.LinkInferred ? LinkedInferred(r.ToolPath, r.NamedToolPath) : Linked(r.ToolPath);
 
         /// <summary>Info: the file was found in the design library by the feature's name, not read from the original.</summary>
         public static string FoundInLibrary(string path) =>
             $"Werkzeugdatei über die Konstruktionsbibliothek gefunden („{path}“); das Original nennt sie nicht als Bezug. Die Lageprüfung hat die Form bestätigt.";
+
+        /// <summary>
+        /// The library info for the copy: <see cref="FoundInLibrary"/> where the original names no tool file; null otherwise –
+        /// where the file it names is gone, the capture note <see cref="Moved"/> says where the one used comes from.
+        /// </summary>
+        public static string? Library(FormToolRecord r) =>
+            r.Source == ToolSource.LibrarySearch && r.NamedToolPath == null ? FoundInLibrary(r.ToolPath) : null;
 
         /// <summary>Capture note: the referenced file is gone, one of the same name was found in the design library.</summary>
         public static string Moved(string referenced, string found) =>

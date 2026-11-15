@@ -95,6 +95,7 @@ namespace Spiegelwerk.Capture
                 string found = SwFormTool.SearchLibrary(_sw, names) ?? throw new NotSupportedException(FormToolPlacement.ToolNotFound);
                 r.ToolPath = found;
                 r.Source = ToolSource.LibrarySearch;
+                r.NamedToolPath = named;
                 if (named != null) r.Notes.Add(FormToolPlacement.Moved(named, found));
             }
             r.LinkToTool = link ?? referenced != null;

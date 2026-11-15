@@ -353,6 +353,12 @@ namespace Spiegelwerk.Core.Records
 
         public ToolSource Source { get; set; }
 
+        /// <summary>
+        /// The tool file the original names (as a reference, else in its data) when that file is not there and
+        /// <see cref="ToolPath"/> was found in the design library instead (<see cref="ToolSource.LibrarySearch"/>); null otherwise.
+        /// </summary>
+        public string? NamedToolPath { get; set; }
+
         /// <summary>The rotation angle of the original (late-bound, 2025 SP2 and later; radians assumed, B69); null: not readable.</summary>
         public double? RotationAngle { get; set; }
 

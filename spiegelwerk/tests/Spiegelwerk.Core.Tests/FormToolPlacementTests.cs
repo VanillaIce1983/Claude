@@ -384,6 +384,30 @@ namespace Spiegelwerk.Core.Tests
             r.LinkInferred = true;
             Assert.Equal(@"Mit der Werkzeugdatei „C:\lib\louver.sldftp“ verknüpft (externer Bezug), weil das Original sie als Bezug nennt – " +
                          "ob das Original verknüpft ist, lässt sich vor SOLIDWORKS 2025 SP2 nicht lesen.", FormToolPlacement.Link(r));
+            // The file it names is gone, one of the same name was found in the library: the original names that one, not this.
+            r.ToolPath = @"D:\lib\louver.sldftp";
+            r.Source = ToolSource.LibrarySearch;
+            r.NamedToolPath = @"C:\old\louver.sldftp";
+            Assert.Equal(@"Mit der Werkzeugdatei „D:\lib\louver.sldftp“ verknüpft (externer Bezug), weil das Original seine Werkzeugdatei " +
+                         @"„C:\old\louver.sldftp“ als Bezug nennt – ob das Original verknüpft ist, lässt sich vor SOLIDWORKS 2025 SP2 nicht lesen.",
+                         FormToolPlacement.Link(r));
+        }
+
+        [Fact]
+        public void Library_info_only_where_the_original_names_no_file()
+        {
+            var r = new FormToolRecord("louver1", "FormToolInstance", "Skizze3", new SketchModel()) { ToolPath = @"D:\lib\louver.sldftp" };
+            // Named by the original.
+            r.Source = ToolSource.ExternalReference;
+            Assert.Null(FormToolPlacement.Library(r));
+            r.Source = ToolSource.LateBound;
+            Assert.Null(FormToolPlacement.Library(r));
+            // Found by the feature's name: the original names no file.
+            r.Source = ToolSource.LibrarySearch;
+            Assert.Equal(FormToolPlacement.FoundInLibrary(@"D:\lib\louver.sldftp"), FormToolPlacement.Library(r));
+            // The file it names is gone: the capture note (Moved) says where this one comes from, not "nennt sie nicht als Bezug".
+            r.NamedToolPath = @"C:\old\louver.sldftp";
+            Assert.Null(FormToolPlacement.Library(r));
         }
 
         [Fact]
