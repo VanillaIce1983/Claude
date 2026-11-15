@@ -269,6 +269,17 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   danach gesetzt. Ein Referenzpunkt-Feature als Bezugspunkt wird nicht übertragen. `FormToolInstance` bleibt „noch nicht“ (der Plan: ein nicht
   unterstütztes Blatt wie ab S7a) – S7a fehlt noch. Spiegel-Features mit Lasche und Schlitz in der Saat werden wie andere Blech-Saaten abgelehnt.
   Keine Tore (§5.2); nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+  Was S7a für diese Typen noch ergänzen muss (bis dahin gilt die Ablehnung aus S0–S6; S8 erfindet keine Auslöser): `SMGusset` bleibt
+  „nachgebaut“ – die Typtabelle von S7a (Plan §3.0/§3.9: „nicht unterstützt“, Blatt) gilt für die Rippe nicht mehr. Eine Rippe, die sich nicht
+  erfassen lässt (eigenes Profil, B66; ein Referenzpunkt-Feature als Bezugspunkt; nicht lesbar), ist heute ein gewöhnlicher Eintrag
+  „fehlgeschlagen“; mit S7a wird sie bei eingeschaltetem Ersatzweg ein Auslöser (`TriggersFallback` ist für sie schon wahr). Eine Rippe, die erst
+  beim Aufbau scheitert, ist Sache von S7b (Neustart); ob eine Rippe, deren Lage keine Variante trifft (heute: die nächste mit Hinweis), dann den
+  Ersatzweg auslösen soll, entscheidet S7a. Lasche und Schlitz: Der Planer braucht die Körpergeschichten aller Körper (A4 P2) – Lasche und Schlitz
+  verbindet stets zwei Körper; ein Körper, in dessen Geschichte bis zum Schnappschuss sie mit einem anderen geteilt ist, bekommt keinen Plan;
+  deckt ein Plan die Lasche, deckt er auch ihren Schlitz (`SheetMetalTree.SlotOf`, ein `CoveredByFallbackRecord` für beide). Ein nicht erkannter
+  Schlitz mit denselben Gruppen löst nichts aus (`TriggersFallback` falsch); ein Lasche und Schlitz, das sich nicht erfassen lässt (externe
+  Bezüge, nicht lesbar), ist ohne bestätigten Namen ein allgemeiner Eintrag und löst nach K17 aus. `FormToolInstance` (falls S9 nicht vorher
+  kommt) und `Rip` setzt S7a auf „nicht unterstützt“ (Blatt, Auslöser); die Träger bleiben abgelehnt, solange der Schalter aus ist.
 
 ## In Arbeit
 
