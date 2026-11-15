@@ -22,7 +22,8 @@ namespace Spiegelwerk.Build.Builders
     ///     original's (else flip on), then the rotation ψ about each insertion axis that puts the mirrored samples of the
     ///     original on its faces (first guesses from the orientation sketches);
     ///  3. placed again turned by ψ – in place where the 2025 data answer, otherwise made anew – in the rotation sense
-    ///     found earlier in the run, else + then −, and checked once more: every sample within 10 µm.
+    ///     found earlier in the run, else + then −, and checked once more: every sample within 10 µm. A turn in place that
+    ///     fits in neither sense is made anew (B69); a sense SOLIDWORKS does not place leaves the other its try.
     /// A tool that fits no rotation is tried with the other configurations of its file (A4 P11); none fits: „Werkzeug
     /// passt nicht“. Everything a failed attempt made is removed before the next.
     /// </summary>
@@ -235,16 +236,43 @@ namespace Spiegelwerk.Build.Builders
 
             /// <summary>
             /// The probe turned by ψ: as it is if it fits already; otherwise in the rotation sense found earlier in the run first,
-            /// in place where the 2025 data answer, else made anew – the first that fits is kept and its sense remembered.
+            /// in place where the 2025 data answer, else made anew – the first that fits is kept and its sense remembered. A turn
+            /// in place that fits in neither sense is tried once more made anew (B69: unit and effect of RotationAngle are not
+            /// confirmed – the 2019 path); fits that, the run turns no tool in place any more.
             /// </summary>
             private Done? Turn(Feature probe, string configuration, bool flip, double psi)
             {
                 if (Fits(probe, out double _)) return new Done(probe, _positionSketch, configuration, flip, 0);
-                Feature current = probe;
-                foreach (int sense in FormToolPlacement.Senses(_ctx.Shared.FormToolSense))
+                List<int>? turnedInPlace = _ctx.Shared.FormToolNoInPlace ? null : new List<int>();
+                Done? done = TurnSenses(probe, FormToolPlacement.Senses(_ctx.Shared.FormToolSense), configuration, flip, psi, turnedInPlace);
+                if (done != null || _left != null || turnedInPlace == null || turnedInPlace.Count == 0) return done;
+                // Everything is removed: the senses SOLIDWORKS turned in place, placed anew.
+                done = TurnSenses(null, turnedInPlace, configuration, flip, psi, null);
+                if (done != null)
+                {
+                    _ctx.Shared.FormToolNoInPlace = true;
+                    _info.Add(FormToolPlacement.TurnedAnew);
+                }
+                return done;
+            }
+
+            /// <summary>
+            /// The senses in their order: <paramref name="current"/> turned in place where <paramref name="turnedInPlace"/> is
+            /// given (it collects the senses whose turn in place was checked), else made anew. A sense whose copy SOLIDWORKS does
+            /// not place leaves the other its try. Null if none fits (everything removed).
+            /// </summary>
+            private Done? TurnSenses(Feature? current, IEnumerable<int> senses, string configuration, bool flip, double psi, List<int>? turnedInPlace)
+            {
+                foreach (int sense in senses)
                 {
                     double angle = FormToolPlacement.FinalAngle(0, psi, sense);
-                    Feature? turned = SwFormTool.TryRotate(_doc, current, angle) ? FlangeSupport.Live(_doc, current) : null;
+                    Feature? turned = null;
+                    if (turnedInPlace != null && current != null && SwFormTool.TryRotate(_doc, current, angle))
+                    {
+                        turned = FlangeSupport.Live(_doc, current);
+                        if (turned != null) turnedInPlace.Add(sense);
+                    }
+                    bool inPlace = turned != null;
                     _ctx.Topology.Invalidate();
                     if (turned == null)
                     {
@@ -253,8 +281,10 @@ namespace Spiegelwerk.Build.Builders
                         if (_left != null) return null;
                         if (turned == null)
                         {
-                            _tried.Add(FormToolPlacement.Tried(configuration, flip, FormToolPlacement.NotInserted));
-                            return null;
+                            // Only the angle differs from the probe: turned the wrong way the form may run over the face's edge (B68).
+                            _tried.Add(FormToolPlacement.Tried(configuration, flip, FormToolPlacement.TurnedNotInserted(angle)));
+                            current = null;
+                            continue;
                         }
                     }
                     if (Fits(turned, out double deviation))
@@ -262,12 +292,16 @@ namespace Spiegelwerk.Build.Builders
                         _ctx.Shared.FormToolSense = sense;
                         return new Done(turned, _positionSketch, configuration, flip, angle);
                     }
-                    _tried.Add(FormToolPlacement.Tried(configuration, flip, FormToolPlacement.Turned(angle, deviation)));
+                    _tried.Add(FormToolPlacement.Tried(configuration, flip, FormToolPlacement.Turned(angle, deviation, inPlace)));
                     current = turned;
                 }
                 Remove();
                 return null;
             }
+
+            /// <summary>The tool on what is selected at mark 0, linked and shown in the flat pattern as the original (where read).</summary>
+            private Feature? Insert(bool flip, double angle, string configuration) =>
+                SwFormTool.Insert(_doc, _r.ToolPath, flip, angle, configuration, _r.LinkToTool, _r.OverrideDisplay == true, _r.ShowPunch, _r.ShowProfile, _r.ShowCenter);
 
             /// <summary>Removes what the attempts made; false (and nothing more is made) if something stays behind.</summary>
             private bool Remove()
@@ -330,7 +364,7 @@ namespace Spiegelwerk.Build.Builders
                 string sketchName = map.Feature.Name;
                 Feature? f = null;
                 SwSelect.Clear(_doc);
-                if (SwSelect.Select(_doc, map.Feature, 0, false)) f = SwFormTool.Insert(_doc, _r.ToolPath, flip, angle, configuration, _r.LinkToTool);
+                if (SwSelect.Select(_doc, map.Feature, 0, false)) f = Insert(flip, angle, configuration);
                 SwSelect.Clear(_doc);
                 _ctx.Topology.Invalidate();
                 f ??= SwSheetMetal.NewOfType(_doc, _before, SwFormTool.TypeName, _ => true);
@@ -348,7 +382,7 @@ namespace Spiegelwerk.Build.Builders
                 Face2? face = FaceNow();
                 if (face == null) return null;
                 Feature? f = null;
-                if (SelectFaceAt(_ctx, face, _centres[0], 0)) f = SwFormTool.Insert(_doc, _r.ToolPath, flip, angle, configuration, _r.LinkToTool);
+                if (SelectFaceAt(_ctx, face, _centres[0], 0)) f = Insert(flip, angle, configuration);
                 SwSelect.Clear(_doc);
                 _ctx.Topology.Invalidate();
                 f ??= SwSheetMetal.NewOfType(_doc, _before, SwFormTool.TypeName, _ => true);
@@ -393,9 +427,9 @@ namespace Spiegelwerk.Build.Builders
                 result.Info.Add(FormToolPlacement.Checked(_samples.Count, _r.Points.Count));
                 if (d.Flip) result.Info.Add(FormToolPlacement.Flipped);
                 if (d.Configuration.Length > 0) result.Info.Add(FormToolPlacement.Configuration(d.Configuration));
-                if (_r.LinkToTool) result.Info.Add(FormToolPlacement.Linked(_r.ToolPath));
+                if (FormToolPlacement.Link(_r) is string link) result.Info.Add(link);
                 if (_r.Source == ToolSource.LibrarySearch) result.Info.Add(FormToolPlacement.FoundInLibrary(_r.ToolPath));
-                result.Info.Add(FormToolPlacement.DisplayDefaults);
+                if (FormToolPlacement.Display(_r) is string display) result.Info.Add(display);
                 result.Info.AddRange(_info);
                 result.Info.AddRange(_tried);
                 return result;

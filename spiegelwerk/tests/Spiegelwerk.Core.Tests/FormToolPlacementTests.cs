@@ -367,6 +367,40 @@ namespace Spiegelwerk.Core.Tests
             Assert.Equal("Konfiguration „Large“, umgekehrt: x", FormToolPlacement.Tried("Large", true, "x"));
             Assert.Equal("Form weicht um 0,02 mm von der gespiegelten ab.", FormToolPlacement.Off(2e-5, De));
             Assert.Equal("Die Positionsskizze der Kopie hat 1 statt 2 Punkte.", FormToolPlacement.CountOff(1, 2));
+            Assert.Equal("um -30° gedreht nicht eingefügt.", FormToolPlacement.TurnedNotInserted(-Math.PI / 6, De));
+            Assert.Equal("um 30° gedreht: Form weicht um 0,02 mm ab.", FormToolPlacement.Turned(Math.PI / 6, 2e-5, culture: De));
+            Assert.Equal("am Feature um 30° gedreht: Form weicht um 0,02 mm ab.", FormToolPlacement.Turned(Math.PI / 6, 2e-5, true, De));
+        }
+
+        [Fact]
+        public void Link_info_says_when_it_is_inferred()
+        {
+            var r = new FormToolRecord("louver1", "FormToolInstance", "Skizze3", new SketchModel()) { ToolPath = @"C:\lib\louver.sldftp" };
+            Assert.Null(FormToolPlacement.Link(r));
+            // Read from the data (2025 SP2 and later).
+            r.LinkToTool = true;
+            Assert.Equal(@"Mit der Werkzeugdatei „C:\lib\louver.sldftp“ verknüpft wie das Original (externer Bezug).", FormToolPlacement.Link(r));
+            // Before 2025 SP2: inferred from the reference (B70) – the report says so.
+            r.LinkInferred = true;
+            Assert.Equal(@"Mit der Werkzeugdatei „C:\lib\louver.sldftp“ verknüpft (externer Bezug), weil das Original sie als Bezug nennt – " +
+                         "ob das Original verknüpft ist, lässt sich vor SOLIDWORKS 2025 SP2 nicht lesen.", FormToolPlacement.Link(r));
+        }
+
+        [Fact]
+        public void Display_info_only_where_the_display_is_not_read_or_overridden()
+        {
+            var r = new FormToolRecord("louver1", "FormToolInstance", "Skizze3", new SketchModel());
+            // Not readable (before 2025 SP2): the document's setting, said as information.
+            Assert.Equal(FormToolPlacement.DisplayDefaults, FormToolPlacement.Display(r));
+            Assert.Contains("vor SOLIDWORKS 2025 SP2 nicht lesbar", FormToolPlacement.DisplayDefaults);
+            // Read, following the document: the copy does the same, nothing to say.
+            r.OverrideDisplay = false;
+            Assert.Null(FormToolPlacement.Display(r));
+            // Read, overridden: the copy gets the same flags.
+            r.OverrideDisplay = true;
+            r.ShowPunch = true;
+            r.ShowCenter = true;
+            Assert.Equal("Anzeige in der Abwicklung wie im Original: Stempel ein, Profil aus, Mittelpunkt ein.", FormToolPlacement.Display(r));
         }
     }
 }

@@ -64,6 +64,17 @@ namespace Spiegelwerk.Sw
             return (string.IsNullOrWhiteSpace(path) ? null : path, configuration, link, angle);
         }
 
+        /// <summary>
+        /// Late-bound (2025 SP2 and later): the flat-pattern display of the tool (OverrideSettings, ShowPunch, ShowProfile,
+        /// ShowCenter); overrideDoc null where the data do not answer.
+        /// </summary>
+        public static (bool? overrideDoc, bool punch, bool profile, bool center) DisplayFromData(object? def)
+        {
+            if (def == null || !(SwLate.Get(def, "OverrideSettings") is bool overrideDoc)) return (null, false, false, false);
+            return (overrideDoc, SwLate.Get(def, "ShowPunch") is bool punch && punch, SwLate.Get(def, "ShowProfile") is bool profile && profile,
+                    SwLate.Get(def, "ShowCenter") is bool center && center);
+        }
+
         /// <summary>Directories looked at in the design library at most (a library on a network drive can be large).</summary>
         private const int MaxDirectories = 5000;
 
@@ -156,13 +167,16 @@ namespace Spiegelwerk.Sw
 
         /// <summary>
         /// Places the tool on what is selected at mark 0 (a sketch with points: one instance at each; a face: one), with the
-        /// document's flat-pattern display; null if SOLIDWORKS makes none or the call throws.
+        /// document's flat-pattern display unless <paramref name="overrideDoc"/> (then punch, profile and centre as given – they
+        /// count only so); null if SOLIDWORKS makes none or the call throws.
         /// </summary>
-        public static Feature? Insert(ModelDoc2 doc, string path, bool flip, double angle, string configuration, bool link)
+        public static Feature? Insert(ModelDoc2 doc, string path, bool flip, double angle, string configuration, bool link,
+                                      bool overrideDoc = false, bool punch = false, bool profile = false, bool center = false)
         {
             try
             {
-                return doc.FeatureManager.InsertFormToolFeature(path, flip, angle, configuration, false, false, false, false, link);
+                return doc.FeatureManager.InsertFormToolFeature(path, flip, angle, configuration, overrideDoc,
+                    overrideDoc && punch, overrideDoc && profile, overrideDoc && center, link);
             }
             catch (Exception)
             {

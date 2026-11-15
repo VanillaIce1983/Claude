@@ -59,6 +59,12 @@ namespace Spiegelwerk.Build
         /// once a forming tool confirmed it; null before (B68). Later tools try it first.
         /// </summary>
         public int? FormToolSense { get; set; }
+
+        /// <summary>
+        /// 2025 SP2 and later: a forming tool turned in place (RotationAngle + ModifyDefinition) fitted in neither sense, placed
+        /// anew it did (B69) – later tools are placed anew straight away.
+        /// </summary>
+        public bool FormToolNoInPlace { get; set; }
     }
 
     /// <summary>

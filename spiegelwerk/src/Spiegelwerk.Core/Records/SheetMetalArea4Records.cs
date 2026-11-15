@@ -330,6 +330,27 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Linked to the tool file (LinkToPart): the copy gets the same external reference.</summary>
         public bool LinkToTool { get; set; }
 
+        /// <summary>
+        /// <see cref="LinkToTool"/> is not read but inferred: before 2025 SP2 the link is not readable, the original naming the
+        /// tool file as a reference counts as linked (B70: whether unlinked tools name it too is open).
+        /// </summary>
+        public bool LinkInferred { get; set; }
+
+        /// <summary>
+        /// The original overrides the document's flat-pattern display (late-bound OverrideSettings, 2025 SP2 and later);
+        /// null: not readable – the copy keeps the document's setting.
+        /// </summary>
+        public bool? OverrideDisplay { get; set; }
+
+        /// <summary>Flat pattern: the tool's cut shown (ShowPunch); counts only with <see cref="OverrideDisplay"/>.</summary>
+        public bool ShowPunch { get; set; }
+
+        /// <summary>Flat pattern: the placement sketch shown (ShowProfile); counts only with <see cref="OverrideDisplay"/>.</summary>
+        public bool ShowProfile { get; set; }
+
+        /// <summary>Flat pattern: the centre mark shown (ShowCenter); counts only with <see cref="OverrideDisplay"/>.</summary>
+        public bool ShowCenter { get; set; }
+
         public ToolSource Source { get; set; }
 
         /// <summary>The rotation angle of the original (late-bound, 2025 SP2 and later; radians assumed, B69); null: not readable.</summary>

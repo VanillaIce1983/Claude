@@ -404,6 +404,14 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>Info: the copy is linked to the tool file as the original is.</summary>
         public static string Linked(string path) => $"Mit der Werkzeugdatei „{path}“ verknüpft wie das Original (externer Bezug).";
 
+        /// <summary>Info: the copy is linked because the original names the tool file as a reference – its link is not readable (B70).</summary>
+        public static string LinkedInferred(string path) =>
+            $"Mit der Werkzeugdatei „{path}“ verknüpft (externer Bezug), weil das Original sie als Bezug nennt – ob das Original verknüpft ist, lässt sich vor SOLIDWORKS 2025 SP2 nicht lesen.";
+
+        /// <summary>The link info for the copy; null if it is not linked.</summary>
+        public static string? Link(FormToolRecord r) =>
+            !r.LinkToTool ? null : r.LinkInferred ? LinkedInferred(r.ToolPath) : Linked(r.ToolPath);
+
         /// <summary>Info: the file was found in the design library by the feature's name, not read from the original.</summary>
         public static string FoundInLibrary(string path) =>
             $"Werkzeugdatei über die Konstruktionsbibliothek gefunden („{path}“); das Original nennt sie nicht als Bezug. Die Lageprüfung hat die Form bestätigt.";
@@ -412,9 +420,21 @@ namespace Spiegelwerk.Core.Planning
         public static string Moved(string referenced, string found) =>
             $"Die Werkzeugdatei „{referenced}“ des Originals ist nicht vorhanden; verwendet wird „{found}“ aus der Konstruktionsbibliothek.";
 
-        /// <summary>Info: the flat-pattern display of the original is not readable before 2025.</summary>
+        /// <summary>Info: the flat-pattern display of the original is not readable before 2025 SP2.</summary>
         public const string DisplayDefaults =
-            "Anzeige in der Abwicklung (Stempel, Profil, Mittelpunkt): Einstellung des Dokuments – die eigene des Originals ist vor SOLIDWORKS 2025 nicht lesbar.";
+            "Anzeige in der Abwicklung (Stempel, Profil, Mittelpunkt): Einstellung des Dokuments – die eigene des Originals ist vor SOLIDWORKS 2025 SP2 nicht lesbar.";
+
+        /// <summary>
+        /// The display info for the copy: <see cref="DisplayDefaults"/> where the original's is not readable, its own setting
+        /// where it overrides the document's; null where it follows the document, as the copy does.
+        /// </summary>
+        public static string? Display(FormToolRecord r) =>
+            r.OverrideDisplay == null ? DisplayDefaults
+            : r.OverrideDisplay == true
+                ? $"Anzeige in der Abwicklung wie im Original: Stempel {OnOff(r.ShowPunch)}, Profil {OnOff(r.ShowProfile)}, Mittelpunkt {OnOff(r.ShowCenter)}."
+                : null;
+
+        private static string OnOff(bool on) => on ? "ein" : "aus";
 
         /// <summary>Info: the selected sketch did not place the tool (B67); it was placed on the face and its sketch written afterwards.</summary>
         public const string SketchWrittenAfter =
@@ -435,12 +455,23 @@ namespace Spiegelwerk.Core.Planning
             $"{(configuration.Length == 0 ? "Standardkonfiguration" : $"Konfiguration „{configuration}“")}, {(flip ? "umgekehrt" : "nicht umgekehrt")}: {why}";
 
         public const string NotInserted = "nicht eingefügt.";
+
+        /// <summary>The copy turned by the angle found was not placed (the wrong sense may run it over the face's edge, B68).</summary>
+        public static string TurnedNotInserted(double angle, IFormatProvider? culture = null) =>
+            $"um {SheetMetalCompare.Deg(angle, culture)} gedreht nicht eingefügt.";
+
+        /// <summary>
+        /// Info (2025 SP2 and later): turned in place the tool fitted in neither sense, placed anew it did (B69) – from then
+        /// on it is placed anew for the rest of the run.
+        /// </summary>
+        public const string TurnedAnew =
+            "Am Feature gedreht passte das Werkzeug nicht, neu eingefügt passte es; für den Rest des Laufs wird jedes Umformwerkzeug zum Drehen neu eingefügt.";
         public const string OtherSide = "Form auf der anderen Seite.";
         public const string NoRotation = "passt in keiner Drehung.";
 
-        /// <summary>The copy turned by the angle found did not fit (the rotation sense, B68).</summary>
-        public static string Turned(double angle, double deviation, IFormatProvider? culture = null) =>
-            $"um {SheetMetalCompare.Deg(angle, culture)} gedreht: Form weicht um {SheetMetalCompare.Mm(deviation, culture)} ab.";
+        /// <summary>The copy turned by the angle found did not fit (the rotation sense, B68) – placed anew, or turned in place (2025 SP2, B69).</summary>
+        public static string Turned(double angle, double deviation, bool inPlace = false, IFormatProvider? culture = null) =>
+            $"{(inPlace ? "am Feature " : "")}um {SheetMetalCompare.Deg(angle, culture)} gedreht: Form weicht um {SheetMetalCompare.Mm(deviation, culture)} ab.";
 
         /// <summary>Info: what the local check confirmed.</summary>
         public static string Checked(int samples, int instances) =>

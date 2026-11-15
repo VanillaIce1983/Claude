@@ -307,9 +307,8 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   Drehung, neu eingesetzt und geprüft; Konfigurationen der Datei; jeder Versuch entfernt), `BuildShared.FormToolSense`, Positionsskizzen als
   Punktskizzen und mit Stützfläche, `CaptureOnItsOwn` mit der Positionsskizze eines Umformwerkzeugs. STOLPERSTEINE 151 und 164 ergänzt,
   246–251 neu, Prüftabelle (B67–B70), Testteil S9.
-  Abweichend vom Plan: Die Anzeige in der Abwicklung wird nicht gelesen (für 2025 ist kein lesendes Mitglied belegt) – die Kopie hat die
-  Einstellung des Dokuments, mit Information; `FormToolRecord` hat dafür keine Felder. Verknüpft ist die Kopie, wie die Daten sagen, sonst wenn das
-  Original das Werkzeug als Bezug nennt (B70 offen, ob auch nicht verknüpfte es tun). Formpunkte sind ein Punkt je Fläche und Anfang, Mitte, Ende
+  Abweichend vom Plan: Verknüpft ist die Kopie, wie die Daten sagen, sonst wenn das Original das Werkzeug als Bezug nennt (B70 offen, ob
+  auch nicht verknüpfte es tun; der Bericht sagt, dass es geschlossen ist). Formpunkte sind ein Punkt je Fläche und Anfang, Mitte, Ende
   ihrer Kanten (der Entwurf: zusätzlich Punkte über `Surface.Evaluate`); gemessen wird je Instanz nur gegen die Flächen nahe ihrem Einfügepunkt.
   Variante B des Entwurfs (Verschieben mit `MoveOrCopy`) entfällt: die gewählte Skizze, sonst Variante A. Die Skizze auf der Fläche geht über den
   gemeinsamen Weg (K7), aber ohne Rückfall auf eine Ebene (`BuildOnFace`). Ab 2025 SP2 wird am Feature gedreht (`RotationAngle` +
@@ -323,20 +322,31 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   gilt nicht mehr). Ein Umformwerkzeug, das sich nicht erfassen lässt (Werkzeugdatei nirgends, Form oder Platzierungsfläche nicht lesbar), ist ein
   gewöhnlicher Eintrag „fehlgeschlagen“ mit `TriggersFallback` (wahr) – mit S7a ein Auslöser auf einem qualifizierten Körper; eines, das erst beim
   Aufbau scheitert („Werkzeug passt nicht“, unsymmetrisches Werkzeug), ist Sache von S7b (Neustart).
+- Blech S9 geprüft, Befunde behoben (Commit „Blech S9: Befunde aus der Prüfung behoben“): Ab 2025 SP2 fiel ein am Feature gedrehtes
+  Werkzeug, das in keinem Drehsinn passte, nie auf das Neueinsetzen zurück (B69: Einheit und Wirkung von `RotationAngle` offen) – jetzt
+  wird es in diesen Drehsinnen neu eingesetzt, und passt es so, dreht der Lauf kein Werkzeug mehr am Feature
+  (`BuildShared.FormToolNoInPlace`, Information `TurnedAnew`; die Versuche am Feature heißen „am Feature um … gedreht“). Setzt SOLIDWORKS
+  das gedrehte Werkzeug in einem Drehsinn nicht ein, kommt der andere trotzdem an die Reihe (`TurnedNotInserted`), statt die
+  Konfiguration aufzugeben. Die Verknüpfung, vor 2025 SP2 aus dem Bezug geschlossen, heißt im Bericht so (`LinkInferred`,
+  `FormToolPlacement.Link`). Die Anzeige in der Abwicklung wird ab 2025 SP2 gelesen (`OverrideSettings`, `ShowPunch`, `ShowProfile`,
+  `ShowCenter`, spät gebunden – die Hilfe belegt sie, die frühere Abweichung „kein lesendes Mitglied“ war falsch) und an
+  `InsertFormToolFeature` gegeben; die Information „Einstellung des Dokuments“ nur noch, wo sie nicht lesbar ist
+  (`FormToolPlacement.Display`). Tests in `FormToolPlacementTests`; STOLPERSTEINE 246, 247, 249, 250, Prüftabelle (B67–B70), Testteil
+  S9, README, ARCHITEKTUR.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S6 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S7 (Ersatzweg): das Tor B54/B55 ist auf SOLIDWORKS 2026 bestanden (`livetests.md`), die Entscheidungen des Eigentümers (`blech-plan.md` §7) gelten vorläufig nach Empfehlung – Ersatzweg ja, hinter einem Schalter, der aus ist; ein gescheitertes Blatt wird gemeldet und der Rest gebaut; „Original löschen“ bleibt bei Blech abgelehnt –, als Nächstes der Live-Test B57 (Umwandeln in Blech, Makro `scripts/livetests/ersatzweg-b57.bas`), der den Weg von S7a bestimmt; bis dahin ist S8 (Versteifungsrippe, Lasche und Schlitz) gebaut, geprüft und nachgeprüft (Befunde behoben) und S9 (Umformwerkzeuge) gebaut, die Prüfung steht aus; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S6 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S7 (Ersatzweg): das Tor B54/B55 ist auf SOLIDWORKS 2026 bestanden (`livetests.md`), die Entscheidungen des Eigentümers (`blech-plan.md` §7) gelten vorläufig nach Empfehlung – Ersatzweg ja, hinter einem Schalter, der aus ist; ein gescheitertes Blatt wird gemeldet und der Rest gebaut; „Original löschen“ bleibt bei Blech abgelehnt –, als Nächstes der Live-Test B57 (Umwandeln in Blech, Makro `scripts/livetests/ersatzweg-b57.bas`), der den Weg von S7a bestimmt; bis dahin ist S8 (Versteifungsrippe, Lasche und Schlitz) gebaut, geprüft und nachgeprüft (Befunde behoben) und S9 (Umformwerkzeuge) gebaut und geprüft (Befunde behoben), die Nachprüfung steht aus; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
 1. Live-Test B57 (und B59) beim Eigentümer: Umwandeln bzw. „Biegungen einfügen“ des gespiegelten Körpers. Sein Ergebnis wählt
    den Weg von S7a (A: Umwandeln, B: „Biegungen einfügen“, sonst nur F3 – dann ist S7 neu abzuwägen). Danach S7a und S7b nach
    `blech-plan.md` mit den Folgen aus `livetests.md` (nur die direkte Spiegelmatrix, jede Transformation an Prüfpunkten bestätigen).
-   S8 (Versteifungsrippe, Lasche und Schlitz) steht, ist geprüft und nachgeprüft; S9 (Umformwerkzeuge) steht, Prüfung und Nachprüfung der
-   Korrekturen stehen aus; jeder Schritt mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen.
+   S8 (Versteifungsrippe, Lasche und Schlitz) steht, ist geprüft und nachgeprüft; S9 (Umformwerkzeuge) steht und ist geprüft
+   (Befunde behoben), die Nachprüfung der Korrekturen steht aus; jeder Schritt mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.
 3. Doku, Version, Regressionsprüfung, Release (Tag nur nach Rückfrage).

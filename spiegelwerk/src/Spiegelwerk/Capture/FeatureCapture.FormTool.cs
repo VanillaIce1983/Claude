@@ -54,8 +54,9 @@ namespace Spiegelwerk.Capture
         /// <summary>
         /// The tool file: named as an external reference of the feature (A4 P11: the path only – the configuration it lists is
         /// the referencing one's), else by its data (2025 SP2 and later), else – or if the file named is not there – found in
-        /// the design library by its file name or the feature's name. The configuration and the angle from the data where they
-        /// answer; linked as its data say, otherwise if it names the tool as a reference (B70).
+        /// the design library by its file name or the feature's name. The configuration, the angle and the flat-pattern display
+        /// from the data where they answer; linked as its data say, otherwise – inferred, and marked so – if it names the tool as
+        /// a reference (B70).
         /// </summary>
         private void ResolveTool(Feature f, FormToolRecord r)
         {
@@ -71,6 +72,7 @@ namespace Spiegelwerk.Capture
             var (dataPath, configuration, link, angle) = SwFormTool.FromData(def);
             r.ToolConfiguration = configuration;
             r.RotationAngle = angle;
+            (r.OverrideDisplay, r.ShowPunch, r.ShowProfile, r.ShowCenter) = SwFormTool.DisplayFromData(def);
             string? referenced = FormToolPlacement.PickToolPath(SwFormTool.ReferencedFiles(f), f.Name);
             if (referenced != null && File.Exists(referenced))
             {
@@ -96,6 +98,7 @@ namespace Spiegelwerk.Capture
                 if (named != null) r.Notes.Add(FormToolPlacement.Moved(named, found));
             }
             r.LinkToTool = link ?? referenced != null;
+            r.LinkInferred = link == null && r.LinkToTool;
         }
 
         /// <summary>
