@@ -1,4 +1,4 @@
-# Zwischenstand (7.11.2026)
+# Zwischenstand (13.11.2026)
 
 Arbeitsstand von Spiegelwerk 0.11 im Hauptzweig `claude/cool-ritchie-ltfl07`. Diese Datei sagt, was
 erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
@@ -162,20 +162,99 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   `88b232f`): bewegte Zeugen zählen nur, wenn jedes frühere Feature des Körpers in der Kopie ohne Fehler nachgebaut ist
   (`BendSupport.Rebuilt`), und nicht, wenn die früheren Features nicht lesbar waren (`OwnWitnessesOnlyFor`). STOLPERSTEINE 225,
   228, 231, Prüftabelle.
+- Blech S5 (Zweig `feat-blech`): geschlossene und gebrochene Ecke, Abwickeln und Zurückbiegen, Querbruch, Eckentlastung. Core:
+  `ClosedCornerRecord`, `BreakCornerRecord`, `FoldRecord` mit `BendRef`, `CrossBreakRecord`, `CornerReliefRecord`/`CornerReliefItem` und die
+  swconst-Zahlen (`ClosedCornerTypes`, `BreakCornerTypes`, `CornerReliefTypes`, `CornerReliefBendTypes`) in `SheetMetalBendRecords.cs`,
+  `CornerRules` (Auswahlarten der geschlossenen Ecke, Überlappung ↔ Unterlappung, Rücklese-Vergleiche, Bruchlinien, Längen des älteren
+  Eckentlastungs-Aufrufs, Ecken paaren, Texte), `FoldRules` (Auswahlarten, einzige Biegung des Besitzers, Texte), `SetMatch`/`FaceSets`/
+  `BendMatcher` (Mengen, volle Treffer), die Bruchlinien-Skizze gehört dem Querbruch (`PartOwnerKind.CrossBreak`), `UnFold`, `Fold`,
+  `BreakCorner`, `CrossBreak`, `CornerFeat` „nachgebaut“; Tests `SheetMetalCornerTests` (A3 #7–#10, #12, #13, #15 und mehr), Ablehnung,
+  Berichtstexte, swconst-Nummern. Add-In: Leser in `FeatureCapture.SheetMetalCorners` (Eckentlastung spät gebunden über `SwCornerRelief`, auch
+  unter einem Namen außerhalb der Tabelle), `SwSheetMetal.Read…Scalars`/`ReadBack…` (Mengenvergleich unter dem `AccessSelections` der Kopie),
+  `NewOfType`, `AllBends`/`BendsOf`, `FeatureEdit.ClosedCorner`/`BreakCorner`/`CrossBreak`/`Folds`, `BuildContext.BendFor`/`RegisterBend`,
+  `CornerSupport` (Bezüge vorab auf eigenen Körpern, `FindBend`), `ClosedCornerBuilder`, `BreakCornerBuilder`, `FoldBuilder`,
+  `CrossBreakBuilder`, `CornerReliefBuilder`. STOLPERSTEINE 232–236, Prüftabelle (B44–B49).
+  Abweichend vom Plan: Die Regeln stehen in eigenen Dateien `CornerRules` und `FoldRules` (der Plan nennt `SheetMetalBendRules` für
+  `SwapOverlap`/`LegacyReliefLengths`), der Mengenvergleich in `SetMatch`/`FaceSets` neben `BendMatcher`. `ctx.Bends` heißt
+  `BendFor`/`RegisterBend` und wird nur von `FindBend` gefüllt: Die Builder der Laschen tragen ihre einzige Biegung nicht selbst ein (K25),
+  das Nachschlagen über das Gegenstück eines Besitzers mit einer Biegung leistet dasselbe, wenn es gebraucht wird. Die Eckentlastung steht
+  ohne bestätigten Namen nicht in der Typtabelle (§1.5, B44; der Plan zählt `CornerRelief` unter den geöffneten Typen): Sie wird über ihre Daten
+  erkannt, der Name `CornerRelief` bekommt nur den Text für ältere Versionen. Kein `FeatureEdit.Late`: Die Eckentlastung wird nicht bearbeitet,
+  Abweichungen sind Hinweise. Der Radius einer kreisförmigen Eckentlastung im älteren Aufruf ist als Schlitzbreite angenommen (laut Hilfe die radiale Schlitzbreite; B49). Weichen die
+  Bruchlinien der Kopie von den gespiegelten ab, werden sie in die neue Skizze geschrieben (A3 P10 nennt nur einen Hinweis); ein Querbruch mit
+  mehr als einer Skizze wird nicht nachgebaut. Abwickeln/Zurückbiegen versuchen vor jedem Auswahlwechsel eine Bearbeitung, die feste Fläche und
+  Biegungen setzt; „sein Abwickeln“ ist das letzte davor in Erstellungsreihenfolge. Eine gebrochene Ecke, die zurückgelesen auf anderen
+  Elementen sitzt, ist ein Hinweis, kein Fehlschlag. Keine Tore (§5.2); nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+
+- Blech S5 geprüft (Befunde behoben in `e402cf0`: `GetCornerAtIndex` zählt ab 1, Radius einer kreisförmigen Eckentlastung im
+  älteren Aufruf ist die Schlitzbreite, der ältere Aufruf schließt die offene Eckenmenge in jedem Fall mit `FinishCornerRelief`, nicht
+  gesetzte Werte einer Ecke nur dann als Hinweis, wenn das Datenobjekt die Eckentlastung angelegt hat) und nachgeprüft (behoben in
+  `5dc7b0c`: Grund, wenn `CreateFeature` ohne Fehler nichts anlegt; der Körper für den zweiten älteren Aufruf wird neu gesucht).
+  STOLPERSTEINE 151, 235, Prüftabelle (B49).
+- Blech S6 (Zweig `feat-blech`): normaler Schnitt und „Biegungen einfügen“ alter Art. Core: `NormalCutRecord` (mit
+  `NormalCutParameterTypes`) und `LegacyBendsRecord` in `SheetMetalRecords.cs`, `NormalCutRules` (Gruppen Fläche für Fläche gespiegelt, als
+  Mengen von Mengen verglichen, Wege, Werte, Texte), `SheetMetalRules` (`LegacyArguments`, `LegacyPlaceholder`, `LegacyOffsetRatio`,
+  `LegacyCreationValues`, `LegacyOverrides`, `LegacyBendsDifferences`, Texte), `SheetMetalTree` (das `SheetMetal` ohne Basislasche, dem seine
+  `FlattenBends`/`ProcessBends` folgen, ist ihr Besitzer – `PartOwnerKind.LegacyBends`, `LegacyAnchors`, `LegacyParts`, `BetweenLegacyBends`,
+  `Closure` in beide Richtungen, eine Abwicklung seines Körpers gehört ihm), `SheetMetalTypes` (`NormalCut`, `FlattenBends`, `ProcessBends`
+  „nachgebaut“, `LegacyAnchor`), `UnsupportedFeatures.RefusalBeforeCapture` mit den Namen aus dem Baum, `SheetMetalPlanner` (Körper ohne
+  seine „Biegungen einfügen“, Grund eines nicht lesbaren Besitzers), `StaysSingleBody` zählt „Biegungen einfügen“ mit; Tests `NormalCutTests`
+  (`Normal_cut_groups_mirror_face_by_face` und mehr), `LegacyBendsTests` (A1 #9 und mehr), `SheetMetalTreeTests`
+  (`Flatten_and_process_bends_belong_to_the_legacy_sheet_metal`), Ablehnung, Berichtstexte, Besitz, swconst-Nummern. Add-In: Leser in
+  `FeatureCapture.SheetMetalLegacy` (der normale Schnitt unter `AccessSelections`, „Biegungen einfügen“ nach Typname und Baum),
+  `SwSheetMetalLegacy` (`ReadNormalCutScalars`, `NormalCutGroups`, `ReadBackNormalCut`, `ReadLegacyBends`, `SameLegacyFixedFace`, `InsertBends`,
+  `IsFlattened`/`SetFlattened`), `FeatureEdit.NormalCut`/`Bends`, `NormalCutBuilder`, `LegacyBendsBuilder`, `SheetMetalSession` biegt
+  unterdrückte `ProcessBends` für den Lauf zurück und gibt den Kopien den Zustand, `MassCapture` nimmt Flächenproben hinter `ProcessBends`,
+  `StepRunner` setzt die wartenden Werte des ersten Blechkörpers auch nach „Biegungen einfügen“, `MirrorJob` (Namen aus dem Baum an die
+  Ablehnung, Zustand der Kopien, geteilte Standardwerte). STOLPERSTEINE 151, 164, 183 ergänzt, 237–240 neu, Prüftabelle (B51, B52).
+  Abweichend vom Plan: Der Plan öffnet „`SheetMetal` (legacy owner)“; ein Typname kann nicht zugleich „noch nicht“ (ohne Besitzer) und
+  „nachgebaut“ sein – der Baum erkennt das `SheetMetal` alter Art, `RefusalBeforeCapture` bekommt seine Namen (neuer, optionaler Parameter) und
+  behandelt es als Träger „nachgebaut“ (`SheetMetalTypes.LegacyAnchor`), jedes andere `SheetMetal` ohne Basislasche bleibt „noch nicht“, ebenso
+  „Biegungen einfügen“ ohne `FlattenBends`/`ProcessBends`. Features zwischen `FlattenBends` und `ProcessBends` (im abgewickelten Zustand
+  angelegt) kann die Kopie nicht dazwischen setzen: solche „Biegungen einfügen“ werden nicht nachgebaut, der Lauf wird abgelehnt (im Plan nicht
+  bedacht). Die Werte folgen nicht dem Entwurf (Argumente, dann `ApplyAndCompare` nur für Biegeabzug und Biegeberechnung), sondern dem
+  Modell der Basislasche (erster Körper legt die Werte des Teils an, weitere über Überschreiben-Flags – `LegacyOverrides` wie
+  `SamePartOverrides` –, die des ersten warten auf den zweiten Körper); nicht nehmbare Biegezugaben bekommen einen K-Faktor als Platzhalter.
+  Eigene Werte von `FlattenBends`/`ProcessBends` werden gesetzt, die feste Fläche hat eine dritte Quelle (Standardwerte, nur mit einem
+  Blechkörper), eine Abwicklung eines Körpers alter Art gehört seinem `SheetMetal`. Für die veralteten Aufrufe des normalen Schnitts
+  nummeriert die Hilfe eine Reihenfolge (`AddSMNormalCut` vor jeder Auswahl, Flächen mit 1, „die Gruppe“ mit 2); der erste Versuch weicht
+  bewusst ab (`AddSMNormalCutType`, je Gruppe Flächen und `AddSMNormalCut`, Bezug, `FinishSMNormalCut`), die der Hilfe folgt danach (B51); die
+  Richtung ist entbehrlich (Hinweis), die Versatzebene nicht. Die Regeln des normalen Schnitts stehen in einer eigenen Datei `NormalCutRules`,
+  A1 #9 in `LegacyBendsTests` (der Plan: `SheetMetalTests`). Das Beispiel der Ablehnung in README und STOLPERSTEINE 151 ist jetzt ein
+  Umformwerkzeug. Keine Tore (§5.2); nicht in einer laufenden SOLIDWORKS-Sitzung erprobt.
+
+- Blech S6 geprüft, Befunde behoben (Commit „Blech S6: Befunde aus der Prüfung behoben“): Die Sitzung biegt ein abgewickeltes
+  `ProcessBends` mit seinen abhängigen Features zurück (`SetSuppressed(…, withDependents)`, nach dem schlichten Aufheben
+  `swUnSuppressDependent`) – was nach ihm auf den gebogenen Flächen entstand, blieb sonst unterdrückt und wurde nicht gespiegelt –, und
+  abgewickelt ist ein `ProcessBends` nur, wenn seine Elternteile (`FlattenBends`, `SheetMetal`; sonst die davor in der Baumreihenfolge)
+  nicht unterdrückt sind („Biegungen einfügen“ als Ganzes unterdrückt bleibt unangetastet). Der normale Schnitt versucht die veralteten
+  Aufrufe auch in der nummerierten Reihenfolge der Hilfe (`NormalCutPath.ObsoleteHelpOrder`, Markierung 2 angenommen für die übrigen
+  Flächen einer Gruppe, `HelpOrderMarks`), schließt einen abgebrochenen veralteten Versuch mit `FinishSMNormalCut` und nennt nicht lesbare
+  Gruppen beim Namen (`NormalCutRules.ReadBackFailure`; die geschlossene Ecke ebenso). Die Information zur nachträglich gesetzten Biegezugabe
+  nennt die gesetzte, bei einem späteren Körper mit Platzhalter wegen der Standardwerte des Ziels beide (`LegacyTargetAllowanceLater`).
+  STOLPERSTEINE 237, 239, 240, Prüftabelle (B51, abgewickelt alter Art), Testteil S6.
+- Blech S6 nachgeprüft, Befunde behoben (Commit „Blech S6: Befunde aus der Nachprüfung behoben“): Was ein `ProcessBends` beim
+  Zurückbiegen mit seinen abhängigen Features zurückbrachte, merkt sich die Sitzung (`SheetMetalRules.BroughtBack`) und unterdrückt die
+  Kopien davon nach dem Abwickeln der Kopie einzeln – sie liegen auf Ebenen und sind keine Kinder des kopierten `ProcessBends`, das
+  Unterdrücken nahm sie dort nicht mit. Die `ProcessBends` werden vor den Abwicklungen zurückgebogen, die Abwicklungen danach nach ihrem
+  dann gültigen Zustand gefaltet (eine gefaltete kam womöglich mit zurück und hätte das Teil für den Lauf abgewickelt). Als Elternteile
+  eines `ProcessBends` zählen nur `FlattenBends` und `SheetMetal` (eine mitgenannte Skizze ist mit ihm unterdrückt). Ist `FlattenBends`
+  unterdrückt, `SheetMetal` aber nicht, kommt der Datensatz ohne die Biegungs-Features aus (`SheetMetalRules.LegacyPartsInRun`): Die Kopie
+  bekommt wie das Original nur das `SheetMetal` (`InsertBends2` ohne „abwickeln“), statt gebogen zu entstehen. Tests in `LegacyBendsTests`;
+  STOLPERSTEINE 239, Prüftabelle (B52, abgewickelt alter Art), Testteil S6, README, ARCHITEKTUR.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | **pausiert** (7.11.2026, auf Wunsch des Eigentümers nach der Nachprüfung von S4); nach `blech-plan.md` in prüfbaren Schritten; S0 bis S4 stehen, sind geprüft und nachgeprüft und im Hauptzweig, als Nächstes S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung); S7a (Ersatzweg) wartet auf die Entscheidungen des Eigentümers (`blech-plan.md` §7); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S5 stehen und sind geprüft und nachgeprüft (S0 bis S4 im Hauptzweig); S6 (normaler Schnitt, „Biegungen einfügen“ alter Art) ist umgesetzt und geprüft, die Nachprüfung der Korrekturen steht aus; S7a (Ersatzweg) wartet auf die Entscheidungen des Eigentümers (`blech-plan.md` §7); bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
-1. Blech S5 (Ecken, Abwickeln/Zurückbiegen, Querbruch, Eckentlastung) und S6 (Normal Cut, alte Biegungen einfügen) nach
-   `blech-plan.md`; jeder Schritt mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen. Der Zweig `feat-blech`
-   steht auf demselben Commit wie der Hauptzweig. S7a (Ersatzweg)
-   erst nach den Entscheidungen des Eigentümers in `blech-plan.md` §7 (Ersatzweg überhaupt, Umgang mit gescheiterten
-   Blättern, „Original löschen“), bei einem Nein stattdessen S7′; S8 und S9 hängen nicht davon ab.
+1. Blech S6: die Korrekturen der Prüfung nachprüfen. S7a (Ersatzweg) erst nach den Entscheidungen des
+   Eigentümers in `blech-plan.md` §7 (Ersatzweg überhaupt, Umgang mit gescheiterten Blättern, „Original löschen“), bei
+   einem Nein stattdessen S7′; S8 (Versteifungsrippe, Lasche und Schlitz) und S9 (Umformwerkzeuge) hängen nicht davon ab
+   und können vorher kommen, ebenso mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.
 3. Doku, Version, Regressionsprüfung, Release (Tag nur nach Rückfrage).

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Spiegelwerk.Core.Records;
@@ -82,6 +83,33 @@ namespace Spiegelwerk.Core.Planning
 
         public bool UseDefaultRelief { get; }
         public ReliefData Relief { get; }
+    }
+
+    /// <summary>
+    /// The arguments of IPartDoc.InsertBends2 besides the radius and the auto-relief flag (A1 §8, help): a bend
+    /// table (empty: none), a K-factor or a bend allowance (−1: not used) and the offset ratio of the relief.
+    /// </summary>
+    public sealed class InsertBendsArguments
+    {
+        public InsertBendsArguments(string bendTable, double kFactor, double bendAllowance, double offsetRatio)
+        {
+            BendTable = bendTable;
+            KFactor = kFactor;
+            BendAllowance = bendAllowance;
+            OffsetRatio = offsetRatio;
+        }
+
+        /// <summary>The bend table file (.btl); empty: none.</summary>
+        public string BendTable { get; }
+
+        /// <summary>The K-factor; −1: not used.</summary>
+        public double KFactor { get; }
+
+        /// <summary>The bend allowance in metres; −1: not used.</summary>
+        public double BendAllowance { get; }
+
+        /// <summary>How far the relief cut extends beyond the bend, as a ratio (0.05–2.0, help).</summary>
+        public double OffsetRatio { get; }
     }
 
     /// <summary>
@@ -216,12 +244,15 @@ namespace Spiegelwerk.Core.Planning
             };
         }
 
-        /// <summary>Base flanges of the run that make a body of their own: at most one means the copy stays single-body.</summary>
+        /// <summary>
+        /// Records of the run that make a sheet-metal body of their own – base flanges that are no tab, legacy
+        /// Insert Bends: at most one means the copy stays single-body.
+        /// </summary>
         public static bool StaysSingleBody(IEnumerable<FeatureRecord> records)
         {
             int bodies = 0;
             foreach (FeatureRecord r in records)
-                if (r is BaseFlangeRecord b && !b.MergesIntoExisting)
+                if ((r is BaseFlangeRecord b && !b.MergesIntoExisting) || r is LegacyBendsRecord)
                     bodies++;
             return bodies <= 1;
         }
@@ -470,6 +501,160 @@ namespace Spiegelwerk.Core.Planning
         /// groups, since the others stay with the defaults.
         /// </summary>
         public static string MaterialNoteFor(bool samePart) => samePart ? MaterialSharedNote : MaterialNote;
+
+        // ---- legacy Insert Bends (blech-plan S6, A1 phase 1b)
+
+        /// <summary>The range of the offset ratio InsertBends2 takes (help: any other value fails).</summary>
+        public const double MinOffsetRatio = 0.05, MaxOffsetRatio = 2.0;
+
+        /// <summary>The offset ratio passed when the original has no auto relief and its ratio is outside the range: it does not matter then.</summary>
+        public const double DefaultOffsetRatio = 0.5;
+
+        public static bool OffsetRatioValid(double ratio) => ratio >= MinOffsetRatio - 1e-12 && ratio <= MaxOffsetRatio + 1e-12;
+
+        /// <summary>
+        /// The offset ratio of the copy's Insert Bends: the relief's ratio; without auto relief, where it means
+        /// nothing, one the call takes if the original's is outside the range. Whether it is valid then says
+        /// <see cref="OffsetRatioValid"/> – with auto relief an invalid one is not changed.
+        /// </summary>
+        public static double LegacyOffsetRatio(ReliefData relief) =>
+            relief.UseAutoRelief || OffsetRatioValid(relief.Ratio) ? relief.Ratio : DefaultOffsetRatio;
+
+        /// <summary>
+        /// The allowance and the offset ratio as InsertBends2 takes them (A1 §8): a K-factor as („“, K, −1), a
+        /// bend allowance as („“, −1, BA), a bend table as (file, −1, −1). Null for what the call cannot take –
+        /// a bend deduction, a bend calculation table – and for an offset ratio outside 0.05–2.0.
+        /// </summary>
+        public static InsertBendsArguments? LegacyArguments(BendAllowanceData allowance, double offsetRatio)
+        {
+            if (!OffsetRatioValid(offsetRatio)) return null;
+            return allowance.Kind switch
+            {
+                BendAllowanceKind.KFactor => new InsertBendsArguments("", allowance.KFactor, -1, offsetRatio),
+                BendAllowanceKind.Direct => new InsertBendsArguments("", -1, allowance.BendAllowance, offsetRatio),
+                BendAllowanceKind.BendTable when allowance.BendTableFile.Length > 0 => new InsertBendsArguments(allowance.BendTableFile, -1, -1, offsetRatio),
+                _ => null,
+            };
+        }
+
+        /// <summary>
+        /// What the copy's Insert Bends is created with when <see cref="LegacyArguments"/> cannot take the allowance
+        /// (or its bend table is not there): a K-factor – the one the allowance object holds if it is one, else 0.5 –,
+        /// the allowance itself follows in an edit of the SheetMetal. Null if the offset ratio is outside the range.
+        /// </summary>
+        public static InsertBendsArguments? LegacyPlaceholder(BendAllowanceData allowance, double offsetRatio) =>
+            OffsetRatioValid(offsetRatio)
+                ? new InsertBendsArguments("", allowance.KFactor > 0 && allowance.KFactor <= 1 ? allowance.KFactor : 0.5, -1, offsetRatio)
+                : null;
+
+        /// <summary>
+        /// What the copy's Insert Bends is created with (as <see cref="CreationValues"/> for a base flange): the
+        /// first sheet-metal body of a part makes the part's values – the original's defaults, or the body's own
+        /// in a copy that stays single-body (<paramref name="partValues"/>) –, every later one is created with
+        /// what the target has, so creating it does not rewrite the defaults the earlier bodies use; its own
+        /// values follow on its SheetMetal. A target without defaults (its first body made none) has nothing to
+        /// protect: the body's own values (<see cref="BodyValues"/>) right away.
+        /// </summary>
+        /// <param name="first">The target has neither defaults nor a SheetMetal yet.</param>
+        /// <param name="partValues">The values the first body makes the part's; null: the body's.</param>
+        /// <param name="body">The original SheetMetal's values.</param>
+        /// <param name="template">The target's defaults, read before; null if none.</param>
+        /// <param name="originalDefaults">The original's defaults; null before 2013.</param>
+        public static SheetMetalParameters LegacyCreationValues(bool first, SheetMetalParameters? partValues, SheetMetalParameters body, SheetMetalParameters? template,
+            SheetMetalParameters? originalDefaults) =>
+            first ? partValues ?? body : template ?? BodyValues(originalDefaults, body);
+
+        /// <summary>
+        /// The override groups the copy's legacy SheetMetal sets when it is not the first body: those the original
+        /// set and every other one whose values differ from the defaults it was created with – as in the same part
+        /// (<see cref="SamePartOverrides"/>): Insert Bends has no values of its own beside the SheetMetal's.
+        /// </summary>
+        public static IReadOnlyList<int> LegacyOverrides(SheetMetalParameters body, SheetMetalParameters? template, SheetMetalParameters? originalDefaults) =>
+            SamePartOverrides(body, template, originalDefaults);
+
+        /// <summary>
+        /// FlattenBends or ProcessBends of the copy against the original's own values (IBendsFeatureData): whether
+        /// each uses the SheetMetal's radius and allowance, and where not, the value.
+        /// </summary>
+        public static List<string> LegacyBendsDifferences(BendValues want, BendValues got, IFormatProvider? culture = null)
+        {
+            var values = new List<(string, double, double, ScalarKind)>
+            {
+                ("Standard-Biegeradius", want.UseDefaultRadius ? 1 : 0, got.UseDefaultRadius ? 1 : 0, ScalarKind.Flag),
+                ("Standard-Biegezugabe", want.UseDefaultAllowance ? 1 : 0, got.UseDefaultAllowance ? 1 : 0, ScalarKind.Flag),
+            };
+            if (!want.UseDefaultRadius) values.Add(("Biegeradius", want.Radius, got.Radius, ScalarKind.Length));
+            List<string> result = SheetMetalCompare.Scalars(values, culture);
+            if (!want.UseDefaultAllowance && want.Allowance != null)
+                result.AddRange(SheetMetalCompare.Allowance(want.Allowance, got.UseDefaultAllowance ? null : got.Allowance, culture).Differences);
+            return result;
+        }
+
+        /// <summary>Does the bends feature have values of its own the copy must get?</summary>
+        public static bool HasOwnValues(BendValues? v) => v != null && (!v.UseDefaultRadius || (!v.UseDefaultAllowance && v.Allowance != null));
+
+        /// <summary>
+        /// The FlattenBends and ProcessBends of legacy Insert Bends the copy makes (<see cref="SheetMetalTree.LegacyParts"/>).
+        /// One still suppressed once the session folded the part – it bent back every ProcessBends suppressed on its own – is
+        /// switched off with a parent (FlattenBends suppressed, ProcessBends with it as its child): the original shows the
+        /// SheetMetal alone, and so does the copy (InsertBends2 without flattening: (null, null)); the collector reports both
+        /// as suppressed.
+        /// </summary>
+        public static (string? flatten, string? process) LegacyPartsInRun((string? flatten, string? process) parts, Func<string, bool> suppressed) =>
+            (parts.flatten != null && suppressed(parts.flatten)) || (parts.process != null && suppressed(parts.process)) ? (null, null) : parts;
+
+        /// <summary>
+        /// What bending a ProcessBends back with its dependents brought back (S6): suppressed before, not after, in the order
+        /// of <paramref name="suppressedBefore"/> – not the features the session folds itself (<paramref name="foldFeatures"/>:
+        /// flat patterns, ProcessBends). In the original they are its children and are suppressed with it again at the end;
+        /// their copies sit on planes, not on its bent faces, so the copy's ProcessBends does not take them along.
+        /// </summary>
+        public static List<string> BroughtBack(IEnumerable<string> suppressedBefore, IEnumerable<string> suppressedAfter, ICollection<string> foldFeatures)
+        {
+            var after = new HashSet<string>(suppressedAfter, StringComparer.Ordinal);
+            return suppressedBefore.Where(n => !after.Contains(n) && !foldFeatures.Contains(n)).Distinct(StringComparer.Ordinal).ToList();
+        }
+
+        /// <summary>
+        /// Features between a legacy SheetMetal and its ProcessBends (<see cref="SheetMetalTree.BetweenLegacyBends"/>):
+        /// made while flattened, bent with ProcessBends – the copy cannot put anything between its bends features.
+        /// </summary>
+        public static string LegacyBetween(IEnumerable<string> features) =>
+            $"Features zwischen „Biegungen einfügen“ und ihrem Zurückbiegen ({string.Join(", ", features.Select(f => $"„{f}“"))}) wirken auf den abgewickelten Zustand; " +
+            "die Kopie legt die Biegungen in einem Schritt an und kann nichts dazwischen setzen.";
+
+        /// <summary>The original's offset ratio with auto relief is outside what InsertBends2 takes.</summary>
+        public static string LegacyRatioInvalid(double ratio, IFormatProvider? culture = null) =>
+            $"Verhältnis der Entlastung {ReportText.Number(ratio, 3, culture)} liegt außerhalb 0,05–2; „Biegungen einfügen“ nimmt es nicht.";
+
+        public const string LegacyFixedFaceUnreadable = "Feste Fläche von „Biegungen einfügen“ im Original nicht lesbar.";
+
+        public const string LegacyFixedFaceMissing = "Feste Fläche von „Biegungen einfügen“ im Ziel nicht gefunden.";
+
+        public const string LegacyFixedFaceNotOwn = "Feste Fläche von „Biegungen einfügen“ liegt im Ziel nicht auf einem gespiegelten Körper; das Original bleibt unberührt.";
+
+        /// <summary>No attempt made the features the original has.</summary>
+        public static string LegacyNotCreated(IEnumerable<string> tried) =>
+            $"SOLIDWORKS hat „Biegungen einfügen“ nicht angelegt ({string.Join("; ", tried)}).";
+
+        /// <summary>The allowance written went in afterwards: InsertBends2 does not take its kind.</summary>
+        public static string LegacyAllowanceLater(BendAllowanceData a, IFormatProvider? culture = null) =>
+            $"Biegezugabe ({SheetMetalCompare.Describe(a, culture)}) nimmt „Biegungen einfügen“ beim Anlegen nicht; sie wurde danach am Blech-Feature gesetzt.";
+
+        /// <summary>
+        /// A later body is created with the target's defaults, and InsertBends2 does not take their allowance: created with
+        /// a placeholder, the body's own (<paramref name="written"/>, one the call would take) set afterwards.
+        /// </summary>
+        public static string LegacyTargetAllowanceLater(BendAllowanceData targetDefaults, BendAllowanceData written, IFormatProvider? culture = null) =>
+            $"Die Biegezugabe der Blech-Standardwerte im Ziel ({SheetMetalCompare.Describe(targetDefaults, culture)}) nimmt „Biegungen einfügen“ beim Anlegen nicht; " +
+            $"angelegt mit einem Platzhalter, danach wurde am Blech-Feature die eigene ({SheetMetalCompare.Describe(written, culture)}) gesetzt.";
+
+        /// <summary>„Biegungen eingefügt (mit Abwickeln und Zurückbiegen), Radius 1 mm, K 0,44“.</summary>
+        public static string DescribeLegacy(LegacyBendsRecord r, IFormatProvider? culture = null)
+        {
+            string parts = r.ProcessBendsName != null || r.FlattenBendsName != null ? " (mit Abwickeln und Zurückbiegen)" : "";
+            return $"Biegungen eingefügt{parts}, Radius {ReportText.Number(r.Body.BendRadius * 1000, 3, culture)} mm, {SheetMetalCompare.Describe(r.Body.BendAllowance, culture)}";
+        }
 
         /// <summary>Grain direction: no API member reads or sets it.</summary>
         public const string GrainNote = "Eine Faserrichtung der Abwicklung ist über die API nicht lesbar und wird nicht übernommen.";

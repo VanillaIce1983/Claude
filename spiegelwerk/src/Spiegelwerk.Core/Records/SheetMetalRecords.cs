@@ -372,4 +372,122 @@ namespace Spiegelwerk.Core.Records
         /// <summary>The folded solid stays as it is.</summary>
         public override bool ChangesSolid => false;
     }
+
+    // ---- blech-plan S6: Normal Cut and legacy Insert Bends (A1 §5, §8)
+
+    /// <summary>Same numbers as swNormalCutParameters_e.</summary>
+    public static class NormalCutParameterTypes
+    {
+        /// <summary>The cut is maximised between the top and bottom intersection profiles (direction optional, mark 8).</summary>
+        public const int Extent = 0;
+
+        /// <summary>The cut follows an offset plane (a plane or the top or bottom face, mark 4).</summary>
+        public const int OffsetPlane = 1;
+    }
+
+    /// <summary>
+    /// Normal Cut (NormalCut, ISMNormalCutFeatureData2): makes the non-normal side walls of cuts normal to the
+    /// sheet. A reflection keeps every value and the meaning of the offset plane (the top face stays the top
+    /// face, outward normals stay outward); it maps the faces of each group, the offset plane and the
+    /// direction onto their mirror images. No flag has a side – no variants.
+    /// </summary>
+    public sealed class NormalCutRecord : FeatureRecord
+    {
+        public NormalCutRecord(string name, string typeName) : base(name, typeName)
+        {
+        }
+
+        /// <summary>The face groups (ISMNormalCutGroupData.Faces), each in the state before the normal cut, in the order read.</summary>
+        public List<List<FaceSignature>> Groups { get; } = new List<List<FaceSignature>>();
+
+        /// <summary>Tangent faces join a group of their own accord.</summary>
+        public bool AutoPropagation { get; set; }
+
+        public bool OptimizeGeometry { get; set; }
+
+        /// <summary><see cref="NormalCutParameterTypes"/>.</summary>
+        public int Parameters { get; set; } = NormalCutParameterTypes.Extent;
+
+        /// <summary>Offset plane mode: a reference plane or the top or bottom face of the sheet; null otherwise.</summary>
+        public GeometryRef? OffsetPlane { get; set; }
+
+        /// <summary>The direction of the cut (an edge, a linear curve or a planar face); null: SOLIDWORKS' default.</summary>
+        public GeometryRef? CutDirection { get; set; }
+
+        /// <summary>Offset plane mode: the plane follows the K-factor (the adjustment is 0.5 then).</summary>
+        public bool LinkToKFactor { get; set; }
+
+        /// <summary>Offset plane mode: where the plane lies between top (0) and bottom (1) of the sheet.</summary>
+        public double LayerAdjustment { get; set; }
+    }
+
+    /// <summary>
+    /// Legacy Insert Bends (InsertBends2): a SheetMetal feature without a base flange, followed by its
+    /// FlattenBends and ProcessBends – one record, anchored on the SheetMetal; the two bends features are
+    /// parts of it (<see cref="PartOwnerKind.LegacyBends"/>). The body it turns into sheet metal is the
+    /// solid the run built before (a shell). A reflection keeps radius, allowance, relief and offset ratio;
+    /// it maps the fixed face (or edge). The state of ProcessBends – suppressed when the original was
+    /// flattened – is the original's at the end, like a flat pattern's.
+    /// </summary>
+    public sealed class LegacyBendsRecord : FeatureRecord
+    {
+        public LegacyBendsRecord(string name, string typeName) : base(name, typeName)
+        {
+        }
+
+        /// <summary>The SheetMetal's parameters (thickness, radius, allowance, relief with its offset ratio) with its override flags.</summary>
+        public SheetMetalParameters Body { get; set; } = new SheetMetalParameters();
+
+        /// <summary>The part's defaults (TemplateSheetMetal); null before 2013 or without them.</summary>
+        public SheetMetalParameters? Defaults { get; set; }
+
+        private GeometryRef? _fixedFace;
+
+        /// <summary>
+        /// The face (or edge) that stays: ISheetMetalFeatureData.FixedReference, else
+        /// IBendsFeatureData.GetFixedFace of the FlattenBends – in the state before the SheetMetal. Only
+        /// ever a face or an edge.
+        /// </summary>
+        public GeometryRef? FixedFace
+        {
+            get => _fixedFace;
+            set
+            {
+                if (value != null && !SheetMetalParameters.IsFixedReferenceKind(value.Kind))
+                    throw new System.ArgumentException($"Die feste Fläche von „Biegungen einfügen“ ist eine Fläche oder Kante, keine Referenz der Art {value.Kind}.");
+                _fixedFace = value;
+            }
+        }
+
+        /// <summary>Its FlattenBends; null if InsertBends made none (only the SheetMetal).</summary>
+        public string? FlattenBendsName { get; set; }
+
+        /// <summary>Its ProcessBends; null if InsertBends made none.</summary>
+        public string? ProcessBendsName { get; set; }
+
+        /// <summary>
+        /// What FlattenBends and ProcessBends have of their own (IBendsFeatureData: radius and allowance where
+        /// they do not use the SheetMetal's); null if not read.
+        /// </summary>
+        public BendValues? FlattenBendsValues { get; set; }
+
+        public BendValues? ProcessBendsValues { get; set; }
+
+        /// <summary>The own dimensions of FlattenBends and ProcessBends: their copies get these names back.</summary>
+        public List<NamedDimension> FlattenBendsDimensions { get; } = new List<NamedDimension>();
+
+        public List<NamedDimension> ProcessBendsDimensions { get; } = new List<NamedDimension>();
+
+        /// <summary>ProcessBends was suppressed (the part flattened) before the run unsuppressed it.</summary>
+        public bool Flattened { get; set; }
+
+        /// <summary>The state after this record is the one after its ProcessBends: SheetMetal and FlattenBends alone are not the result.</summary>
+        public override string MeasureUntil => ProcessBendsName ?? FlattenBendsName ?? Name;
+
+        /// <summary>FlattenBends and ProcessBends come into being with it.</summary>
+        public override bool BringsParts => true;
+
+        /// <summary>Creating it may write the part's shared sheet-metal defaults: it runs under the guard.</summary>
+        public override bool TouchesSheetMetalDefaults => true;
+    }
 }

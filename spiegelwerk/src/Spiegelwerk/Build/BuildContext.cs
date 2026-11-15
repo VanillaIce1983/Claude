@@ -205,6 +205,35 @@ namespace Spiegelwerk.Build
         /// <summary>Original feature name → new feature.</summary>
         public Dictionary<string, Feature> Created { get; } = new Dictionary<string, Feature>(StringComparer.Ordinal);
 
+        /// <summary>
+        /// Original bend name → its original owner and the bend sub-feature of the copy (A3 P8, blech-plan K25):
+        /// every bend an unfold or fold found – by its mirrored faces or as the only bend of its owner's copy,
+        /// never by position among several – so a later fold finds the bends its unfold named by name. Gone
+        /// with the owner (<see cref="Unregister"/>, <see cref="Forget"/>).
+        /// </summary>
+        private readonly Dictionary<string, (string owner, Feature bend)> _bends = new Dictionary<string, (string, Feature)>(StringComparer.Ordinal);
+
+        /// <summary>The copy of an original bend found before, if it is still in the document (looked up by its name).</summary>
+        public Feature? BendFor(string originalBend)
+        {
+            if (!_bends.TryGetValue(originalBend, out var known)) return null;
+            try
+            {
+                return SwDoc.FeatureByName(Doc, known.bend.Name);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        public void RegisterBend(string originalBend, string originalOwner, Feature bend) => _bends[originalBend] = (originalOwner, bend);
+
+        private void ForgetBends(Func<string, Feature, bool> gone)
+        {
+            foreach (string key in _bends.Where(kv => gone(kv.Value.owner, kv.Value.bend)).Select(kv => kv.Key).ToList()) _bends.Remove(key);
+        }
+
         /// <summary>Original base flange → the sheet-metal body its copy made (SheetMetal, flat pattern, σ).</summary>
         public Dictionary<string, SheetMetalBody> SheetMetalBodies { get; } = new Dictionary<string, SheetMetalBody>(StringComparer.Ordinal);
 
@@ -304,6 +333,7 @@ namespace Spiegelwerk.Build
             Created.Remove(originalName);
             Groups.Remove(originalName);
             SheetMetalBodies.Remove(originalName);
+            ForgetBends((owner, _) => owner == originalName);
             Topology.Invalidate();
         }
 
@@ -328,8 +358,23 @@ namespace Spiegelwerk.Build
             foreach (string name in names) Shared.Built.Remove(name);
             // A sheet-metal body whose flange or companions go is gone with them.
             foreach (string key in SheetMetalBodies.Where(kv => Gone(kv.Key, kv.Value, names)).Select(kv => kv.Key).ToList()) SheetMetalBodies.Remove(key);
+            // A bend that goes (one whose owner's copy went is gone with its unregistering above).
+            ForgetBends((_, bend) => names.Contains(NameOf(bend)));
             Planes.Forget(names);
             Topology.Invalidate();
+        }
+
+        /// <summary>The name of a feature that may already be deleted; empty then.</summary>
+        private static string NameOf(Feature f)
+        {
+            try
+            {
+                return f.Name;
+            }
+            catch (Exception)
+            {
+                return "";
+            }
         }
 
         private bool Gone(string owner, SheetMetalBody body, ICollection<string> names) =>

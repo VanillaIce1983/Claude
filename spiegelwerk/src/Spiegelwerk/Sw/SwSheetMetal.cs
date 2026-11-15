@@ -28,14 +28,14 @@ namespace Spiegelwerk.Sw
     /// written in the one order that works and read back –, the flat patterns and their state,
     /// and what a step added. The only place that writes sheet-metal parameters.
     /// </summary>
-    internal static class SwSheetMetal
+    internal static partial class SwSheetMetal
     {
         private static readonly HashSet<string> SheetMetalTypes = new HashSet<string>(StringComparer.Ordinal)
         {
-            "SheetMetal", "TemplateSheetMetal", "FlatPattern", "TemplateFlatPattern", "SMBaseFlange",
+            "SheetMetal", "TemplateSheetMetal", "FlatPattern", "TemplateFlatPattern", "SMBaseFlange", "FlattenBends", "ProcessBends",
         };
 
-        /// <summary>The part has sheet metal: a SheetMetal, base flange, flat pattern or one of their folders at the top level.</summary>
+        /// <summary>The part has sheet metal: a SheetMetal, base flange, flat pattern, legacy bends feature or one of their folders at the top level.</summary>
         public static bool HasSheetMetal(ModelDoc2 doc) => SwDoc.TopLevelFeatures(doc).Any(f => SheetMetalTypes.Contains(f.GetTypeName2()));
 
         /// <summary>The part's defaults (TemplateSheetMetal); null before 2013 or without sheet metal.</summary>
@@ -281,7 +281,8 @@ namespace Spiegelwerk.Sw
         /// <summary>
         /// Deletes what a step made, in two rounds, and returns the names still there. A flat
         /// pattern goes with its own sketches; everything else alone – the profile sketch of a base
-        /// flange is a record of its own and stays.
+        /// flange is a record of its own and stays. Children first: flat patterns and ProcessBends,
+        /// then flanges and FlattenBends, the SheetMetal last.
         /// </summary>
         public static List<string> RemoveNew(ModelDoc2 doc, HashSet<string> before)
         {
@@ -314,7 +315,7 @@ namespace Spiegelwerk.Sw
 
         private static int DeleteRank(Feature f) => f.GetTypeName2() switch
         {
-            "FlatPattern" => 0,
+            "FlatPattern" or "ProcessBends" => 0,
             "SheetMetal" => 2,
             _ => 1,
         };
@@ -339,14 +340,30 @@ namespace Spiegelwerk.Sw
             return f.IsSuppressed();
         }
 
-        /// <summary>Suppresses (folds) or unsuppresses (flattens) in the active configuration; true if the state is the wanted one afterwards.</summary>
-        public static bool SetSuppressed(ModelDoc2 doc, Feature f, bool suppressed)
+        /// <summary>
+        /// Suppresses (folds) or unsuppresses (flattens) in the active configuration; true if the state is the wanted one afterwards.
+        /// <paramref name="withDependents"/>: unsuppressing also unsuppresses the features SOLIDWORKS suppressed with it (its
+        /// children, swUnSuppressDependent) – a second call after the plain one, so either reading of that action (the children
+        /// alone, or the feature with them) works; whether the children came back does not count. Suppressing always takes them along.
+        /// </summary>
+        public static bool SetSuppressed(ModelDoc2 doc, Feature f, bool suppressed, bool withDependents = false)
         {
             if (IsSuppressed(f) == suppressed) return true;
             try
             {
                 f.SetSuppression2(suppressed ? (int)swFeatureSuppressionAction_e.swSuppressFeature : (int)swFeatureSuppressionAction_e.swUnSuppressFeature,
                     (int)swInConfigurationOpts_e.swThisConfiguration, null);
+                if (!suppressed && withDependents)
+                {
+                    try
+                    {
+                        f.SetSuppression2((int)swFeatureSuppressionAction_e.swUnSuppressDependent, (int)swInConfigurationOpts_e.swThisConfiguration, null);
+                    }
+                    catch (Exception)
+                    {
+                        // The feature itself is what counts; its children then stay as they were.
+                    }
+                }
                 doc.EditRebuild3();
             }
             catch (Exception)

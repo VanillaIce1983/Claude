@@ -16,6 +16,8 @@ namespace Spiegelwerk.Capture
     /// S1a: base flange (and tab) with its SheetMetal and the part's defaults, flat pattern.
     /// S2: hem and miter flange, S3: edge flange (<c>FeatureCapture.SheetMetalFlanges.cs</c>).
     /// S4: sketched bend (<c>FeatureCapture.SheetMetalBends.cs</c>) and jog.
+    /// S5: closed and break corner, unfold and fold, cross break, corner relief (<c>FeatureCapture.SheetMetalCorners.cs</c>).
+    /// S6: normal cut and legacy Insert Bends (<c>FeatureCapture.SheetMetalLegacy.cs</c>).
     /// </summary>
     internal sealed partial class FeatureCapture
     {
@@ -60,8 +62,12 @@ namespace Spiegelwerk.Capture
             return record;
         }
 
-        /// <summary>Readers by type name, for types whose definition may be null. None yet.</summary>
-        private FeatureRecord? SheetMetalByType(Feature f, string type) => null;
+        /// <summary>
+        /// Readers by type name, for types whose definition may be null or does not tell: the SheetMetal of legacy
+        /// Insert Bends (by the tree – its data are those of any SheetMetal).
+        /// </summary>
+        private FeatureRecord? SheetMetalByType(Feature f, string type) =>
+            type == "SheetMetal" && _sheetMetal.IsLegacyAnchor(f.Name) ? CaptureLegacyBends(f, type) : null;
 
         /// <summary>Readers by definition (switch on the data interface).</summary>
         private FeatureRecord? SheetMetalByDefinition(Feature f, string type, object? def) => def switch
@@ -73,6 +79,17 @@ namespace Spiegelwerk.Capture
             EdgeFlangeFeatureData ef => CaptureEdgeFlange(f, type, ef),
             SketchedBendFeatureData sb => CaptureSketchedBend(f, type, sb),
             JogFeatureData jg => CaptureJog(f, type, jg),
+            ClosedCornerFeatureData cc => CaptureClosedCorner(f, type, cc),
+            // The same interface in the flattened state is a corner trim: not rebuilt (its own reason, A3 P3).
+            BreakCornerFeatureData bc when type == "BreakCorner" => CaptureBreakCorner(f, type, bc),
+            CrossBreakFeatureData cb => CaptureCrossBreak(f, type, cb),
+            // Type name and data interface both: unfold and fold share theirs (A3 P14).
+            FoldsFeatureData fd when type == "UnFold" || type == "Fold" => CaptureFold(f, type, fd),
+            SMNormalCutFeatureData2 nc => CaptureNormalCut(f, type, nc),
+            // FlattenBends and ProcessBends are parts of their SheetMetal; reached only if the tree found none for them.
+            BendsFeatureData _ => throw new NotSupportedException("Gehört zu „Biegungen einfügen“, deren Blech-Feature nicht erkannt wurde."),
+            // 2022 and later, late-bound, whatever its (unconfirmed) name.
+            _ when SwCornerRelief.Is(def) => CaptureCornerRelief(f, type, def!),
             _ => null,
         };
 

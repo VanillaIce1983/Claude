@@ -68,11 +68,9 @@ namespace Spiegelwerk.Core.Tests
 
         [Theory]
         [InlineData("SheetMetal")]
-        [InlineData("UnFold")]
         [InlineData("SketchBend")]
-        [InlineData("FlattenBends")]
-        [InlineData("ProcessBends")]
-        [InlineData("CrossBreak")]
+        [InlineData("SMGusset")]
+        [InlineData("Rip")]
         public void Sheet_metal_features_get_one_clear_message(string type)
         {
             Assert.True(UnsupportedFeatures.IsSheetMetal(type));
@@ -88,6 +86,12 @@ namespace Spiegelwerk.Core.Tests
         [InlineData("SM3dBend")]
         [InlineData("FlatPattern")]
         [InlineData("TemplateSheetMetal")]
+        [InlineData("UnFold")]
+        [InlineData("CrossBreak")]
+        [InlineData("CornerFeat")]
+        [InlineData("NormalCut")]
+        [InlineData("FlattenBends")]
+        [InlineData("ProcessBends")]
         public void Rebuilt_sheet_metal_types_are_reported_as_unreadable_not_as_unsupported(string type)
         {
             // Reached only if the definition does not answer as its reader expects.
@@ -99,7 +103,11 @@ namespace Spiegelwerk.Core.Tests
         {
             // The first of them carries the body: nothing after it could be built.
             Assert.True(UnsupportedFeatures.RefusesRun("SheetMetal"));
-            Assert.True(UnsupportedFeatures.RefusesRun("UnFold"));
+            Assert.True(UnsupportedFeatures.RefusesRun("SMGusset"));
+            // Decided by blech-plan S6: the normal cut is rebuilt.
+            Assert.False(UnsupportedFeatures.RefusesRun("NormalCut"));
+            // Decided by blech-plan S5: unfold and fold are rebuilt.
+            Assert.False(UnsupportedFeatures.RefusesRun("UnFold"));
             // Decided by blech-plan S4: jog and sketched bend are rebuilt.
             Assert.False(UnsupportedFeatures.RefusesRun("Jog"));
             Assert.True(UnsupportedFeatures.RefusesRun("MirrorStock"));

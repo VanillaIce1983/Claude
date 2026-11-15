@@ -103,6 +103,12 @@ namespace Spiegelwerk.Core.Records
 
         /// <summary>A sketch under a flat pattern.</summary>
         FlatPattern,
+
+        /// <summary>The sketch with the break lines of a cross break: left out with it.</summary>
+        CrossBreak,
+
+        /// <summary>FlattenBends and ProcessBends of legacy Insert Bends: they come into being with its SheetMetal.</summary>
+        LegacyBends,
     }
 
     /// <summary>
@@ -134,6 +140,8 @@ namespace Spiegelwerk.Core.Records
             PartOwnerKind.EdgeFlange => $"Profilskizze der Kantenlasche „{Owner}“, die nicht gespiegelt wird – entfällt mit ihr.",
             PartOwnerKind.Hem => $"Skizze des Saums „{Owner}“, der nicht gespiegelt wird – entfällt mit ihm.",
             PartOwnerKind.SheetMetal => $"Entsteht nur mit der Basislasche „{Owner}“.",
+            PartOwnerKind.CrossBreak => $"Skizze der Bruchlinien des Querbruchs „{Owner}“, der nicht gespiegelt wird – entfällt mit ihm.",
+            PartOwnerKind.LegacyBends => $"Entsteht nur mit „Biegungen einfügen“ an „{Owner}“.",
             _ => $"Gehört zur Abwicklung „{Owner}“.",
         };
     }

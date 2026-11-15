@@ -62,6 +62,13 @@ namespace Spiegelwerk.Build
             new EdgeFlangeBuilder(),
             new SketchedBendBuilder(),
             new JogBuilder(),
+            new ClosedCornerBuilder(),
+            new BreakCornerBuilder(),
+            new FoldBuilder(),
+            new CrossBreakBuilder(),
+            new CornerReliefBuilder(),
+            new NormalCutBuilder(),
+            new LegacyBendsBuilder(),
         };
 
         /// <summary>
@@ -156,7 +163,7 @@ namespace Spiegelwerk.Build
                 verification = "";
             }
             // The first body's own sheet-metal values once the copy has a second body: after the check and the guard (B15).
-            if (result.Success && record is BaseFlangeRecord && ctx.Shared.AbortReason == null) BaseFlangeBuilder.ApplyPending(ctx, result);
+            if (result.Success && (record is BaseFlangeRecord || record is LegacyBendsRecord) && ctx.Shared.AbortReason == null) BaseFlangeBuilder.ApplyPending(ctx, result);
             // Only now: a variant tried above may have replaced dimensions.
             if (result.Success && record.OwnDimensions.Count > 0) RestoreDimensionNames(ctx, result.Feature!, record.Name, record.OwnDimensions, result.Notes);
             if (result.Success)

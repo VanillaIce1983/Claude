@@ -89,6 +89,8 @@ namespace Spiegelwerk.Capture
             }
             r.ExpectedChange = after - before;
             if (SwDoc.FeatureByName(doc, r.Name) is Feature f) SampleFaces(f, r);
+            // A record measured until another feature (legacy Insert Bends: SheetMetal has no faces of its own) – that one's too.
+            if (r.FaceSamples.Count == 0 && r.MeasureUntil != r.Name && SwDoc.FeatureByName(doc, r.MeasureUntil) is Feature until) SampleFaces(until, r);
         }
 
         private sealed class ForeignBody

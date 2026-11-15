@@ -18,7 +18,8 @@ namespace Spiegelwerk.Core.Planning
         /// run in its history. Refused when
         ///  - an unsupported record of the run on it is a carrier (<see cref="SheetMetalRole.Carrier"/>), or
         ///  - the run rebuilds the body from its first solid feature and that one is unsupported, or
-        ///  - the run rebuilds the body and its SheetMetal has no base flange the run rebuilds.
+        ///  - the run rebuilds the body and its SheetMetal has no base flange the run rebuilds – or, the
+        ///    SheetMetal of legacy Insert Bends (S6), is not rebuilt itself.
         /// A body the run does not rebuild (only a later feature selected) is left to the ordinary rules.
         /// </summary>
         /// <param name="bodies">Every solid body of the original with its features in creation order (also in whole-part mode).</param>
@@ -37,8 +38,9 @@ namespace Spiegelwerk.Core.Planning
                 foreach (string n in inRun)
                     if (byName[n] is UnsupportedRecord u && SheetMetalTypes.Of(u.TypeName)?.Role == SheetMetalRole.Carrier)
                     {
-                        // The SheetMetal of a base flange the run could not read: the flange and its own reason count.
-                        if (tree.Owners.TryGetValue(n, out var own) && own.kind == PartOwnerKind.SheetMetal &&
+                        // A part of an owner the run could not read (the SheetMetal of a base flange, the bends of
+                        // legacy Insert Bends): the owner and its own reason count.
+                        if (tree.Owners.TryGetValue(n, out var own) && (own.kind == PartOwnerKind.SheetMetal || own.kind == PartOwnerKind.LegacyBends) &&
                             byName.TryGetValue(own.owner, out FeatureRecord ownerRecord) && ownerRecord is UnsupportedRecord unread)
                             return Text(own.owner, body.Name, unread.Reason);
                         return Text(n, body.Name, u.Reason);
@@ -49,6 +51,12 @@ namespace Spiegelwerk.Core.Planning
                 if (firstRecord is UnsupportedRecord unsupported) return Text(first, body.Name, unsupported.Reason);
                 foreach (string sm in body.Features.Where(n => TypeOf(n) == "SheetMetal"))
                 {
+                    if (tree.IsLegacyAnchor(sm))
+                    {
+                        if (!(byName.TryGetValue(sm, out FeatureRecord legacy) && legacy is LegacyBendsRecord))
+                            return Text(sm, body.Name, LegacyNotRebuilt);
+                        continue;
+                    }
                     if (!tree.Owners.TryGetValue(sm, out var owner))
                         return Text(sm, body.Name, "der Blechkörper hat keine eigene Basislasche");
                     if (!(byName.TryGetValue(owner.owner, out FeatureRecord o) && o is BaseFlangeRecord))
@@ -64,6 +72,9 @@ namespace Spiegelwerk.Core.Planning
         /// </summary>
         private static bool MakesBody(string type) =>
             type.Length > 0 && type != "SheetMetal" && type != "FlatPattern" && !SheetMetalTree.IsSystemType(type) && UnsupportedFeatures.ChangesSolid(type);
+
+        /// <summary>The body's legacy Insert Bends are not in the run, its solid is: the copy would not become sheet metal.</summary>
+        public const string LegacyNotRebuilt = "„Biegungen einfügen“ wird nicht mitgespiegelt";
 
         /// <summary>„„Swept-Flange1“ trägt den Blechkörper „Körper1“ und wird nicht nachgebaut (…). Es wurde nichts gespiegelt.“</summary>
         public static string Text(string feature, string body, string reason) =>

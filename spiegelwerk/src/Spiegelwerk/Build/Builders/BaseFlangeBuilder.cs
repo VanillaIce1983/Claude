@@ -428,8 +428,8 @@ namespace Spiegelwerk.Build.Builders
 
         // ---- values
 
-        /// <summary>The part's values, written by the first body: into the defaults, before 2013 into its SheetMetal.</summary>
-        private static List<string> WritePartValues(ModelDoc2 doc, Feature? sheetMetal, SheetMetalParameters values)
+        /// <summary>The part's values, written by the first body: into the defaults, before 2013 into its SheetMetal (also legacy Insert Bends').</summary>
+        internal static List<string> WritePartValues(ModelDoc2 doc, Feature? sheetMetal, SheetMetalParameters values)
         {
             // Without the gauge table (not found): fixed values, the table is not expected back.
             SheetMetalParameters want = WithoutGauge(values);

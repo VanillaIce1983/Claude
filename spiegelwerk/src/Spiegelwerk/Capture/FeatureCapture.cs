@@ -84,8 +84,8 @@ namespace Spiegelwerk.Capture
                 records.Add(Capture(f));
                 if (cancelled != null && cancelled()) return null;
             }
-            // A flat pattern comes into being only with its base flange; without it, it and its parts are left out.
-            var baseFlanges = new HashSet<string>(records.OfType<BaseFlangeRecord>().Select(r => r.Name), StringComparer.Ordinal);
+            // A flat pattern comes into being only with its base flange (or legacy Insert Bends); without it, it and its parts are left out.
+            var baseFlanges = new HashSet<string>(records.Where(r => r is BaseFlangeRecord || r is LegacyBendsRecord).Select(r => r.Name), StringComparer.Ordinal);
             for (int i = 0; i < records.Count; i++)
                 if (records[i] is FlatPatternRecord fp && !baseFlanges.Contains(fp.Owner))
                     records[i] = new UnsupportedRecord(fp.Name, fp.TypeName, SheetMetalTree.FlatPatternWithoutOwner(fp.Owner), false) { TriggersFallback = false };
@@ -161,6 +161,8 @@ namespace Spiegelwerk.Capture
                     case MirrorSolidFeatureData ms:
                         return CaptureMirrorSolid(f, type, ms);
                 }
+                // A corner relief (2022 and later) under a name the type table does not know (B44): found by its data, captured as sheet metal.
+                if (SwCornerRelief.Is(def)) return CaptureSheetMetal(f, type);
                 return new UnsupportedRecord(f.Name, type, UnsupportedFeatures.Reason(type), ChangesSolid(type));
             }
             catch (NotSupportedException ex)
