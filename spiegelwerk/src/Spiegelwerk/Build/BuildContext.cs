@@ -175,6 +175,12 @@ namespace Spiegelwerk.Build
         public Dictionary<string, string> PartOwners { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
         /// <summary>
+        /// Owners (original names) that were not built (<see cref="StepRunner.WithdrawParts"/>): a part that comes
+        /// after its owner is then not reported as built with it (<see cref="Builders.PartOfBuilder"/>).
+        /// </summary>
+        public HashSet<string> OwnersNotBuilt { get; } = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>
         /// Original names of sketches in which every sketch point is an instance – reference
         /// sketches of sketch driven patterns: a stand-in there must not be a point of its own.
         /// </summary>

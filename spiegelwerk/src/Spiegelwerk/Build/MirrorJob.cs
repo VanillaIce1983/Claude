@@ -137,7 +137,8 @@ namespace Spiegelwerk.Build
             ModelDoc2 source = req.Source;
             MirrorOptions opt = req.Options;
             var selectedBodyNames = new HashSet<string>(bodyNames, StringComparer.Ordinal);
-            SheetMetalTree sheetMetal = session == null ? SheetMetalTree.Empty : SwSheetMetal.Tree(source);
+            // Also without sheet metal: a tab and slot on plain solid bodies needs its slot from the tree (empty if there is none).
+            SheetMetalTree sheetMetal = SwSheetMetal.Tree(source);
             List<Body2> bodies = session == null ? req.Bodies : SelectedBodiesFolded(source, bodyNames);
 
             var skipped = new List<(Feature feature, string reason)>();

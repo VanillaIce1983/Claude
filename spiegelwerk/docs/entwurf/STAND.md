@@ -263,7 +263,7 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   Beispiel der Hilfe), danach eine Bearbeitung nur, wo etwas anders zurückkommt oder Punkte und Laschenfläche zu setzen sind. Der Hinweis auf die
   Schlitz-Optionen kommt wie beim Saum nur, wo die Prüfung sie nicht bestätigen kann (P12: immer). Der Schnitt einer Versteifungsrippe ist die Mitte
   der Ausdehnung ihrer Flächen entlang der Biegelinie (A4 §7: Schwerpunkt der Flächen; angenommen ist, dass die Rippe symmetrisch zu ihrer
-  Schnittebene steht, B65); als Bezug einer früheren Rippe zählen auch ihre Seitenflächen (Schnitt ± halbe Dicke). Die Lageprüfung legt jede Variante
+  Schnittebene steht, B65); als Bezug einer früheren Rippe zählen auch ihre Seitenflächen (Schnitt ± halbe Breite, ggf. zuzüglich der Dicke). Die Lageprüfung legt jede Variante
   neu an (gespiegeltes Biegungsende beidseitig, ohne Punkt, L − d, andere Seite) und behält die erste passende; passt keine, bleibt die nächste mit
   Hinweis, statt dass der Schritt scheitert. Der Aufruf mit 21 Werten nimmt keinen Bezugspunkt, also wird er immer mit Versatz angelegt und der Punkt
   danach gesetzt. Ein Referenzpunkt-Feature als Bezugspunkt wird nicht übertragen. `FormToolInstance` bleibt „noch nicht“ (der Plan: ein nicht
@@ -280,19 +280,28 @@ erledigt ist, was läuft und in welcher Reihenfolge es weitergeht.
   Schlitz mit denselben Gruppen löst nichts aus (`TriggersFallback` falsch); ein Lasche und Schlitz, das sich nicht erfassen lässt (externe
   Bezüge, nicht lesbar), ist ohne bestätigten Namen ein allgemeiner Eintrag und löst nach K17 aus. `FormToolInstance` (falls S9 nicht vorher
   kommt) und `Rip` setzt S7a auf „nicht unterstützt“ (Blatt, Auslöser); die Träger bleiben abgelehnt, solange der Schalter aus ist.
+- Blech S8 geprüft, Befunde behoben (Commit „Blech S8: Befunde aus der Prüfung behoben“): Lasche und Schlitz gibt es auch zwischen
+  gewöhnlichen Volumenkörpern (Schweißblechen); `SwSheetMetal.Tree` baut den Baum dann auch in einem Teil ohne Blech, nur für Lasche und
+  Schlitz, und `MirrorJob` liest ihn unabhängig von der Blech-Sitzung – sonst lief der Schlitz dort als eigenes, nicht unterstütztes Feature
+  mit. Ein Teil nach seinem Besitzer (Schlitz, Biegungs-Features alter „Biegungen einfügen“), dessen Besitzer beim Aufbau scheiterte, heißt
+  „nicht entstanden“ statt „entsteht mit diesem“ (`BuildContext.OwnersNotBuilt`, `RunSteps.PartOf`). Ein Schlitz, den erst die gleichen
+  Gruppen verraten, wird der Schlitz seiner Lasche (`SlotFeatureName`): gemessen bis zu ihm, Begleiter unter seinem Namen. Seitenflächen
+  einer früheren Versteifungsrippe liegen bei Schnitt ± halber Breite (`IndentWidth`) oder ± halber Breite plus Dicke, nicht bei ± halber
+  Dicke (`GussetSection.Width`). Tests in `TabSlotRulesTests`, `GussetRulesTests`, `OwnershipTests`; STOLPERSTEINE 80, 241, 244,
+  Prüftabelle (B64, B65), Testteil S8, README, ARCHITEKTUR.
 
 ## In Arbeit
 
 | Thema | Stand |
 | --- | --- |
-| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S6 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S7 (Ersatzweg): das Tor B54/B55 ist auf SOLIDWORKS 2026 bestanden (`livetests.md`), die Entscheidungen des Eigentümers (`blech-plan.md` §7) gelten vorläufig nach Empfehlung – Ersatzweg ja, hinter einem Schalter, der aus ist; ein gescheitertes Blatt wird gemeldet und der Rest gebaut; „Original löschen“ bleibt bei Blech abgelehnt –, als Nächstes der Live-Test B57 (Umwandeln in Blech, Makro `scripts/livetests/ersatzweg-b57.bas`), der den Weg von S7a bestimmt; bis dahin ist S8 (Versteifungsrippe, Lasche und Schlitz) gebaut, noch ungeprüft; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
+| Blech | nach `blech-plan.md` in prüfbaren Schritten; S0 bis S6 stehen, sind geprüft und nachgeprüft und im Hauptzweig; S7 (Ersatzweg): das Tor B54/B55 ist auf SOLIDWORKS 2026 bestanden (`livetests.md`), die Entscheidungen des Eigentümers (`blech-plan.md` §7) gelten vorläufig nach Empfehlung – Ersatzweg ja, hinter einem Schalter, der aus ist; ein gescheitertes Blatt wird gemeldet und der Rest gebaut; „Original löschen“ bleibt bei Blech abgelehnt –, als Nächstes der Live-Test B57 (Umwandeln in Blech, Makro `scripts/livetests/ersatzweg-b57.bas`), der den Weg von S7a bestimmt; bis dahin ist S8 (Versteifungsrippe, Lasche und Schlitz) gebaut und geprüft (Befunde behoben), die Nachprüfung steht aus; bis ein Typ seinen Schritt hat, lehnt `UnsupportedFeatures.RefusalBeforeCapture` den Lauf ab (`SheetMetalTypes`), einen Blechkörper ohne nachgebauten Träger `SheetMetalPlanner.Refusal` |
 
 ## Reihenfolge beim Fortsetzen
 
 1. Live-Test B57 (und B59) beim Eigentümer: Umwandeln bzw. „Biegungen einfügen“ des gespiegelten Körpers. Sein Ergebnis wählt
    den Weg von S7a (A: Umwandeln, B: „Biegungen einfügen“, sonst nur F3 – dann ist S7 neu abzuwägen). Danach S7a und S7b nach
    `blech-plan.md` mit den Folgen aus `livetests.md` (nur die direkte Spiegelmatrix, jede Transformation an Prüfpunkten bestätigen).
-   S8 (Versteifungsrippe, Lasche und Schlitz) steht, Prüfung und Nachprüfung stehen aus; S9 (Umformwerkzeuge) hängt ebenfalls nicht davon
+   S8 (Versteifungsrippe, Lasche und Schlitz) steht und ist geprüft, die Nachprüfung der Korrekturen steht aus; S9 (Umformwerkzeuge) hängt ebenfalls nicht davon
    ab und kann vorher kommen; jeder Schritt mit Core-Tests, Prüfung, Gegenprüfung und Nachprüfung der Korrekturen.
 2. Erster Test in einer laufenden SOLIDWORKS-Sitzung: die Annahmen unter „Was beim ersten Test in SOLIDWORKS zu prüfen ist“
    (STOLPERSTEINE) und `blech-plan.md` §5.2.

@@ -60,7 +60,11 @@ namespace Spiegelwerk.Capture
             // The slot feature, should the tree not have recognised it (B64): the same groups as one captured before.
             TabAndSlotRecord? earlier = _tabsAndSlots.FirstOrDefault(x => SameGroups(x, r));
             if (earlier != null)
+            {
+                // Its slot after all: the tab is measured up to it (MeasureUntil), and the copy's slot becomes its companion under this name.
+                earlier.SlotFeatureName ??= f.Name;
                 return new UnsupportedRecord(f.Name, type, TabSlotRules.SameAsEarlier(earlier.Name), false) { TriggersFallback = false };
+            }
             _tabsAndSlots.Add(r);
             return r;
         }
@@ -87,6 +91,10 @@ namespace Spiegelwerk.Capture
             public Vec3? EndA { get; set; }
             public Vec3? EndB { get; set; }
             public Vec3? Section { get; set; }
+
+            /// <summary>Indent width (its extent along the bend) and wall thickness, metres.</summary>
+            public double Width { get; set; }
+
             public double Thickness { get; set; }
         }
 
@@ -124,7 +132,7 @@ namespace Spiegelwerk.Capture
                     if (r.ReferencePoint == null || (r.ReferencePoint.Kind != GeometryRefKind.Vertex && r.ReferencePoint.Kind != GeometryRefKind.SketchPoint))
                         throw new NotSupportedException("Bezugspunkt der Versteifungsrippe ist weder Eckpunkt noch Skizzenpunkt (ein Referenzpunkt wird noch nicht übertragen).");
                 }
-                FillBend(place, legs, r.GussetThickness);
+                FillBend(place, legs, r.IndentWidth, r.GussetThickness);
             }
             finally
             {
@@ -149,8 +157,9 @@ namespace Spiegelwerk.Capture
         }
 
         /// <summary>The bend under the legs (state before the gusset) and its ends; nothing if it does not read.</summary>
-        private static void FillBend(GussetPlace place, List<Face2> legs, double thickness)
+        private static void FillBend(GussetPlace place, List<Face2> legs, double width, double thickness)
         {
+            place.Width = width;
             place.Thickness = thickness;
             if (!(SwSheetMetal.BendOf(legs) is (Line3 axis, List<Vec3> points))) return;
             place.Bend = axis;
@@ -197,7 +206,7 @@ namespace Spiegelwerk.Capture
             }
             foreach (Feature g in earlier)
                 if (PlaceOf(g) is GussetPlace p && p.Bend is Line3 other && other.IsSameLine(bend) && p.Section is Vec3 s)
-                    result.Add(new GussetSection(g.Name, s, p.Thickness));
+                    result.Add(new GussetSection(g.Name, s, p.Width, p.Thickness));
             return result;
         }
 
@@ -212,7 +221,7 @@ namespace Spiegelwerk.Capture
                 try
                 {
                     List<Face2> legs = ((object)d.SupportingFaces as object[] ?? Array.Empty<object>()).OfType<Face2>().ToList();
-                    FillBend(place, legs, d.GussetThickness);
+                    FillBend(place, legs, d.IndentWidth, d.GussetThickness);
                 }
                 finally
                 {

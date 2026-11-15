@@ -103,6 +103,16 @@ namespace Spiegelwerk.Core.Tests
             Assert.Empty(RunSteps.OwnersNotBuiltAfter(records, records.Length - 1));
         }
 
+        [Fact]
+        public void A_part_says_whether_it_came_with_its_owner()
+        {
+            // Before its owner (a hole's sketch) or after it with the owner built (a slot): built with it.
+            Assert.Equal("Teil von „Lasche und Schlitz-Lasche1“; entsteht mit diesem.", RunSteps.PartOf("Lasche und Schlitz-Lasche1", ownerNotBuilt: false));
+            // Withdrawn, or after an owner that failed: not built.
+            Assert.Equal("Teil von „Lasche und Schlitz-Lasche1“; nicht entstanden, weil „Lasche und Schlitz-Lasche1“ nicht gespiegelt wurde.",
+                RunSteps.PartOf("Lasche und Schlitz-Lasche1", ownerNotBuilt: true));
+        }
+
         [Theory]
         [InlineData(PartOwnerKind.Hole, true, "Profilskizze der Bohrung „X“, die nicht gespiegelt wird – entfällt mit ihr.")]
         [InlineData(PartOwnerKind.FormTool, true, "Skizze des Umformwerkzeugs „X“, das nicht gespiegelt wird – entfällt mit ihm.")]

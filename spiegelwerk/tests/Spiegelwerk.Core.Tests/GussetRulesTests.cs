@@ -80,22 +80,35 @@ namespace Spiegelwerk.Core.Tests
         [Fact]
         public void A_later_gusset_counts_from_the_one_inserted_before()
         {
-            // The first at 30 mm, the second 20 mm on from its side face (30 + 1 + 20): the help's „edge of the gusset last inserted“.
-            SheetMetalGussetRecord second = OnBend(section: 0.051, offset: 0.02);
-            second.PreviousOnBend.Add(new GussetSection("Sheet Metal Gusset1", new Vec3(0.03, 0.01, 0.01), 0.002));
+            // The first at 30 mm, 10 mm wide (IndentWidth) and 3 mm thick (help example); the second 20 mm on from its
+            // side face at half the width (30 + 5 + 20): the help's „edge of the gusset last inserted“.
+            static GussetSection First() => new GussetSection("Sheet Metal Gusset1", new Vec3(0.03, 0.01, 0.01), 0.01, 0.003);
+            SheetMetalGussetRecord second = OnBend(section: 0.055, offset: 0.02);
+            second.PreviousOnBend.Add(First());
             var (anchor, point, gusset) = GussetRules.AnchorOf(second);
             Assert.Equal(GussetAnchor.PreviousGusset, anchor);
             Assert.Null(point);
             Assert.Equal("Sheet Metal Gusset1", gusset);
             second.Anchor = anchor;
+            // The width as the inner measure, the wall outside it (30 + 5 + 3 + 20), and on the other side (30 − 5 − 3 − 20).
+            SheetMetalGussetRecord outer = OnBend(section: 0.058, offset: 0.02);
+            outer.PreviousOnBend.Add(First());
+            Assert.Equal(GussetAnchor.PreviousGusset, GussetRules.AnchorOf(outer).anchor);
+            SheetMetalGussetRecord before = OnBend(section: 0.002, offset: 0.02);
+            before.PreviousOnBend.Add(First());
+            Assert.Equal(GussetAnchor.PreviousGusset, GussetRules.AnchorOf(before).anchor);
             // From its section as well.
             SheetMetalGussetRecord fromSection = OnBend(section: 0.05, offset: 0.02);
-            fromSection.PreviousOnBend.Add(new GussetSection("Sheet Metal Gusset1", new Vec3(0.03, 0.01, 0.01), 0.002));
+            fromSection.PreviousOnBend.Add(First());
             Assert.Equal(GussetAnchor.PreviousGusset, GussetRules.AnchorOf(fromSection).anchor);
+            // Half the thickness is no side face (30 + 1.5 + 20): neither the earlier gusset nor a bend end – not determinable.
+            SheetMetalGussetRecord halfThickness = OnBend(section: 0.0515, offset: 0.02);
+            halfThickness.PreviousOnBend.Add(First());
+            Assert.Equal(GussetAnchor.Unknown, GussetRules.AnchorOf(halfThickness).anchor);
             // The last inserted first: with two before, the later one is named.
             SheetMetalGussetRecord third = OnBend(section: 0.08, offset: 0.02);
-            third.PreviousOnBend.Add(new GussetSection("A", new Vec3(0.1, 0.01, 0.01), 0.002));
-            third.PreviousOnBend.Add(new GussetSection("B", new Vec3(0.06, 0.01, 0.01), 0.002));
+            third.PreviousOnBend.Add(new GussetSection("A", new Vec3(0.1, 0.01, 0.01), 0.01, 0.003));
+            third.PreviousOnBend.Add(new GussetSection("B", new Vec3(0.06, 0.01, 0.01), 0.01, 0.003));
             Assert.Equal("B", GussetRules.AnchorOf(third).gusset);
             Assert.Equal(GussetRules.FromPrevious, GussetRules.Variants(second)[0].Description);
             Assert.All(GussetRules.Variants(second), v => Assert.Equal(GussetPoint.None, v.Point));

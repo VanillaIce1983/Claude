@@ -94,15 +94,18 @@ namespace Spiegelwerk.Sw
         /// parents and sub-features, folders with their contents, for each flat pattern its own
         /// corner features and the features of its body, and the features whose data answer as tab and
         /// slot (its type name is not confirmed, B64: every top-level feature that is no sketch, datum,
-        /// folder or listed sheet-metal type is asked).
+        /// folder or listed sheet-metal type is asked). Tab and slot also stands on plain solid bodies
+        /// (weldment plates): a part without sheet metal gets the tree too if it has one – then it holds
+        /// only the top-level features and the tab-and-slot facts, so its slot is found there as well.
         /// </summary>
         public static SheetMetalTree Tree(ModelDoc2 doc)
         {
-            if (!HasSheetMetal(doc)) return SheetMetalTree.Empty;
+            var tabAndSlots = new HashSet<string>(SwDoc.TopLevelFeatures(doc).Where(f => MayBeTabAndSlot(f) && IsTabAndSlot(f)).Select(f => f.Name),
+                StringComparer.Ordinal);
+            if (tabAndSlots.Count == 0 && !HasSheetMetal(doc)) return SheetMetalTree.Empty;
             var top = new List<TreeFeature>();
             var facts = new Dictionary<string, FlatPatternFacts>(StringComparer.Ordinal);
             var flanges = new Dictionary<string, EdgeFlangeFacts>(StringComparer.Ordinal);
-            var tabAndSlots = new HashSet<string>(StringComparer.Ordinal);
             TreeFeature Node(Feature f, IEnumerable<Feature> subs)
             {
                 if (f.GetTypeName2() == "FlatPattern" && !facts.ContainsKey(f.Name)) facts[f.Name] = Facts(doc, f);
@@ -118,7 +121,6 @@ namespace Spiegelwerk.Sw
                 foreach (Feature c in FolderContents(doc, f))
                     if (subs.All(s => s.Name != c.Name)) subs.Add(c);
                 top.Add(Node(f, subs));
-                if (MayBeTabAndSlot(f) && IsTabAndSlot(f)) tabAndSlots.Add(f.Name);
             }
             return SheetMetalTree.Of(top, facts, flanges, tabAndSlots);
         }

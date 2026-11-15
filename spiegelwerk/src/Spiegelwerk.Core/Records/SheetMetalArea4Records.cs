@@ -156,13 +156,14 @@ namespace Spiegelwerk.Core.Records
         PreviousGusset,
     }
 
-    /// <summary>The place of an earlier gusset on the same bend, as the capture measured it.</summary>
+    /// <summary>The place of an earlier gusset on the same bend, as the capture measured it, with its width and thickness.</summary>
     public sealed class GussetSection
     {
-        public GussetSection(string name, Vec3 point, double thickness)
+        public GussetSection(string name, Vec3 point, double width, double thickness)
         {
             Name = name;
             Point = point;
+            Width = width;
             Thickness = thickness;
         }
 
@@ -171,7 +172,10 @@ namespace Spiegelwerk.Core.Records
         /// <summary>Its section on the bend line (model coordinates, unmirrored).</summary>
         public Vec3 Point { get; }
 
-        /// <summary>Metres.</summary>
+        /// <summary>Its indent width (IndentWidth): its extent along the bend, symmetric to the section. Metres.</summary>
+        public double Width { get; }
+
+        /// <summary>Its wall thickness (GussetThickness). Metres.</summary>
         public double Thickness { get; }
     }
 

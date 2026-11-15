@@ -183,6 +183,32 @@ namespace Spiegelwerk.Core.Tests
         }
 
         [Fact]
+        public void Without_sheet_metal_the_tree_still_makes_the_slot_a_part_of_its_tab()
+        {
+            // Tab and slot on two plain plates (weldment plates): no SheetMetal, no base flange, no flat pattern.
+            static TreeFeature F(string name, string type, params string[] parents) => new TreeFeature(name, type, parents);
+            var top = new[]
+            {
+                F("Boss-Extrude1", "Extrusion"),
+                F("Boss-Extrude2", "Extrusion"),
+                F("Tab and Slot-Tab1", "TabAndSlot", "Boss-Extrude1", "Boss-Extrude2"),
+                F("Tab and Slot-Slot1", "TabAndSlot", "Tab and Slot-Tab1"),
+            };
+            SheetMetalTree tree = SheetMetalTree.Of(top, tabAndSlots: new[] { "Tab and Slot-Tab1" });
+            Assert.Equal(("Tab and Slot-Tab1", PartOwnerKind.TabAndSlot), tree.Owners["Tab and Slot-Slot1"]);
+            Assert.Equal("Tab and Slot-Slot1", tree.SlotOf("Tab and Slot-Tab1"));
+            Assert.Single(tree.Owners);
+            Assert.Equal(new[] { "Tab and Slot-Slot1" }, tree.Closure(new[] { "Tab and Slot-Tab1" }).ToArray());
+            Assert.Equal(new[] { "Tab and Slot-Tab1" }, tree.Closure(new[] { "Tab and Slot-Slot1" }).ToArray());
+            // Nothing of a sheet-metal part answers.
+            Assert.Empty(tree.LegacyAnchors);
+            Assert.Empty(tree.FlatPatternOwners);
+            Assert.False(tree.SuppressedWhenFolded("Tab and Slot-Slot1"));
+            Assert.False(tree.IsAfterFlatPattern("Tab and Slot-Slot1"));
+            Assert.Null(UnsupportedFeatures.RefusalBeforeCapture(top.Select(f => (f.Name, f.Type)).ToList(), tree.Owners, fallbackOn: false, tree.LegacyAnchors));
+        }
+
+        [Fact]
         public void The_record_brings_its_slot_and_is_measured_after_it()
         {
             var r = new TabAndSlotRecord("Tab and Slot-Tab1", "TabAndSlot");

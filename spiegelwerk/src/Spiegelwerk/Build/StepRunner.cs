@@ -249,15 +249,17 @@ namespace Spiegelwerk.Build
 
         /// <summary>
         /// The parts of a feature (the sketches of a hole) were reported as "built with it" before
-        /// it was built. If it failed, they were not.
+        /// it was built. If it failed, they were not – and those after it (the slot of a tab and
+        /// slot) are not reported as built when their turn comes (<see cref="BuildContext.OwnersNotBuilt"/>).
         /// </summary>
         public static void WithdrawParts(BuildContext ctx, string owner)
         {
+            ctx.OwnersNotBuilt.Add(owner);
             foreach (ReportEntry e in ctx.Report.Entries)
                 if (ctx.PartOwners.TryGetValue(e.Feature, out string o) && o == owner && e.HasEquivalent)
                 {
                     e.HasEquivalent = false;
-                    e.Message = $"Teil von „{owner}“; nicht entstanden, weil „{owner}“ nicht gespiegelt wurde.";
+                    e.Message = RunSteps.PartOf(owner, ownerNotBuilt: true);
                 }
         }
 

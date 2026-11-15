@@ -67,5 +67,14 @@ namespace Spiegelwerk.Core.Planning
         /// </summary>
         public static IEnumerable<string> OwnersNotBuiltAfter(IReadOnlyList<FeatureRecord> records, int lastBuilt) =>
             records.Skip(lastBuilt + 1).Where(r => r.BringsParts).Select(r => r.Name);
+
+        /// <summary>
+        /// The report text of a part (<see cref="PartOfFeatureRecord"/>): built with its owner, or not – its owner was
+        /// not built. A part before its owner (a hole's sketches) is reported as built and withdrawn when the owner
+        /// fails; a part after it (the slot of a tab and slot, the bends of legacy Insert Bends) comes when the owner's
+        /// fate is known.
+        /// </summary>
+        public static string PartOf(string owner, bool ownerNotBuilt) =>
+            ownerNotBuilt ? $"Teil von „{owner}“; nicht entstanden, weil „{owner}“ nicht gespiegelt wurde." : $"Teil von „{owner}“; entsteht mit diesem.";
     }
 }

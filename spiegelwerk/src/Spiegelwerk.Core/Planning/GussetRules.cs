@@ -94,9 +94,11 @@ namespace Spiegelwerk.Core.Planning
         /// <summary>
         /// What the offset of a gusset counts from (A4 P9), from where its section lies: its own reference point;
         /// otherwise – with an offset – the earlier gusset on the same bend whose section, or one of whose side
-        /// faces (section ± half its thickness), lies at the offset's distance (the last inserted first: the help
-        /// names „the edge of the gusset last inserted“), then the bend end at that distance; if both ends are
-        /// (a gusset in the middle), the first. Unknown otherwise.
+        /// faces, lies at the offset's distance (the last inserted first: the help names „the edge of the gusset
+        /// last inserted“), then the bend end at that distance; if both ends are (a gusset in the middle), the
+        /// first. Unknown otherwise. Its extent along the bend is its indent width, not its thickness: a side face
+        /// lies at section ± half the width (the width as the outer measure) or ± half the width plus the wall
+        /// thickness (the width as the inner measure) – which one SOLIDWORKS counts from is open (B65).
         /// </summary>
         public static (GussetAnchor anchor, Vec3? point, string? gusset) AnchorOf(SheetMetalGussetRecord r, double tol = SectionTolerance)
         {
@@ -106,8 +108,8 @@ namespace Spiegelwerk.Core.Planning
             bool At(double from) => Math.Abs(Math.Abs(t - from) - d) <= tol;
             foreach (GussetSection previous in Enumerable.Reverse(r.PreviousOnBend))
             {
-                double s = Along(line, previous.Point), h = previous.Thickness / 2;
-                if (At(s) || At(s - h) || At(s + h)) return (GussetAnchor.PreviousGusset, null, previous.Name);
+                double s = Along(line, previous.Point), h = previous.Width / 2, o = h + previous.Thickness;
+                if (At(s) || At(s - h) || At(s + h) || At(s - o) || At(s + o)) return (GussetAnchor.PreviousGusset, null, previous.Name);
             }
             foreach (Vec3? end in new[] { r.BendEndA, r.BendEndB })
                 if (end is Vec3 e && At(Along(line, e)))
